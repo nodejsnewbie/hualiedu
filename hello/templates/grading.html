@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>作业评分系统</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/themes/default/style.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/jstree.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+    <style>
+        .container {
+            display: flex;
+            height: calc(100vh - 60px);
+            gap: 20px;
+            padding: 20px;
+        }
+        .file-list {
+            width: 300px;
+            border-right: 1px solid #ddd;
+            padding-right: 20px;
+            height: 100%;
+            overflow: auto;
+        }
+        .preview-pane {
+            flex: 1;
+            height: 100%;
+            border: 1px solid #ddd;
+            padding: 20px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    {% csrf_token %}
+    <div id="loading">加载中...</div>
+    <div class="container">
+        <div class="file-list">
+            <h3>作业目录选择</h3>
+            <input type="hidden" id="dirPath" value="{{ upload_path|default:'/media' }}">
+            <div id="tree-container">
+                <div id="grade-tree"></div>
+            </div>
+            <button onclick="handleDirectoryUpload()" style="margin-top: 10px;">上传选定目录</button>
+        </div>
+
+        <div class="content-area">
+            <div class="doc-content" id="docContent">
+                <div class="loading-message">请从左侧选择要评阅的文件</div>
+            </div>
+            <div class="grade-panel">
+                <h4>评分等级：</h4>
+                <div id="grade-buttons">
+                    <button onclick="selectGrade('A')">A (90-100)</button>
+                    <button onclick="selectGrade('B')">B (80-89)</button>
+                    <button onclick="selectGrade('C')">C (70-79)</button>
+                    <button onclick="selectGrade('D')">D (60-69)</button>
+                    <button onclick="selectGrade('E')">E (0-59)</button>
+                </div>
+                <div id="recommendation" style="margin: 15px 0;">系统推荐：B</div>
+                <button onclick="submitGrade()" style="margin-top:20px; padding: 10px 20px; background-color: #4CAF50; color: white; border: none; cursor: pointer;">确认评分</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentFile = '';
+        let selectedGrade = '';
+
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        function getCSRFToken() {
+            const tokenInput = document.querySelector('input[name="csrfmiddlewaretoken"]');
+            if (tokenInput) {
+                return tokenInput.value;
+            }
+            return getCookie('csrftoken');
+        }
+
+        function showError(message) {
+            const docContent = document.getElementById('docContent');
+            docContent.innerHTML = `<div class="error-message">${message}</div>`;
+        }
+
+        function showContent(content) {
+            const docContent = document.getElementById('docContent');
+            if (content) {
+                docContent.innerHTML = DOMPurify.sanitize(content, {
+                    ADD_TAGS: ['style'],
+                    ADD_ATTR: ['target']
+                });
+            } else {
+                docContent.innerHTML = '<div class="loading-message">无内容</div>';
+            }
+        }
+
+        function loadDocumentContent(filePath) {
+            if (!filePath) return;
+            
+            currentFile = filePath;
+            $('#loading').show();
+            document.getElementById('docContent').innerHTML = '<div class="loading-message">加载中...</div>';
+            
+            fetch('/grading/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': getCSRFToken()
+                },
+                body: `file_path=${encodeURIComponent(filePath)}&action=get_content`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success' && data.content) {
+                    showContent(data.content);
+                    selectedGrade = '';
+                    document.querySelectorAll('#grade-buttons button').forEach(btn => {
+                        btn.classList.remove('selected');
+                    });
+                } else {
+                    throw new Error(data.message || '加载失败');
+                }
+            })
+            .catch(error => {
+                showError('加载文件失败: ' + error.message);
+            })
+            .finally(() => {
+                $('#loading').hide();
+            });
+        }
+
+        function selectGrade(grade) {
+            selectedGrade = grade;
+            document.querySelectorAll('#grade-buttons button').forEach(btn => {
+                if (btn.textContent.includes(grade)) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+        }
+
+        function submitGrade() {
+            if (!selectedGrade) {
+                alert('请选择评分等级');
+                return;
+            }
+            if (!currentFile) {
+                alert('请先选择要评分的文件');
+                return;
+            }
+            
+            $('#loading').show();
+            fetch('/grading/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRFToken': getCSRFToken()
+                },
+                body: `file_path=${encodeURIComponent(currentFile)}&action=save_grade&grade=${encodeURIComponent(selectedGrade)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('评分已保存');
+                } else {
+                    throw new Error(data.message || '保存失败');
+                }
+            })
+            .catch(error => {
+                alert('保存失败：' + error.message);
+            })
+            .finally(() => {
+                $('#loading').hide();
+            });
+        }
+
+        function initTree() {
+            const dirPathElement = document.getElementById('dirPath');
+            let currentPath = dirPathElement ? dirPathElement.value : '/media';
+            
+            $('#loading').show();
+            
+            $('#grade-tree').jstree({
+                'core': {
+                    'data': function (node, cb) {
+                        const token = getCSRFToken();
+                        if (!token) {
+                            cb.call(this, []);
+                            return;
+                        }
+                        
+                        $.ajax({
+                            url: '/grading/',
+                            method: 'POST',
+                            headers: { 'X-CSRFToken': token },
+                            data: {
+                                action: 'get_directory_tree',
+                                file_path: node.id === '#' ? currentPath : node.id
+                            }
+                        }).done(function (data) {
+                            if (data.status === 'success') {
+                                cb.call(this, data.children || []);
+                            } else {
+                                cb.call(this, []);
+                            }
+                        }).fail(function() {
+                            cb.call(this, []);
+                        }).always(() => $('#loading').hide());
+                    }
+                },
+                'types': {
+                    'file': { 'icon': 'jstree-file' },
+                    'folder': { 'icon': 'jstree-folder' }
+                },
+                'plugins': ['types']
+            }).on('select_node.jstree', function (e, data) {
+                if (data.node.type === 'file') {
+                    loadDocumentContent(data.node.id);
+                }
+            });
+        }
+
+        function handleDirectoryUpload() {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.webkitdirectory = true;
+            input.multiple = true;
+            
+            input.onchange = function(e) {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+
+                const formData = new FormData();
+                formData.append('action', 'upload_directory');
+                files.forEach(file => {
+                    formData.append('files', file);
+                });
+
+                $('#loading').show();
+                fetch('/grading/', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCSRFToken()
+                    },
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        alert('目录上传成功');
+                        $('#grade-tree').jstree(true).refresh();
+                    } else {
+                        throw new Error(data.message || '上传失败');
+                    }
+                })
+                .catch(error => {
+                    alert('上传失败：' + error.message);
+                })
+                .finally(() => {
+                    $('#loading').hide();
+                });
+            };
+
+            input.click();
+        }
+
+        $(document).ready(function() {
+            initTree();
+        });
+    </script>
+</body>
+</html>
