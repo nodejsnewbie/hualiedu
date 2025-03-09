@@ -193,9 +193,61 @@ def grading_page(request):
                             'message': f'保存评分失败: {str(e)}'
                         })
                 
+                elif action == 'get_courses':
+                    try:
+                        # 获取grades目录下的所有课程目录
+                        grades_dir = os.path.join(settings.MEDIA_ROOT, 'grades')
+                        os.makedirs(grades_dir, exist_ok=True)
+                        courses = [d for d in os.listdir(grades_dir) 
+                                 if os.path.isdir(os.path.join(grades_dir, d))]
+                        
+                        return JsonResponse({
+                            'status': 'success',
+                            'courses': courses
+                        })
+                    except Exception as e:
+                        logger.error(f'获取课程列表失败: {str(e)}')
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'获取课程列表失败: {str(e)}'
+                        })
+
+                elif action == 'get_classes':
+                    try:
+                        course_name = request.POST.get('course_name')
+                        if not course_name:
+                            return JsonResponse({
+                                'status': 'error',
+                                'message': '未提供课程名称'
+                            })
+
+                        # 获取课程目录下的所有班级目录
+                        course_dir = os.path.join(settings.MEDIA_ROOT, 'grades', course_name)
+                        if not os.path.exists(course_dir):
+                            return JsonResponse({
+                                'status': 'success',
+                                'classes': []
+                            })
+
+                        classes = [d for d in os.listdir(course_dir) 
+                                 if os.path.isdir(os.path.join(course_dir, d))]
+                        
+                        return JsonResponse({
+                            'status': 'success',
+                            'classes': classes
+                        })
+                    except Exception as e:
+                        logger.error(f'获取班级列表失败: {str(e)}')
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'获取班级列表失败: {str(e)}'
+                        })
+
                 elif action == 'upload_directory':
                     try:
                         files = request.FILES.getlist('files')
+                        file_paths = request.POST.getlist('file_paths')  # 获取文件相对路径列表
+                        
                         if not files:
                             logger.error('没有接收到文件')
                             return JsonResponse({
@@ -203,44 +255,32 @@ def grading_page(request):
                                 'message': '没有接收到文件'
                             })
 
-                        logger.info(f'接收到 {len(files)} 个文件')
+                        # 获取课程名称、班级名称和目标目录名
+                        course_name = request.POST.get('course_name')
+                        class_name = request.POST.get('class_name')
+                        target_dir = request.POST.get('target_dir')
                         
-                        # 获取目标目录名
-                        directory_name = request.POST.get('directory_name')
-                        logger.info(f'目录名: {directory_name}')
-                        
-                        if not directory_name:
-                            logger.error('未提供目录名')
+                        if not all([course_name, class_name, target_dir]):
                             return JsonResponse({
                                 'status': 'error',
-                                'message': '未提供目录名'
+                                'message': '未提供完整的目录信息'
                             })
 
-                        # 确保上传目录存在
-                        upload_dir = os.path.join(settings.MEDIA_ROOT, directory_name)
+                        logger.info(f'接收到 {len(files)} 个文件，课程：{course_name}，班级：{class_name}，目标目录：{target_dir}')
+                        
+                        # 构建目标目录路径
+                        upload_dir = os.path.join(settings.MEDIA_ROOT, 'grades', course_name, class_name, target_dir)
                         os.makedirs(upload_dir, exist_ok=True)
                         logger.info(f'创建目录: {upload_dir}')
 
                         uploaded_files = []
                         # 处理每个文件
-                        for uploaded_file in files:
+                        for uploaded_file, file_path in zip(files, file_paths):
                             try:
-                                # 获取文件的相对路径
-                                file_path = str(uploaded_file)
                                 logger.info(f'处理文件: {file_path}')
                                 
-                                # 从完整路径中提取相对路径
-                                if '/' in file_path:
-                                    relative_path = '/'.join(file_path.split('/')[1:])  # 跳过第一个目录名
-                                elif '\\' in file_path:
-                                    relative_path = '\\'.join(file_path.split('\\')[1:])  # 跳过第一个目录名
-                                else:
-                                    relative_path = file_path
-
-                                logger.info(f'相对路径: {relative_path}')
-                                
                                 # 构建目标路径
-                                target_path = os.path.join(upload_dir, relative_path)
+                                target_path = os.path.join(upload_dir, file_path)
                                 if os.path.dirname(target_path):
                                     os.makedirs(os.path.dirname(target_path), exist_ok=True)
 
@@ -254,15 +294,15 @@ def grading_page(request):
                                 uploaded_files.append(target_path)
                                 logger.info(f'文件上传成功: {target_path}')
                             except Exception as e:
-                                logger.error(f'处理文件 {uploaded_file} 时出错: {str(e)}')
+                                logger.error(f'处理文件 {file_path} 时出错: {str(e)}')
                                 return JsonResponse({
                                     'status': 'error',
-                                    'message': f'处理文件 {uploaded_file} 时出错: {str(e)}'
+                                    'message': f'处理文件 {file_path} 时出错: {str(e)}'
                                 })
 
                         return JsonResponse({
                             'status': 'success',
-                            'message': f'成功上传 {len(files)} 个文件到 {directory_name}',
+                            'message': f'成功上传 {len(files)} 个文件到 {course_name}/{class_name}/{target_dir}',
                             'uploaded_files': uploaded_files
                         })
 
