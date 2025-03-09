@@ -15,16 +15,16 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path
 from django.conf import settings
-from hello import views
-from hello.views import grading_page
+from django.conf.urls.static import static
+from grading import views
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path('admin/', admin.site.urls),
     path('', views.index),
-    path('grading/', grading_page, name='grading'),
-]
+    path('grading/', views.grading_page, name='grading'),
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 # 开发环境添加静态文件服务
 if settings.DEBUG:

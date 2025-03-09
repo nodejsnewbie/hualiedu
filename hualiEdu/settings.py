@@ -38,7 +38,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'hello',
+    'grading',
     'corsheaders',
 ]
 
@@ -122,8 +122,14 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 # Media files configuration
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 MEDIA_URL = '/media/'
+
+# 确保 grades 目录存在
+os.makedirs(os.path.join(MEDIA_ROOT, 'grades'), exist_ok=True)
+
+# 允许上传的文件类型
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'doc', 'docx'}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
