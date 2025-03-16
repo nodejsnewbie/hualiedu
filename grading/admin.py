@@ -58,17 +58,17 @@ class SSHKeyFileField(forms.FileField):
         return value
 
 class GlobalConfigForm(forms.ModelForm):
-    ssh_key_file = SSHKeyFileField(
+    ssh_key_file = forms.FileField(
         label='SSH 私钥文件',
         required=False,
+        widget=SSHKeyFileInput(),
         help_text='上传 SSH 私钥文件（支持 .pem、.key、.rsa 格式或无后缀名文件）'
     )
 
     class Meta:
         model = GlobalConfig
-        fields = '__all__'
+        fields = ('https_username', 'https_password', 'ssh_key')
         widgets = {
-            'ssh_key_file': SSHKeyFileInput(),
             'https_password': forms.PasswordInput(render_value=True),
             'ssh_key': forms.Textarea(attrs={
                 'rows': 10,
@@ -76,6 +76,22 @@ class GlobalConfigForm(forms.ModelForm):
                 'placeholder': '如果不上传文件，也可以直接粘贴 SSH 私钥内容到这里（支持 RSA 格式）'
             })
         }
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if 'ssh_key_file' in self.files:
+            try:
+                file = self.files['ssh_key_file']
+                content = file.read().decode('utf-8')
+                # 验证 SSH 密钥格式
+                if not (content.strip().startswith('-----BEGIN') and content.strip().endswith('PRIVATE KEY-----')):
+                    raise forms.ValidationError('无效的 SSH 私钥格式，请确保上传的是有效的 SSH 私钥文件')
+                cleaned_data['ssh_key'] = content
+            except UnicodeDecodeError:
+                raise forms.ValidationError('无效的文件格式，请确保上传的是文本格式的 SSH 私钥文件')
+            except Exception as e:
+                raise forms.ValidationError(f'读取文件失败：{str(e)}')
+        return cleaned_data
 
 @admin.register(GlobalConfig)
 class GlobalConfigAdmin(admin.ModelAdmin):

@@ -1,1 +1,16 @@
-{% include "django/forms/widgets/input.html" %} 
+{% extends "admin/base_site.html" %}
+{% block extrahead %}
+{{ block.super }}
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+<script>
+  if (!window.$) {
+    window.$ = django.jQuery;
+  }
+</script>
+{% endblock %}
+{% load static %}
+<div class="ssh-key-file-input-wrapper">
+    {% include "django/forms/widgets/input.html" %}
+    <button type="button" class="button select-ssh-key">上传 SSH 私钥文件</button>
+    <span class="ssh-key-file-name"></span>
+</div>
