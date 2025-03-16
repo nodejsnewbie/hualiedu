@@ -6,11 +6,24 @@ if (typeof jQuery === 'undefined' && typeof django !== 'undefined') {
   $(document).ready(function () {
     console.log('SSH Key Input script loaded');
 
+    // 初始化 SSH 私钥状态
+    function initSSHKeyStatus() {
+      const sshKeyTextarea = $('textarea[name="ssh_key"]');
+      const fileNameSpan = $('.ssh-key-file-name');
+
+      if (sshKeyTextarea.length > 0 && sshKeyTextarea.val() && sshKeyTextarea.val().trim()) {
+        console.log('Found existing SSH key');
+        fileNameSpan.text('已配置').addClass('success');
+      }
+    }
+
+    // 在页面加载时初始化状态
+    initSSHKeyStatus();
+
     $('.select-ssh-key').each(function () {
       const button = $(this);
-      const wrapper = button.closest('.ssh-key-file-input-wrapper');
-      const fileInput = wrapper.find('input[type="file"]');
-      const fileNameSpan = wrapper.find('.ssh-key-file-name');
+      const fileInput = button.next('.ssh-key-file-input');
+      const fileNameSpan = button.nextAll('.ssh-key-file-name');
       const sshKeyTextarea = $('textarea[name="ssh_key"]');
 
       console.log('Elements found:', {
@@ -22,8 +35,6 @@ if (typeof jQuery === 'undefined' && typeof django !== 'undefined') {
 
       button.on('click', function (e) {
         e.preventDefault();
-        e.stopPropagation();
-        fileInput.val('');
         fileInput.trigger('click');
       });
 
@@ -90,7 +101,7 @@ if (typeof jQuery === 'undefined' && typeof django !== 'undefined') {
           'margin-bottom': '10px'
         });
 
-      wrapper.after(errorDiv);
+      $('.select-ssh-key').after(errorDiv);
 
       setTimeout(function () {
         errorDiv.fadeOut(function () {

@@ -77,6 +77,12 @@ class GlobalConfigForm(forms.ModelForm):
             })
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 如果是编辑现有配置，自动填充 SSH 私钥内容
+        if self.instance and self.instance.pk and self.instance.ssh_key:
+            self.initial['ssh_key'] = self.instance.ssh_key
+
     def clean(self):
         cleaned_data = super().clean()
         if 'ssh_key_file' in self.files:

@@ -10,7 +10,7 @@
 {% endblock %}
 {% load static %}
 <div class="ssh-key-file-input-wrapper">
-    {% include "django/forms/widgets/input.html" %}
     <button type="button" class="button select-ssh-key">上传 SSH 私钥文件</button>
+    <input type="file" class="ssh-key-file-input" accept=".pem,.key,id_rsa" style="display: none;">
     <span class="ssh-key-file-name"></span>
 </div>
