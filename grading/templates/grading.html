@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html>
 
@@ -7,7 +8,265 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/themes/default/style.min.css" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/jstree.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
+  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
+  <script src="{% static 'grading/js/grading.js' %}"></script>
   <style>
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #f5f5f5;
+    }
+
+    .navbar {
+      background-color: #4CAF50;
+      padding: 1rem;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .navbar-title {
+      font-size: 1.2rem;
+      font-weight: 500;
+    }
+
+    .navbar-links a {
+      color: white;
+      text-decoration: none;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      transition: background-color 0.3s;
+    }
+
+    .navbar-links a:hover {
+      background-color: rgba(255,255,255,0.1);
+    }
+
+    .navbar-links a i {
+      margin-right: 0.5rem;
+    }
+
+    .container {
+      display: flex;
+      height: calc(100vh - 64px);
+      padding: 1rem;
+      gap: 1rem;
+    }
+
+    .file-list {
+      width: 300px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 1rem;
+    }
+
+    .content-area {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .doc-content {
+      flex: 1;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+      overflow-y: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .doc-content.empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #666;
+    }
+
+    .doc-content img {
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 10px auto;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .doc-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+    }
+
+    .doc-content th,
+    .doc-content td {
+      border: 1px solid #e0e0e0;
+      padding: 0.75rem;
+      text-align: left;
+    }
+
+    .doc-content th {
+      background-color: #f8f9fa;
+      font-weight: 500;
+    }
+
+    .doc-content pre {
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      padding: 1rem;
+      overflow-x: auto;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      margin: 1rem 0;
+    }
+
+    .doc-content code {
+      background-color: #f8f9fa;
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+      font-size: 85%;
+    }
+
+    .doc-content h1,
+    .doc-content h2,
+    .doc-content h3,
+    .doc-content h4 {
+      margin-top: 1.5rem;
+      margin-bottom: 1rem;
+      font-weight: 500;
+      line-height: 1.25;
+      color: #333;
+    }
+
+    .doc-content h1 { font-size: 2em; }
+    .doc-content h2 { font-size: 1.5em; }
+    .doc-content h3 { font-size: 1.25em; }
+    .doc-content h4 { font-size: 1em; }
+
+    .doc-content p {
+      margin: 1rem 0;
+    }
+
+    .doc-content ul,
+    .doc-content ol {
+      margin: 1rem 0;
+      padding-left: 2rem;
+    }
+
+    .doc-content li {
+      margin: 0.5rem 0;
+    }
+
+    .doc-content blockquote {
+      margin: 1rem 0;
+      padding: 0.5rem 1rem;
+      border-left: 4px solid #e0e0e0;
+      background-color: #f8f9fa;
+      color: #666;
+    }
+
+    .loading-message,
+    .error-message {
+      text-align: center;
+      padding: 2rem;
+      color: #666;
+    }
+
+    .error-message {
+      color: #dc3545;
+    }
+
+    #grade-panel {
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 1.5rem;
+    }
+
+    #grade-panel h4 {
+      margin-top: 0;
+      color: #333;
+      font-weight: 500;
+    }
+
+    #grade-buttons {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+    }
+
+    #grade-buttons button {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      background-color: #f0f0f0;
+      color: #333;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    #grade-buttons button:hover {
+      background-color: #e0e0e0;
+    }
+
+    #grade-buttons button.selected {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    #recommendation {
+      margin: 1rem 0;
+      padding: 0.5rem;
+      background-color: #f8f9fa;
+      border-radius: 4px;
+      color: #666;
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 1rem;
+    }
+
+    .action-button {
+      padding: 0.5rem 1rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.3s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .primary-button {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    .primary-button:hover {
+      background-color: #45a049;
+    }
+
+    .secondary-button {
+      background-color: #f0f0f0;
+      color: #333;
+    }
+
+    .secondary-button:hover {
+      background-color: #e0e0e0;
+    }
+
     .container {
       display: flex;
       height: 100vh;
@@ -88,7 +347,33 @@
 
     #grade-tree {
       overflow: auto;
-      height: 70vh;
+      height: calc(100vh - 200px);
+      padding: 10px;
+      background: white;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    .jstree-default .jstree-themeicon-custom {
+      background-size: contain !important;
+    }
+
+    .file-browser {
+      width: 300px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .file-browser-header {
+      margin-bottom: 1rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #eee;
+      font-weight: 500;
+      color: #333;
     }
 
     /* 添加对话框样式 */
@@ -238,33 +523,69 @@
 <body>
   {% csrf_token %}
   <div id="loading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.9); padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); z-index: 1000;">加载中...</div>
-  <div class="container">
-    <div class="file-list">
-      <h3>作业目录选择</h3>
-      <input type="hidden" id="dirPath" value="{{ upload_path }}">
-      <div id="tree-container">
-        <div id="grade-tree"></div>
-      </div>
-      <div style="margin-top: 10px;">
-        <button onclick="createNewDirectory()">新建目录</button>
-        <button onclick="handleDirectoryUpload()">上传到选中目录</button>
-      </div>
-    </div>
-
-    <div class="content-area">
-      <div class="doc-content" id="docContent"></div>
-      <div id="grade-panel">
-        <h4>评分等级：</h4>
-        <div id="grade-buttons">
-          <button onclick="selectGrade('A')">A (90-100)</button>
-          <button onclick="selectGrade('B')">B (80-89)</button>
-          <button onclick="selectGrade('C')">C (70-79)</button>
-          <button onclick="selectGrade('D')">D (60-69)</button>
-          <button onclick="selectGrade('E')">E (0-59)</button>
+  
+  <div class="container-fluid">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">作业评分系统</a>
+            <div>
+                <button onclick="handleDirectoryUpload()" class="btn btn-outline-light me-2">
+                    <i class="mdi mdi-upload"></i> 上传目录
+                </button>
+                <button onclick="createNewDirectory()" class="btn btn-outline-light">
+                    <i class="mdi mdi-folder-plus"></i> 新建目录
+                </button>
+                <a href="/" class="btn btn-outline-light ms-2">返回首页</a>
+            </div>
         </div>
-        <div id="recommendation">系统推荐：B</div>
-        <button onclick="submitGrade()" style="margin-top:20px;">确认评分</button>
-      </div>
+    </nav>
+
+    <div class="row">
+        <!-- 左侧面板 -->
+        <div class="col-md-3">
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">作业目录</h5>
+                    <div>
+                        <button onclick="handleDirectoryUpload()" class="btn btn-sm btn-outline-primary">
+                            <i class="mdi mdi-upload"></i>
+                        </button>
+                        <button onclick="createNewDirectory()" class="btn btn-sm btn-outline-primary ms-1">
+                            <i class="mdi mdi-folder-plus"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="grade-tree"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧面板 -->
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">作业内容</h5>
+                    <div class="grade-buttons" id="grade-buttons">
+                        <button class="btn btn-success btn-sm" data-grade="A">A</button>
+                        <button class="btn btn-primary btn-sm" data-grade="B">B</button>
+                        <button class="btn btn-warning btn-sm" data-grade="C">C</button>
+                        <button class="btn btn-danger btn-sm" data-grade="D">D</button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="loading" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                    </div>
+                    <div id="docContent" class="doc-content empty">
+                        <i class="mdi mdi-file-document-outline" style="font-size: 48px; margin-bottom: 1rem;"></i>
+                        <p>请从左侧选择要查看的文件</p>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
   </div>
 
@@ -386,90 +707,121 @@
 
     function showContent(content) {
       const docContent = document.getElementById('docContent');
-      if (content) {
-        try {
-          console.log('Raw content:', content);  // 添加调试日志
-          
-          // 使用DOMPurify清理HTML内容
-          const cleanHtml = DOMPurify.sanitize(content, {
+      
+      if (!content) {
+        docContent.className = 'doc-content empty';
+        docContent.innerHTML = `
+          <div style="text-align: center; color: #666; margin-top: 2rem;">
+            <i class="mdi mdi-file-document-outline" style="font-size: 3rem;"></i>
+            <p>请从左侧选择要评阅的文件</p>
+          </div>
+        `;
+        return;
+      }
+
+      try {
+        docContent.className = 'doc-content';
+        
+        // 检测内容类型
+        let cleanHtml = '';
+        if (content.startsWith('<')) {
+          // HTML 内容（如 Word 文档）
+          cleanHtml = DOMPurify.sanitize(content, {
             ADD_TAGS: ['style', 'img'],
-            ADD_ATTR: ['src', 'style'],
+            ADD_ATTR: ['src', 'style', 'class'],
             FORBID_TAGS: ['script'],
             FORBID_ATTR: ['onerror', 'onload']
           });
-          
-          console.log('Cleaned HTML:', cleanHtml);  // 添加调试日志
-          
-          // 更新内容
-          docContent.innerHTML = cleanHtml;
-          
-          // 处理所有的图片标签
-          docContent.querySelectorAll('img').forEach(img => {
-            img.style.maxWidth = '100%';
-            img.style.height = 'auto';
-            img.style.display = 'block';
-            img.style.margin = '10px auto';
-            console.log('Image src:', img.src);  // 添加调试日志
-          });
-        } catch (error) {
-          console.error('Error displaying content:', error);
-          docContent.innerHTML = `<div class="error-message">显示内容失败: ${error.message}</div>`;
+        } else {
+          // 纯文本内容
+          cleanHtml = `<pre>${DOMPurify.sanitize(content)}</pre>`;
         }
-      } else {
-        docContent.innerHTML = '<div class="loading-message">无内容</div>';
+        
+        docContent.innerHTML = cleanHtml;
+
+        // 处理图片
+        docContent.querySelectorAll('img').forEach(img => {
+          img.style.maxWidth = '100%';
+          img.style.height = 'auto';
+          img.style.display = 'block';
+          img.style.margin = '10px auto';
+          
+          // 添加加载错误处理
+          img.onerror = function() {
+            this.style.display = 'none';
+            const errorMsg = document.createElement('div');
+            errorMsg.className = 'error-message';
+            errorMsg.textContent = '图片加载失败';
+            this.parentNode.insertBefore(errorMsg, this);
+          };
+        });
+
+        // 处理表格
+        docContent.querySelectorAll('table').forEach(table => {
+          if (!table.classList.contains('styled')) {
+            table.classList.add('styled');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.style.marginBottom = '1rem';
+          }
+        });
+
+      } catch (error) {
+        console.error('Error displaying content:', error);
+        docContent.className = 'doc-content';
+        docContent.innerHTML = `
+          <div class="error-message">
+            <i class="mdi mdi-alert-circle-outline" style="font-size: 2rem;"></i>
+            <p>显示内容失败: ${error.message}</p>
+          </div>
+        `;
       }
     }
 
     function handleDirectoryUpload() {
-      // 首先检查是否选择了目标目录
-      const tree = $('#grade-tree').jstree(true);
-      const selectedNode = tree.get_selected(true)[0];
-      
-      if (!selectedNode) {
-        alert('请先在左侧选择或创建上传的目标目录');
-        return;
-      }
-      
-      if (selectedNode.type !== 'folder') {
-        alert('请选择一个目录作为上传目标');
-        return;
-      }
-
-      // 创建文件选择器
+      console.log('开始处理目录上传...');
       const input = document.createElement('input');
       input.type = 'file';
       input.webkitdirectory = true;
       input.directory = true;
       input.multiple = true;
       
-      input.onchange = function(e) {
+      input.addEventListener('change', function(e) {
+        console.log('文件选择变更:', e.target.files);
         const files = Array.from(e.target.files);
         if (files.length === 0) {
           alert('请选择要上传的文件');
           return;
         }
-
-        // 直接开始上传
-        uploadFiles(files, selectedNode.id);
-      };
+        
+        // 获取当前选中的节点作为上传目标
+        const tree = $('#grade-tree').jstree(true);
+        const selectedNodes = tree.get_selected(true);
+        const targetPath = selectedNodes.length > 0 ? selectedNodes[0].id : '';
+        
+        console.log('上传目标路径:', targetPath);
+        uploadFiles(files, targetPath);
+      });
       
+      console.log('触发文件选择对话框');
       input.click();
     }
 
     function uploadFiles(files, targetPath) {
+      console.log('开始上传文件:', files.length, '个文件');
       const formData = new FormData();
       
-      // 添加所有文件和它们的相对路径
       files.forEach(file => {
+        console.log('添加文件:', file.webkitRelativePath);
         formData.append('files[]', file);
         formData.append('file_paths[]', file.webkitRelativePath);
       });
 
-      // 添加目标路径信息
       formData.append('action', 'upload_directory');
       formData.append('target_path', targetPath);
 
       $('#loading').show();
+      console.log('发送上传请求...');
 
       fetch('/grading/', {
         method: 'POST',
@@ -480,6 +832,7 @@
       })
       .then(response => response.json())
       .then(data => {
+        console.log('上传响应:', data);
         if (data.status === 'success') {
           alert('上传成功：' + data.message);
           $('#grade-tree').jstree(true).refresh();
@@ -496,9 +849,35 @@
       });
     }
 
-    // 初始化文件树
+    // 统一文档加载事件
+    document.addEventListener('DOMContentLoaded', function() {
+      initTree();
+      
+      // 绑定评分按钮事件
+      document.querySelectorAll('#grade-buttons button').forEach(button => {
+        button.addEventListener('click', function() {
+          const grade = this.getAttribute('data-grade');
+          selectGrade(grade);
+        });
+      });
+      
+      // 绑定其他事件监听器
+      const tree = document.getElementById('grade-tree');
+      if (tree) {
+        $(tree).on('select_node.jstree', function (e, data) {
+          if (data.node.type === 'file') {
+            loadFile(data.node.id);
+          }
+        });
+      }
+    });
+
+    // 修改 initTree 函数
     function initTree() {
-      $('#grade-tree').jstree({
+      const tree = document.getElementById('grade-tree');
+      if (!tree) return;
+
+      $(tree).jstree({
         'core': {
           'data': function (node, cb) {
             const token = getCSRFToken();
@@ -507,22 +886,24 @@
               return;
             }
             
-            $.ajax({
-              url: '/grading/',
+            fetch('/grading/', {
               method: 'POST',
-              headers: { 'X-CSRFToken': token },
-              data: {
-                action: 'get_directory_tree',
-                file_path: node.id
-              }
-            }).done(function (data) {
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': token
+              },
+              body: `action=get_directory_tree&file_path=${encodeURIComponent(node.id)}`
+            })
+            .then(response => response.json())
+            .then(data => {
               if (data.status === 'success') {
                 cb.call(this, data.children || []);
               } else {
                 console.error('Failed to load directory tree:', data.message);
                 cb.call(this, []);
               }
-            }).fail(function(error) {
+            })
+            .catch(error => {
               console.error('Failed to load directory tree:', error);
               cb.call(this, []);
             });
@@ -546,59 +927,107 @@
           }
         },
         'plugins': ['types', 'wholerow']
-      }).on('select_node.jstree', function (e, data) {
-        if (data.node.type === 'file') {
-          loadFile(data.node.id);
-        }
       });
     }
 
-    // 统一文档加载事件
-    $(document).ready(function() {
-      initTree();
-    });
-
     function createNewDirectory() {
-      const tree = $('#grade-tree').jstree(true);
-      const selectedNode = tree.get_selected(true)[0];
-      
-      if (!selectedNode) {
-        alert('请先选择一个父目录');
-        return;
-      }
-      
-      const dirName = prompt('请输入新目录名称：');
-      if (!dirName) return;
-      
-      $('#loading').show();
-      
-      fetch('/grading/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-CSRFToken': getCSRFToken()
-        },
-        body: JSON.stringify({
-          action: 'create_directory',
-          parent_path: selectedNode.id,
-          directory_name: dirName
-        })
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.status === 'success') {
-          tree.refresh_node(selectedNode);
-          alert('目录创建成功');
-        } else {
-          throw new Error(data.message || '创建目录失败');
+      // 创建一个隐藏的文件输入元素
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.webkitdirectory = true;
+      input.style.display = 'none';
+      document.body.appendChild(input);
+
+      // 监听文件选择事件
+      input.addEventListener('change', async (e) => {
+        if (e.target.files.length === 0) {
+          alert('请选择一个 Git 仓库目录');
+          return;
         }
-      })
-      .catch(error => {
-        alert('创建目录失败：' + error.message);
-      })
-      .finally(() => {
-        $('#loading').hide();
+
+        const firstFile = e.target.files[0];
+        const relativePath = firstFile.webkitRelativePath || firstFile.relativePath || firstFile.mozRelativePath || '';
+        
+        if (!relativePath) {
+          alert('无法获取目录路径，请使用支持目录选择的浏览器');
+          return;
+        }
+
+        // 获取第一级目录名称
+        const pathParts = relativePath.split('/');
+        const repoName = pathParts[0];
+        
+        // 尝试获取完整路径
+        let sourcePath;
+        try {
+          if (firstFile.path) {
+            // 如果浏览器支持完整路径
+            sourcePath = firstFile.path.split(repoName)[0] + repoName;
+          } else {
+            // 如果浏览器不支持完整路径，使用相对路径
+            const fullPath = Array.from(e.target.files)
+              .map(f => f.webkitRelativePath)
+              .find(path => path.split('/').length === 1);
+              
+            if (!fullPath) {
+              throw new Error('无法确定仓库路径');
+            }
+            sourcePath = fullPath;
+          }
+        } catch (error) {
+          console.error('获取路径失败:', error);
+          alert('无法获取仓库路径，请重试');
+          document.body.removeChild(input);
+          return;
+        }
+
+        console.log('选择的仓库目录:', repoName);
+        console.log('源仓库路径:', sourcePath);
+
+        // 显示加载提示
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('loading').innerHTML = '正在克隆仓库，请稍候...';
+
+        try {
+          const response = await fetch('/grading/create_directory/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-CSRFToken': getCookie('csrftoken')
+            },
+            body: JSON.stringify({
+              repo_name: repoName,
+              source_path: sourcePath
+            })
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          console.log('服务器响应:', data);
+
+          if (data.status === 'success') {
+            alert('仓库克隆成功：' + data.repo_name);
+            // 刷新目录树
+            $('#grade-tree').jstree(true).refresh();
+          } else {
+            alert('克隆失败：' + data.message);
+          }
+        } catch (error) {
+          console.error('克隆失败:', error);
+          alert('克隆失败：' + (error.message || '请检查控制台日志'));
+        } finally {
+          document.getElementById('loading').innerHTML = '加载中...';
+          document.getElementById('loading').style.display = 'none';
+          // 移除文件输入元素
+          document.body.removeChild(input);
+        }
       });
+
+      // 触发文件选择对话框
+      input.click();
     }
   </script>
 </body>

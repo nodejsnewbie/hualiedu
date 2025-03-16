@@ -32,6 +32,7 @@ ALLOWED_HOSTS = ['*']
 # Application definition
 
 INSTALLED_APPS = [
+    "jazzmin",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -107,9 +108,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "zh-hans"
 
-TIME_ZONE = "UTC"
+TIME_ZONE = "Asia/Shanghai"
 
 USE_I18N = True
 
@@ -120,6 +121,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, "static"),
+]
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 # Media files configuration
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
@@ -179,3 +184,30 @@ LOGGING = {
 # CORS 设置
 CORS_ALLOW_ALL_ORIGINS = True  # 允许所有来源的跨域请求
 CORS_ALLOW_CREDENTIALS = True  # 允许携带认证信息
+
+# Jazzmin Settings
+JAZZMIN_SETTINGS = {
+    "site_title": "华理教育管理系统",
+    "site_header": "华理教育",
+    "site_brand": "华理教育",
+    "welcome_sign": "欢迎使用华理教育管理系统",
+    "copyright": "华理教育",
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "auth.user": "fas fa-user",
+        "auth.Group": "fas fa-users",
+        "grading": "fas fa-graduation-cap"
+    },
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "theme": "default",
+    "dark_mode_theme": "darkly",
+    "show_ui_builder": True
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "navbar": "navbar-dark",
+    "brand_colour": "navbar-success",
+    "sidebar": "sidebar-dark-success",
+    "theme": "cosmo"
+}

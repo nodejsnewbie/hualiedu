@@ -1,2 +1,6 @@
-Django
-mysqlclient
+Django>=4.2,<5.0
+mysqlclient==2.2.4
+python-docx>=0.8.11
+mammoth==1.6.0
+django-jazzmin==3.0.1
+GitPython>=3.1.40

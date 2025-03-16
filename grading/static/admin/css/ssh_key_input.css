@@ -1,0 +1,46 @@
+.ssh-key-file-input-wrapper {
+  margin: 10px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.select-ssh-key {
+  min-width: 120px;
+  background-color: var(--object-tools-bg);
+  color: var(--object-tools-fg);
+  border: 1px solid var(--object-tools-hover-bg);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.select-ssh-key:hover {
+  background-color: var(--object-tools-hover-bg);
+}
+
+.ssh-key-file-name {
+  color: var(--body-quiet-color);
+  font-size: 0.9em;
+  margin-left: 10px;
+}
+
+.ssh-key-file-name.success {
+  color: var(--success-color);
+}
+
+.ssh-key-status {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.9em;
+  background-color: var(--success-color);
+  color: white;
+}
+
+.ssh-key-status:empty::before {
+  content: '未配置';
+  color: var(--body-quiet-color);
+  background-color: transparent;
+}

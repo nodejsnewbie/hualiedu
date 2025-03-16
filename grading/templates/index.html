@@ -1,3 +1,4 @@
+{% load static %}
 <!DOCTYPE html>
 <html>
 <head>
@@ -75,8 +76,8 @@
         <h1>作业评分系统</h1>
         
         <div class="menu">
-            <a href="/grading/" class="menu-item">开始评分</a>
-            <a href="/admin/" class="menu-item">管理后台</a>
+            <a href="{% url 'grading:grading' %}" class="menu-item">开始评分</a>
+            <a href="{% url 'admin:index' %}" class="menu-item">管理后台</a>
         </div>
         
         <div class="features">
