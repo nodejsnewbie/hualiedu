@@ -7,6 +7,7 @@ import os
 import time
 import random
 import string
+from urllib.parse import urlparse, urlunparse
 
 class Student(models.Model):
     student_id = models.CharField(max_length=20, unique=True)
@@ -110,45 +111,35 @@ class GlobalConfig(models.Model):
         super().save(*args, **kwargs)
 
 class Repository(models.Model):
-    """Git 仓库模型"""
-    name = models.CharField(max_length=100, unique=True)
-    url = models.CharField(max_length=255, help_text='支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git')
-    branch = models.CharField(max_length=100, default='main')
-    local_path = models.CharField(max_length=255, blank=True)
+    name = models.CharField(max_length=255, unique=True)
+    url = models.CharField(max_length=255, unique=True)
+    branch = models.CharField(max_length=255, default='main')
+    branches = models.JSONField(default=list, help_text='仓库的所有分支列表')
     last_sync_time = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        verbose_name = '仓库'
-        verbose_name_plural = '仓库'
-        ordering = ['-updated_at']
 
     def __str__(self):
         return self.name
 
     def get_local_path(self):
-        """获取本地仓库路径"""
-        if not self.local_path:
-            config = GlobalConfig.objects.first()
-            if config and config.repo_base_dir:
-                # 构造本地路径
-                self.local_path = os.path.join(
-                    os.path.expanduser(config.repo_base_dir),
-                    self.name
-                )
-        return self.local_path
+        """获取本地路径"""
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return None
+        return os.path.join(config.repo_base_dir, self.name)
 
     def is_cloned(self):
         """检查仓库是否已克隆"""
         local_path = self.get_local_path()
-        return bool(local_path and os.path.exists(local_path) and os.path.exists(os.path.join(local_path, '.git')))
+        return local_path and os.path.exists(local_path)
+
+    def is_ssh_protocol(self):
+        """检查是否使用 SSH 协议"""
+        return self.url.startswith('git@') or self.url.startswith('ssh://')
 
     def get_clone_url(self):
         """获取克隆 URL"""
-        if not self.url:
-            raise ValueError('仓库 URL 不能为空')
-
         config = GlobalConfig.objects.first()
         if not config:
             return self.url
@@ -156,17 +147,10 @@ class Repository(models.Model):
         if self.is_ssh_protocol():
             return self.url
         else:
-            # 使用 HTTPS 认证
-            if config.https_username and config.https_password:
-                # 在 URL 中插入用户名和密码
-                url_parts = self.url.split('://')
-                if len(url_parts) == 2:
-                    return f"{url_parts[0]}://{config.https_username}:{config.https_password}@{url_parts[1]}"
-            return self.url
-
-    def is_ssh_protocol(self):
-        """检查是否使用 SSH 协议"""
-        return self.url.startswith('git@') or self.url.startswith('ssh://')
+            # 从 URL 中提取用户名和密码
+            parsed = urlparse(self.url)
+            netloc = f"{config.https_username}:{config.https_password}@{parsed.netloc}"
+            return urlunparse(parsed._replace(netloc=netloc))
 
     @staticmethod
     def generate_name_from_url(url):
