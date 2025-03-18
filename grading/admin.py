@@ -1,17 +1,19 @@
-from django.contrib import admin
-from django.utils.html import format_html
-from .models import Student, Assignment, Submission, Repository, GlobalConfig
 import os
 import git
-from django.conf import settings
-from django.contrib import messages
-from django.utils import timezone
+import shutil
 import tempfile
-from django import forms
-from django.core.files.storage import FileSystemStorage
-from pathlib import Path
+from django.contrib import admin
+from django.utils.html import format_html
 from django.urls import reverse
 from django.http import HttpResponseRedirect
+from django.contrib import messages
+from django.utils import timezone
+from django.shortcuts import render
+from django import forms
+from .models import Student, Assignment, Submission, Repository, GlobalConfig
+from django.conf import settings
+from django.core.files.storage import FileSystemStorage
+from pathlib import Path
 
 class SSHKeyFileInput(forms.ClearableFileInput):
     template_name = 'django/forms/widgets/clearable_file_input.html'
@@ -102,6 +104,9 @@ class GlobalConfigForm(forms.ModelForm):
                 # 验证 SSH 密钥格式
                 if not (content.strip().startswith('-----BEGIN') and content.strip().endswith('PRIVATE KEY-----')):
                     raise forms.ValidationError('无效的 SSH 私钥格式，请确保上传的是有效的 SSH 私钥文件')
+                # 检查密钥类型
+                if 'OPENSSH PRIVATE KEY' not in content and 'RSA PRIVATE KEY' not in content:
+                    raise forms.ValidationError('不支持的 SSH 私钥格式，请确保上传的是 RSA 或 ED25519 格式的私钥文件')
                 cleaned_data['ssh_key'] = content
             except UnicodeDecodeError:
                 raise forms.ValidationError('无效的文件格式，请确保上传的是文本格式的 SSH 私钥文件')
@@ -328,7 +333,7 @@ class RepositoryForm(forms.ModelForm):
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
     form = RepositoryForm
-    list_display = ('name', 'url', 'branch', 'get_last_sync_time', 'get_sync_status', 'get_action_buttons')
+    list_display = ('name', 'url', 'get_branch', 'get_last_sync_time', 'get_sync_status', 'get_action_buttons')
     list_filter = ('branch',)
     search_fields = ('name', 'url')
     readonly_fields = ('name', 'get_last_sync_time', 'get_sync_status')
@@ -349,18 +354,25 @@ class RepositoryAdmin(admin.ModelAdmin):
     
     def get_sync_status(self, obj):
         """获取同步状态"""
-        local_path = obj.get_local_path()
-        if not os.path.exists(local_path):
+        if not obj.is_cloned():
             return format_html('<span style="color: #999;">未克隆</span>')
         elif not hasattr(obj, 'last_sync_time') or not obj.last_sync_time:
             return format_html('<span style="color: #999;">未同步</span>')
         return format_html('<span style="color: green;">已同步</span>')
     get_sync_status.short_description = '同步状态'
 
+    def get_branch(self, obj):
+        """显示分支和修改按钮"""
+        return format_html(
+            '{} <a href="{}" class="button">修改</a>',
+            obj.branch,
+            reverse('admin:grading_repository_change_branch', args=[obj.pk])
+        )
+    get_branch.short_description = '分支'
+
     def get_action_buttons(self, obj):
         """获取操作按钮"""
-        local_path = obj.get_local_path()
-        if not os.path.exists(local_path):
+        if not obj.is_cloned():
             # 如果仓库未克隆，只显示克隆按钮
             return format_html(
                 '<div class="action-buttons">'
@@ -368,18 +380,18 @@ class RepositoryAdmin(admin.ModelAdmin):
                 '</div>',
                 reverse('admin:grading_repository_clone', args=[obj.pk])
             )
-        else:
-            # 如果仓库已克隆，显示更新、推送和清除按钮
-            return format_html(
-                '<div class="action-buttons">'
-                '<a class="button" href="{}">更新</a> '
-                '<a class="button" href="{}">推送</a> '
-                '<a class="button delete-button" href="{}">清除</a>'
-                '</div>',
-                reverse('admin:grading_repository_sync', args=[obj.pk]),
-                reverse('admin:grading_repository_push', args=[obj.pk]),
-                reverse('admin:grading_repository_clear', args=[obj.pk])
-            )
+        
+        # 如果仓库已克隆，显示更新、推送和清除按钮
+        return format_html(
+            '<div class="action-buttons">'
+            '<a class="button" href="{}">更新</a> '
+            '<a class="button" href="{}">推送</a> '
+            '<a class="button delete-button" href="{}">清除</a>'
+            '</div>',
+            reverse('admin:grading_repository_sync', args=[obj.pk]),
+            reverse('admin:grading_repository_push', args=[obj.pk]),
+            reverse('admin:grading_repository_clear', args=[obj.pk])
+        )
     get_action_buttons.short_description = '操作'
 
     def get_urls(self):
@@ -406,6 +418,11 @@ class RepositoryAdmin(admin.ModelAdmin):
                 self.admin_site.admin_view(self.clear_repository),
                 name='grading_repository_clear',
             ),
+            path(
+                '<int:repo_id>/change_branch/',
+                self.admin_site.admin_view(self.change_branch),
+                name='grading_repository_change_branch',
+            ),
         ]
         return custom_urls + urls
 
@@ -416,13 +433,14 @@ class RepositoryAdmin(admin.ModelAdmin):
             local_path = repo.get_local_path()
             
             # 检查目录是否已存在
-            if os.path.exists(local_path):
+            if os.path.exists(local_path) and os.path.exists(os.path.join(local_path, '.git')):
                 self.message_user(request, f'仓库目录已存在：{local_path}', level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
-            # 确保 media/repo 目录存在
-            repo_dir = os.path.join(settings.MEDIA_ROOT, 'repo')
-            os.makedirs(repo_dir, exist_ok=True)
+            # 如果目录存在但不是 git 仓库，则删除它
+            if os.path.exists(local_path):
+                import shutil
+                shutil.rmtree(local_path)
             
             # 准备克隆选项
             clone_kwargs = {
@@ -446,8 +464,35 @@ class RepositoryAdmin(admin.ModelAdmin):
                         git_ssh_cmd = f'ssh -i {key_file.name} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes'
                         clone_kwargs['env'] = {'GIT_SSH_COMMAND': git_ssh_cmd}
                         
-                        # 克隆仓库
-                        git.Repo.clone_from(**clone_kwargs)
+                        # 先克隆仓库，不指定分支
+                        git_repo = git.Repo.clone_from(
+                            url=clone_kwargs['url'],
+                            to_path=clone_kwargs['to_path']
+                        )
+                        
+                        # 获取所有远程分支
+                        git_repo.git.fetch('--all')
+                        remote_branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                        
+                        # 检查分支是否存在
+                        if repo.branch not in remote_branches:
+                            # 如果分支不存在，删除仓库并提示用户
+                            shutil.rmtree(local_path)
+                            self.message_user(request, 
+                                f'仓库克隆失败：分支 {repo.branch} 不存在。\n'
+                                f'可用的分支有：\n' + 
+                                '\n'.join(f'- {branch}' for branch in remote_branches) + 
+                                '\n\n修改分支的方法：\n'
+                                '1. 点击仓库名称进入编辑页面\n'
+                                '2. 在"分支"字段中输入正确的分支名称\n'
+                                '3. 点击"保存"按钮\n'
+                                '4. 重新点击"克隆"按钮',
+                                level=messages.ERROR)
+                            return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+                        
+                        # 切换到指定分支
+                        git_repo.git.checkout(repo.branch)
+                        
                         # 更新同步时间
                         repo.last_sync_time = timezone.now()
                         repo.save()
@@ -467,8 +512,35 @@ class RepositoryAdmin(admin.ModelAdmin):
                         'GIT_PASSWORD': config.https_password
                     }
                 
-                # 克隆仓库
-                git.Repo.clone_from(**clone_kwargs)
+                # 先克隆仓库，不指定分支
+                git_repo = git.Repo.clone_from(
+                    url=clone_kwargs['url'],
+                    to_path=clone_kwargs['to_path']
+                )
+                
+                # 获取所有远程分支
+                git_repo.git.fetch('--all')
+                remote_branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                
+                # 检查分支是否存在
+                if repo.branch not in remote_branches:
+                    # 如果分支不存在，删除仓库并提示用户
+                    shutil.rmtree(local_path)
+                    self.message_user(request, 
+                        f'仓库克隆失败：分支 {repo.branch} 不存在。\n'
+                        f'可用的分支有：\n' + 
+                        '\n'.join(f'- {branch}' for branch in remote_branches) + 
+                        '\n\n修改分支的方法：\n'
+                        '1. 点击仓库名称进入编辑页面\n'
+                        '2. 在"分支"字段中输入正确的分支名称\n'
+                        '3. 点击"保存"按钮\n'
+                        '4. 重新点击"克隆"按钮',
+                        level=messages.ERROR)
+                    return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+                
+                # 切换到指定分支
+                git_repo.git.checkout(repo.branch)
+                
                 # 更新同步时间
                 repo.last_sync_time = timezone.now()
                 repo.save()
@@ -708,6 +780,71 @@ class RepositoryAdmin(admin.ModelAdmin):
         if 'delete_selected' in actions:
             del actions['delete_selected']
         return actions
+
+    def change_branch(self, request, repo_id):
+        """修改分支"""
+        try:
+            repo = Repository.objects.get(id=repo_id)
+            
+            if request.method == 'POST':
+                new_branch = request.POST.get('branch')
+                if not new_branch:
+                    self.message_user(request, '请选择分支', level=messages.ERROR)
+                    return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+                
+                # 如果仓库已克隆，验证分支是否存在并切换
+                if repo.is_cloned():
+                    git_repo = git.Repo(repo.get_local_path())
+                    git_repo.git.fetch('--all')
+                    remote_branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                    
+                    if new_branch not in remote_branches:
+                        self.message_user(request, 
+                            f'分支 {new_branch} 不存在。\n'
+                            f'可用的分支有：\n' + 
+                            '\n'.join(f'- {branch}' for branch in remote_branches),
+                            level=messages.ERROR)
+                        return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+                    
+                    # 切换到新分支
+                    git_repo.git.checkout(new_branch)
+                
+                # 更新分支
+                repo.branch = new_branch
+                repo.save()
+                
+                self.message_user(request, f'分支已修改为：{new_branch}')
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            # 显示分支选择页面
+            context = {
+                'title': '修改分支',
+                'repo': repo,
+                'branches': ['main', 'master', 'develop'],  # 默认显示常用分支
+                'current_branch': repo.branch,
+                'opts': self.model._meta,
+                'app_label': self.model._meta.app_label,
+                'has_permission': self.has_change_permission(request),
+            }
+            
+            # 如果仓库已克隆，获取实际的分支列表
+            if repo.is_cloned():
+                try:
+                    git_repo = git.Repo(repo.get_local_path())
+                    git_repo.git.fetch('--all')
+                    context['branches'] = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                except Exception as e:
+                    # 如果获取远程分支失败，使用默认分支列表
+                    self.message_user(request, f'获取远程分支列表失败：{str(e)}，将显示默认分支列表', level=messages.WARNING)
+            
+            return render(request, 'admin/grading/repository/change_branch.html', context)
+            
+        except Repository.DoesNotExist:
+            self.message_user(request, '仓库不存在', level=messages.ERROR)
+        except Exception as e:
+            self.message_user(request, f'修改分支失败：{str(e)}', level=messages.ERROR)
+        
+        return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
 
 # 注册其他模型
 @admin.register(Student)
