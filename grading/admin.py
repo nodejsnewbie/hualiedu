@@ -379,8 +379,89 @@ class RepositoryForm(forms.ModelForm):
                         existing_repo.last_sync_time.strftime("%Y-%m-%d %H:%M:%S") if existing_repo.last_sync_time else "未同步"
                     ))
                     return cleaned_data
-                cleaned_data['name'] = repo_name
-                cleaned_data['branch'] = 'main'  # 默认使用 main 分支
+                
+                # 获取远端分支列表
+                try:
+                    # 准备环境变量
+                    env = os.environ.copy()
+                    if is_ssh and config.ssh_key:
+                        # 创建临时 SSH 密钥文件
+                        ssh_key_path = os.path.join(os.path.expanduser('~'), '.ssh', 'id_rsa_temp')
+                        os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
+                        with open(ssh_key_path, 'w') as f:
+                            f.write(config.ssh_key)
+                        os.chmod(ssh_key_path, 0o600)
+                        env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no'
+                    
+                    # 使用 git ls-remote 获取分支列表
+                    clone_url = url
+                    if not is_ssh and config.https_username and config.https_password:
+                        from urllib.parse import urlparse, urlunparse
+                        parsed = urlparse(url)
+                        netloc = f"{config.https_username}:{config.https_password}@{parsed.netloc}"
+                        clone_url = urlunparse(parsed._replace(netloc=netloc))
+                    
+                    result = subprocess.run(
+                        ['git', 'ls-remote', '--heads', clone_url],
+                        env=env,
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if result.returncode == 0:
+                        # 解析分支列表
+                        branches = []
+                        for line in result.stdout.splitlines():
+                            if line.strip():
+                                # 提取分支名
+                                branch = line.split('refs/heads/')[-1]
+                                branches.append(branch)
+                        
+                        # 设置分支列表
+                        cleaned_data['branches'] = branches
+                        
+                        # 验证选择的分支是否存在
+                        selected_branch = cleaned_data.get('branch', 'main')
+                        if selected_branch not in branches:
+                            self.add_error('branch', format_html(
+                                '<div class="alert alert-danger" style="margin-top: 10px;">'
+                                '<strong>选择的分支不存在</strong><br>'
+                                '分支 {} 在远端仓库中不存在。<br>'
+                                '可用的分支有：<br>' + 
+                                '<br>'.join(f'- {branch}' for branch in branches),
+                                selected_branch
+                            ))
+                            return cleaned_data
+                        
+                        # 设置仓库名称和分支
+                        cleaned_data['name'] = repo_name
+                        cleaned_data['branch'] = selected_branch
+                    else:
+                        self.add_error('url', format_html(
+                            '<div class="alert alert-danger" style="margin-top: 10px;">'
+                            '<strong>获取分支列表失败</strong><br>'
+                            '错误信息：{}'
+                            '</div>',
+                            result.stderr
+                        ))
+                        return cleaned_data
+                    
+                    # 清理临时文件
+                    if is_ssh and config.ssh_key:
+                        try:
+                            os.remove(ssh_key_path)
+                        except:
+                            pass
+                            
+                except Exception as e:
+                    self.add_error('url', format_html(
+                        '<div class="alert alert-danger" style="margin-top: 10px;">'
+                        '<strong>获取分支列表失败</strong><br>'
+                        '错误信息：{}'
+                        '</div>',
+                        str(e)
+                    ))
+                    return cleaned_data
         
         return cleaned_data
 
