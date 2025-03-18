@@ -2,6 +2,7 @@ import os
 import git
 import shutil
 import tempfile
+import subprocess
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse, path
@@ -412,144 +413,69 @@ class RepositoryAdmin(admin.ModelAdmin):
     def clone_repository(self, request, repo_id):
         """克隆仓库"""
         try:
-            repo = Repository.objects.get(id=repo_id)
-            local_path = repo.get_local_path()
-            
-            # 检查目录是否已存在
-            if os.path.exists(local_path) and os.path.exists(os.path.join(local_path, '.git')):
-                self.message_user(request, f'仓库目录已存在：{local_path}', level=messages.ERROR)
-                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
-            
-            # 如果目录存在但不是 git 仓库，则删除它
-            if os.path.exists(local_path):
-                import shutil
-                shutil.rmtree(local_path)
-            
-            # 准备克隆选项
-            clone_kwargs = {
-                'url': repo.get_clone_url(),
-                'to_path': local_path,
-                'branch': repo.branch,
-            }
-            
-            # 获取全局配置
+            repo = Repository.objects.get(pk=repo_id)
             config = GlobalConfig.objects.first()
             
-            # 处理 SSH 密钥
-            if repo.is_ssh_protocol() and config and config.ssh_key:
-                with tempfile.NamedTemporaryFile(mode='w', delete=False) as key_file:
-                    key_file.write(config.ssh_key)
-                    key_file.flush()
-                    os.chmod(key_file.name, 0o600)
-                    
-                    try:
-                        # 配置 SSH 命令
-                        git_ssh_cmd = f'ssh -i {key_file.name} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes'
-                        clone_kwargs['env'] = {'GIT_SSH_COMMAND': git_ssh_cmd}
-                        
-                        # 先克隆仓库，不指定分支
-                        git_repo = git.Repo.clone_from(
-                            url=clone_kwargs['url'],
-                            to_path=clone_kwargs['to_path']
-                        )
-                        
-                        # 获取所有远程分支
-                        git_repo.git.fetch('--all')
-                        remote_branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
-                        
-                        # 检查分支是否存在
-                        if repo.branch not in remote_branches:
-                            # 如果分支不存在，删除仓库并提示用户
-                            shutil.rmtree(local_path)
-                            self.message_user(request, 
-                                f'仓库克隆失败：分支 {repo.branch} 不存在。\n'
-                                f'可用的分支有：\n' + 
-                                '\n'.join(f'- {branch}' for branch in remote_branches) + 
-                                '\n\n修改分支的方法：\n'
-                                '1. 点击仓库名称进入编辑页面\n'
-                                '2. 在"分支"字段中输入正确的分支名称\n'
-                                '3. 点击"保存"按钮\n'
-                                '4. 重新点击"克隆"按钮',
-                                level=messages.ERROR)
-                            return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
-                        
-                        # 切换到指定分支
-                        git_repo.git.checkout(repo.branch)
-                        
-                        # 更新同步时间
-                        repo.last_sync_time = timezone.now()
-                        repo.save()
-                        self.message_user(request, f'仓库 {repo.name} 克隆成功')
-                    finally:
-                        # 清理临时文件
-                        try:
-                            os.unlink(key_file.name)
-                        except:
-                            pass
-            else:
-                # 使用 HTTPS 认证
-                if config and config.https_username and config.https_password:
-                    clone_kwargs['env'] = {
-                        'GIT_ASKPASS': 'echo',
-                        'GIT_USERNAME': config.https_username,
-                        'GIT_PASSWORD': config.https_password
-                    }
+            if not config:
+                messages.error(request, '请先配置全局认证信息')
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            # 获取本地路径
+            local_path = repo.get_local_path()
+            if not local_path:
+                messages.error(request, '无法获取本地路径')
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            # 如果目录已存在，先删除
+            if os.path.exists(local_path):
+                shutil.rmtree(local_path)
+            
+            # 确保父目录存在
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
+            
+            # 获取克隆 URL
+            clone_url = repo.get_clone_url()
+            
+            # 准备环境变量
+            env = os.environ.copy()
+            if repo.is_ssh_protocol() and config.ssh_key:
+                # 创建临时 SSH 密钥文件
+                ssh_key_path = os.path.join(os.path.expanduser('~'), '.ssh', 'id_rsa_temp')
+                os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
+                with open(ssh_key_path, 'w') as f:
+                    f.write(config.ssh_key)
+                os.chmod(ssh_key_path, 0o600)
                 
-                # 先克隆仓库，不指定分支
-                git_repo = git.Repo.clone_from(
-                    url=clone_kwargs['url'],
-                    to_path=clone_kwargs['to_path']
-                )
-                
-                # 获取所有远程分支
-                git_repo.git.fetch('--all')
-                remote_branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
-                
-                # 检查分支是否存在
-                if repo.branch not in remote_branches:
-                    # 如果分支不存在，删除仓库并提示用户
-                    shutil.rmtree(local_path)
-                    self.message_user(request, 
-                        f'仓库克隆失败：分支 {repo.branch} 不存在。\n'
-                        f'可用的分支有：\n' + 
-                        '\n'.join(f'- {branch}' for branch in remote_branches) + 
-                        '\n\n修改分支的方法：\n'
-                        '1. 点击仓库名称进入编辑页面\n'
-                        '2. 在"分支"字段中输入正确的分支名称\n'
-                        '3. 点击"保存"按钮\n'
-                        '4. 重新点击"克隆"按钮',
-                        level=messages.ERROR)
-                    return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
-                
-                # 切换到指定分支
-                git_repo.git.checkout(repo.branch)
-                
-                # 更新同步时间
+                # 配置 Git SSH 命令
+                env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no'
+            
+            # 执行克隆命令
+            result = subprocess.run(
+                ['git', 'clone', '-b', repo.branch, clone_url, local_path],
+                env=env,
+                capture_output=True,
+                text=True
+            )
+            
+            if result.returncode == 0:
+                # 更新最后同步时间
                 repo.last_sync_time = timezone.now()
                 repo.save()
-                self.message_user(request, f'仓库 {repo.name} 克隆成功')
-            
-        except Repository.DoesNotExist:
-            self.message_user(request, '仓库不存在', level=messages.ERROR)
-        except git.exc.GitCommandError as e:
-            if 'Permission denied (publickey)' in str(e):
-                self.message_user(request, 
-                    '仓库克隆失败：SSH 密钥认证失败，请检查：\n'
-                    '1. SSH 密钥是否正确配置\n'
-                    '2. 远程仓库地址是否正确\n'
-                    '3. 是否有权限访问该仓库', 
-                    level=messages.ERROR)
-            elif 'Authentication failed' in str(e):
-                self.message_user(request, 
-                    '仓库克隆失败：HTTPS 认证失败，请检查：\n'
-                    '1. 用户名和密码是否正确\n'
-                    '2. 远程仓库地址是否正确\n'
-                    '3. 是否有权限访问该仓库', 
-                    level=messages.ERROR)
+                messages.success(request, f'仓库 {repo.name} 克隆成功')
             else:
-                self.message_user(request, f'仓库克隆失败：{str(e)}', level=messages.ERROR)
+                messages.error(request, f'克隆失败：{result.stderr}')
+            
+            # 清理临时文件
+            if repo.is_ssh_protocol() and config.ssh_key:
+                try:
+                    os.remove(ssh_key_path)
+                except:
+                    pass
+                
+        except Repository.DoesNotExist:
+            messages.error(request, '仓库不存在')
         except Exception as e:
-            self.message_user(request, f'克隆失败：{str(e)}', level=messages.ERROR)
+            messages.error(request, f'克隆失败：{str(e)}')
         
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
 
@@ -760,8 +686,6 @@ class RepositoryAdmin(admin.ModelAdmin):
     def get_actions(self, request):
         """获取批量操作"""
         actions = super().get_actions(request)
-        if 'delete_selected' in actions:
-            del actions['delete_selected']
         return actions
 
     def change_branch(self, request, repo_id):
@@ -828,6 +752,47 @@ class RepositoryAdmin(admin.ModelAdmin):
             self.message_user(request, f'修改分支失败：{str(e)}', level=messages.ERROR)
         
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+
+    def has_add_permission(self, request):
+        """允许添加仓库"""
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        """允许修改仓库"""
+        return True
+
+    def has_delete_permission(self, request, obj=None):
+        """允许删除仓库"""
+        return True
+
+    def has_view_permission(self, request, obj=None):
+        """允许查看仓库"""
+        return True
+
+    def delete_model(self, request, obj):
+        """删除单个仓库"""
+        try:
+            # 删除本地目录
+            if obj.local_path and os.path.exists(obj.local_path):
+                shutil.rmtree(obj.local_path)
+            # 删除数据库记录
+            obj.delete()
+            messages.success(request, f'仓库 {obj.name} 已删除')
+        except Exception as e:
+            messages.error(request, f'删除仓库失败：{str(e)}')
+
+    def delete_queryset(self, request, queryset):
+        """批量删除仓库"""
+        for obj in queryset:
+            try:
+                # 删除本地目录
+                if obj.local_path and os.path.exists(obj.local_path):
+                    shutil.rmtree(obj.local_path)
+                # 删除数据库记录
+                obj.delete()
+                messages.success(request, f'仓库 {obj.name} 已删除')
+            except Exception as e:
+                messages.error(request, f'删除仓库 {obj.name} 失败：{str(e)}')
 
 # 注册其他模型
 @admin.register(Student)

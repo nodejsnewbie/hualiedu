@@ -130,20 +130,19 @@ class Repository(models.Model):
     def get_local_path(self):
         """获取本地仓库路径"""
         if not self.local_path:
-            # 使用仓库名称作为目录名
-            repo_name = self.name
-            # 确保 media/repo 目录存在
-            repo_dir = os.path.join(settings.MEDIA_ROOT, 'repo')
-            os.makedirs(repo_dir, exist_ok=True)
-            # 设置仓库的本地路径
-            self.local_path = os.path.join(repo_dir, repo_name)
-            self.save()  # 保存更新后的路径
+            config = GlobalConfig.objects.first()
+            if config and config.repo_base_dir:
+                # 构造本地路径
+                self.local_path = os.path.join(
+                    os.path.expanduser(config.repo_base_dir),
+                    self.name
+                )
         return self.local_path
 
     def is_cloned(self):
         """检查仓库是否已克隆"""
         local_path = self.get_local_path()
-        return os.path.exists(local_path) and os.path.exists(os.path.join(local_path, '.git'))
+        return bool(local_path and os.path.exists(local_path) and os.path.exists(os.path.join(local_path, '.git')))
 
     def get_clone_url(self):
         """获取克隆 URL"""
