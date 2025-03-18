@@ -58,11 +58,12 @@ class Submission(models.Model):
         unique_together = ['student', 'assignment']
 
 class GlobalConfig(models.Model):
-    """全局配置模型"""
-    https_username = models.CharField(max_length=100, blank=True, null=True, help_text='HTTPS 克隆时使用的用户名')
-    https_password = models.CharField(max_length=100, blank=True, null=True, help_text='HTTPS 克隆时使用的密码')
-    ssh_key = models.TextField(blank=True, null=True, help_text='SSH 克隆时使用的私钥内容')
+    """全局配置"""
+    https_username = models.CharField(max_length=100, blank=True, null=True, help_text='HTTPS 认证用户名')
+    https_password = models.CharField(max_length=100, blank=True, null=True, help_text='HTTPS 认证密码')
+    ssh_key = models.TextField(blank=True, null=True, help_text='SSH 私钥内容')
     ssh_key_file = models.FileField(upload_to='ssh_keys/', null=True, blank=True, help_text='SSH 私钥文件')
+    repo_base_dir = models.CharField(max_length=255, default='~/repo', help_text='仓库克隆的基础目录，默认为 ~/repo')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -83,6 +84,7 @@ class GlobalConfig(models.Model):
                 'https_username': '',
                 'https_password': '',
                 'ssh_key': '',
+                'repo_base_dir': '~/repo'
             }
         )
         return config
@@ -145,6 +147,9 @@ class Repository(models.Model):
 
     def get_clone_url(self):
         """获取克隆 URL"""
+        if not self.url:
+            raise ValueError('仓库 URL 不能为空')
+
         config = GlobalConfig.objects.first()
         if not config:
             return self.url

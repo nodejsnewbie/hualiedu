@@ -145,14 +145,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (form) {
       form.onsubmit = function (e) {
         e.preventDefault();
-        if (confirm('是否要立即克隆所有未克隆的仓库？')) {
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = '_clone_repositories';
-          input.value = '1';
-          this.appendChild(input);
-        }
-        this.submit();
+        // 直接提交表单
+        form.submit();
       };
     }
   }

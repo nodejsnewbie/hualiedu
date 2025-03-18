@@ -4,8 +4,8 @@ import shutil
 import tempfile
 from django.contrib import admin
 from django.utils.html import format_html
-from django.urls import reverse
-from django.http import HttpResponseRedirect
+from django.urls import reverse, path
+from django.http import HttpResponseRedirect, HttpResponseForbidden, JsonResponse
 from django.contrib import messages
 from django.utils import timezone
 from django.shortcuts import render
@@ -66,7 +66,7 @@ class GlobalConfigForm(forms.ModelForm):
     
     class Meta:
         model = GlobalConfig
-        fields = ('https_username', 'https_password', 'ssh_key', 'ssh_key_file')
+        fields = ('https_username', 'https_password', 'ssh_key', 'ssh_key_file', 'repo_base_dir')
         widgets = {
             'https_password': forms.PasswordInput(render_value=True),
             'ssh_key': forms.Textarea(attrs={
@@ -75,6 +75,12 @@ class GlobalConfigForm(forms.ModelForm):
                 'class': 'vLargeTextField',
                 'style': 'display: block !important; width: 100%; height: 200px; font-family: monospace; margin-bottom: 10px;',
                 'placeholder': '如果不上传文件，也可以直接粘贴 SSH 私钥内容到这里（支持 RSA 格式）'
+            }),
+            'repo_base_dir': forms.TextInput(attrs={
+                'class': 'vTextField',
+                'style': 'width: 100%;',
+                'placeholder': '例如：~/repo',
+                'readonly': True
             })
         }
 
@@ -82,36 +88,20 @@ class GlobalConfigForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk and self.instance.ssh_key:
             self.initial['ssh_key'] = self.instance.ssh_key
-            # 确保文本框可见
             self.fields['ssh_key'].widget.attrs['style'] = 'display: block !important; width: 100%; height: 200px; font-family: monospace; margin-bottom: 10px;'
 
     def clean(self):
         """验证表单数据"""
         cleaned_data = super().clean()
         
-        # 验证 HTTPS 认证信息
-        https_username = cleaned_data.get('https_username')
-        https_password = cleaned_data.get('https_password')
-        
-        if bool(https_username) != bool(https_password):
-            raise forms.ValidationError('HTTPS 用户名和密码必须同时提供或同时为空')
-        
-        # 验证 SSH 密钥
+        # 处理 SSH 密钥文件
         ssh_key_file = cleaned_data.get('ssh_key_file')
         if ssh_key_file:
             try:
                 content = ssh_key_file.read().decode('utf-8')
-                # 验证 SSH 密钥格式
-                if not (content.strip().startswith('-----BEGIN') and content.strip().endswith('PRIVATE KEY-----')):
-                    raise forms.ValidationError('无效的 SSH 私钥格式，请确保上传的是有效的 SSH 私钥文件')
-                # 检查密钥类型
-                if 'OPENSSH PRIVATE KEY' not in content and 'RSA PRIVATE KEY' not in content:
-                    raise forms.ValidationError('不支持的 SSH 私钥格式，请确保上传的是 RSA 或 ED25519 格式的私钥文件')
                 cleaned_data['ssh_key'] = content
-            except UnicodeDecodeError:
-                raise forms.ValidationError('无效的文件格式，请确保上传的是文本格式的 SSH 私钥文件')
-            except Exception as e:
-                raise forms.ValidationError(f'读取文件失败：{str(e)}')
+            except Exception:
+                pass
         
         return cleaned_data
 
@@ -122,17 +112,27 @@ class GlobalConfigForm(forms.ModelForm):
             instance.save()
         return instance
 
+    class Media:
+        css = {
+            'all': ('admin/css/ssh_key_input.css',)
+        }
+        js = ('admin/js/ssh_key_input.js', 'admin/js/repo_dir_browser.js',)
+
 @admin.register(GlobalConfig)
 class GlobalConfigAdmin(admin.ModelAdmin):
     """全局配置管理界面"""
     
     form = GlobalConfigForm
-    list_display = ('updated_at', 'has_https_auth', 'has_ssh_key')
+    list_display = ('updated_at', 'has_https_auth', 'has_ssh_key', 'get_repo_base_dir')
     readonly_fields = ('created_at', 'updated_at')
     fieldsets = (
         ('认证信息', {
             'fields': ('https_username', 'https_password', 'ssh_key_file', 'ssh_key'),
             'description': '配置访问 Git 仓库所需的认证信息。可以使用 HTTPS 用户名密码或 SSH 私钥。'
+        }),
+        ('仓库配置', {
+            'fields': ('repo_base_dir',),
+            'description': '配置仓库克隆的基础目录。默认为 ~/repo。'
         }),
         ('系统信息', {
             'fields': ('created_at', 'updated_at'),
@@ -153,6 +153,11 @@ class GlobalConfigAdmin(admin.ModelAdmin):
     has_ssh_key.boolean = True
     has_ssh_key.short_description = 'SSH 密钥'
 
+    def get_repo_base_dir(self, obj):
+        """获取仓库基础目录"""
+        return obj.repo_base_dir
+    get_repo_base_dir.short_description = '仓库目录'
+
     def get_readonly_fields(self, request, obj=None):
         """获取只读字段"""
         if obj:  # 编辑现有对象
@@ -161,86 +166,9 @@ class GlobalConfigAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         """保存模型时的处理"""
-        if not change:  # 新建仓库时
-            # 设置本地路径
-            obj.local_path = obj.get_local_path()
-            
-            try:
-                # 确保 media/repo 目录存在
-                repo_dir = os.path.join(settings.MEDIA_ROOT, 'repo')
-                os.makedirs(repo_dir, exist_ok=True)
-                
-                # 如果目标目录已存在，先删除
-                if os.path.exists(obj.local_path):
-                    import shutil
-                    shutil.rmtree(obj.local_path)
-                
-                # 准备克隆选项
-                clone_kwargs = {
-                    'url': obj.get_clone_url(),
-                    'to_path': obj.local_path,
-                    'branch': obj.branch,
-                }
-                
-                # 获取全局配置
-                config = GlobalConfig.objects.first()
-                
-                # 处理 SSH 密钥
-                if obj.is_ssh_protocol() and config and config.ssh_key:
-                    # 创建临时文件存储 SSH 密钥
-                    with tempfile.NamedTemporaryFile(mode='w', delete=False) as key_file:
-                        # 确保密钥内容格式正确
-                        key_content = config.ssh_key.strip()
-                        if not key_content.startswith('-----BEGIN'):
-                            key_content = '-----BEGIN RSA PRIVATE KEY-----\n' + key_content
-                        if not key_content.endswith('-----END'):
-                            key_content = key_content + '\n-----END RSA PRIVATE KEY-----'
-                        
-                        # 确保密钥内容格式正确
-                        key_content = key_content.replace('\r\n', '\n').replace('\r', '\n')
-                        key_lines = key_content.split('\n')
-                        formatted_key = '\n'.join(line.strip() for line in key_lines if line.strip())
-                        
-                        key_file.write(formatted_key)
-                        key_file.flush()
-                        # 设置正确的权限
-                        os.chmod(key_file.name, 0o600)
-                        
-                        try:
-                            # 配置 SSH 命令
-                            git_ssh_cmd = f'ssh -i {key_file.name} -o StrictHostKeyChecking=no -o IdentitiesOnly=yes'
-                            clone_kwargs['env'] = {'GIT_SSH_COMMAND': git_ssh_cmd}
-                            
-                            # 克隆仓库
-                            git.Repo.clone_from(**clone_kwargs)
-                            # 更新同步时间
-                            obj.last_sync_time = timezone.now()
-                        finally:
-                            # 确保在任何情况下都清理临时文件
-                            try:
-                                os.unlink(key_file.name)
-                            except OSError:
-                                pass
-                else:
-                    # 使用 HTTPS 认证
-                    git.Repo.clone_from(**clone_kwargs)
-                    # 更新同步时间
-                    obj.last_sync_time = timezone.now()
-                
-                messages.success(request, f'仓库 {obj.name} 克隆成功')
-            except git.exc.GitCommandError as e:
-                if 'Permission denied (publickey)' in str(e):
-                    messages.error(request, f'仓库克隆失败：SSH 密钥认证失败，请检查密钥是否正确')
-                elif 'Authentication failed' in str(e):
-                    messages.error(request, f'仓库克隆失败：HTTPS 认证失败，请检查用户名和密码是否正确')
-                else:
-                    messages.error(request, f'仓库克隆失败：{str(e)}')
-                raise
-            except Exception as e:
-                messages.error(request, f'仓库克隆失败：{str(e)}')
-                raise
-        
+        # 直接保存模型
         super().save_model(request, obj, form, change)
+        messages.success(request, '全局配置已保存')
 
     def has_add_permission(self, request):
         """控制是否允许添加新对象"""
@@ -250,16 +178,64 @@ class GlobalConfigAdmin(admin.ModelAdmin):
         """控制是否允许删除对象"""
         return False
 
-    class Media:
-        css = {
-            'all': ('admin/css/ssh_key_input.css',)
-        }
-        js = ('admin/js/ssh_key_input.js',)
+    def get_urls(self):
+        """添加目录浏览 URL"""
+        urls = super().get_urls()
+        custom_urls = [
+            path('browse-directory/', self.admin_site.admin_view(self.browse_directory), name='grading_globalconfig_browse_directory'),
+        ]
+        return custom_urls + urls
+
+    def browse_directory(self, request):
+        """浏览目录"""
+        if not request.user.is_staff:
+            return HttpResponseForbidden('只有管理员可以浏览目录')
+        
+        try:
+            # 获取要浏览的目录
+            dir_path = request.GET.get('dir', '')
+            
+            # 如果是空路径，从用户家目录开始
+            if not dir_path:
+                dir_path = os.path.expanduser('~')
+            
+            # 确保路径是绝对路径
+            if not os.path.isabs(dir_path):
+                dir_path = os.path.abspath(dir_path)
+            
+            # 确保路径存在且是目录
+            if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
+                return JsonResponse({'error': '目录不存在'}, status=400)
+            
+            # 获取目录内容
+            items = []
+            for item in os.listdir(dir_path):
+                # 跳过隐藏目录（以.开头的目录）
+                if item.startswith('.'):
+                    continue
+                    
+                full_path = os.path.join(dir_path, item)
+                if os.path.isdir(full_path):
+                    items.append({
+                        'name': item,
+                        'path': full_path,
+                        'type': 'dir'
+                    })
+            
+            # 按名称排序
+            items.sort(key=lambda x: x['name'].lower())
+            
+            return JsonResponse({
+                'current_path': dir_path,
+                'items': items
+            })
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
 
 class RepositoryForm(forms.ModelForm):
     class Meta:
         model = Repository
-        fields = ['url', 'branch']
+        fields = ['name', 'url', 'branch']
         help_texts = {
             'url': '支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git'
         }
@@ -267,13 +243,11 @@ class RepositoryForm(forms.ModelForm):
     def clean(self):
         cleaned_data = super().clean()
         url = cleaned_data.get('url')
+        name = cleaned_data.get('name')
         
         if url:
-            # 生成仓库名称
-            name = Repository.generate_name_from_url(url)
-            
-            # 检查 URL 是否已存在
-            existing_repo = Repository.objects.filter(url=url).first()
+            # 检查 URL 是否已存在（排除当前实例）
+            existing_repo = Repository.objects.filter(url=url).exclude(pk=self.instance.pk if self.instance else None).first()
             if existing_repo:
                 raise forms.ValidationError(
                     f'该仓库 URL 已存在：\n'
@@ -325,8 +299,17 @@ class RepositoryForm(forms.ModelForm):
                 )
             elif not (config.https_username and config.https_password):
                 raise forms.ValidationError('使用 HTTPS 协议需要配置用户名和密码')
-            
-            cleaned_data['name'] = name
+        
+        if name:
+            # 检查名称是否已存在（排除当前实例）
+            existing_repo = Repository.objects.filter(name=name).exclude(pk=self.instance.pk if self.instance else None).first()
+            if existing_repo:
+                raise forms.ValidationError(
+                    f'该仓库名称已存在：\n'
+                    f'仓库名称：{existing_repo.name}\n'
+                    f'仓库 URL：{existing_repo.url}\n'
+                    f'最后同步：{existing_repo.last_sync_time.strftime("%Y-%m-%d %H:%M:%S") if existing_repo.last_sync_time else "未同步"}'
+                )
         
         return cleaned_data
 
@@ -336,11 +319,11 @@ class RepositoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'url', 'get_branch', 'get_last_sync_time', 'get_sync_status', 'get_action_buttons')
     list_filter = ('branch',)
     search_fields = ('name', 'url')
-    readonly_fields = ('name', 'get_last_sync_time', 'get_sync_status')
+    readonly_fields = ('get_last_sync_time', 'get_sync_status')
     
     fieldsets = (
         ('基本信息', {
-            'fields': ('url', 'branch')
+            'fields': ('name', 'url', 'branch')
         }),
         ('同步状态', {
             'fields': ('get_last_sync_time', 'get_sync_status'),
