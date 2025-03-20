@@ -1,1035 +1,425 @@
+{% extends 'base.html' %}
 {% load static %}
-<!DOCTYPE html>
-<html>
 
-<head>
-  <title>作业评分系统</title>
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/themes/default/style.min.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/jstree.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.9/purify.min.js"></script>
-  <link href="https://cdn.jsdelivr.net/npm/@mdi/font@6.5.95/css/materialdesignicons.min.css" rel="stylesheet">
-  <script src="{% static 'grading/js/grading.js' %}"></script>
-  <style>
-    body {
-      margin: 0;
-      padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      background-color: #f5f5f5;
+{% block title %}评分系统{% endblock %}
+
+{% block content %}
+<div class="grading-container">
+    <!-- 左侧面板 -->
+    <div class="left-panel">
+        <div class="panel-header">
+            <h2>文件列表</h2>
+        </div>
+        <div class="panel-content">
+            <div id="grade-tree"></div>
+        </div>
+    </div>
+
+    <!-- 右侧面板 -->
+    <div class="right-panel">
+        <div class="panel-header">
+            <h2>文件内容</h2>
+            <div class="file-info">
+                <span id="current-file"></span>
+            </div>
+        </div>
+        <div class="panel-content">
+            <div id="docContent" class="doc-content"></div>
+        </div>
+    </div>
+</div>
+
+<!-- 评分按钮面板 -->
+<div class="grade-panel">
+    <div class="grade-buttons" id="grade-buttons">
+        <button class="grade-btn" onclick="gradeSubmission('A')">A</button>
+        <button class="grade-btn" onclick="gradeSubmission('B')">B</button>
+        <button class="grade-btn" onclick="gradeSubmission('C')">C</button>
+        <button class="grade-btn" onclick="gradeSubmission('D')">D</button>
+        <button class="grade-btn" onclick="gradeSubmission('F')">F</button>
+    </div>
+    <div class="grade-actions">
+        <button class="action-btn save-btn" onclick="saveGrade()">保存评分</button>
+        <button class="action-btn next-btn" onclick="nextSubmission()">下一个</button>
+    </div>
+</div>
+
+<!-- 加载提示 -->
+<div id="loading" class="loading-overlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">加载中...</div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .grading-container {
+        display: flex;
+        height: calc(100vh - 60px);
+        background: #f5f5f5;
     }
 
-    .navbar {
-      background-color: #4CAF50;
-      padding: 1rem;
-      color: white;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    .left-panel, .right-panel {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: white;
+        margin: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     }
 
-    .navbar-title {
-      font-size: 1.2rem;
-      font-weight: 500;
+    .panel-header {
+        padding: 15px 20px;
+        border-bottom: 1px solid #eee;
+        background: #f8f9fa;
+        border-radius: 8px 8px 0 0;
     }
 
-    .navbar-links a {
-      color: white;
-      text-decoration: none;
-      padding: 0.5rem 1rem;
-      border-radius: 4px;
-      transition: background-color 0.3s;
+    .panel-header h2 {
+        margin: 0;
+        font-size: 18px;
+        color: #333;
     }
 
-    .navbar-links a:hover {
-      background-color: rgba(255,255,255,0.1);
+    .panel-content {
+        flex: 1;
+        overflow: auto;
+        padding: 20px;
     }
 
-    .navbar-links a i {
-      margin-right: 0.5rem;
-    }
-
-    .container {
-      display: flex;
-      height: calc(100vh - 64px);
-      padding: 1rem;
-      gap: 1rem;
-    }
-
-    .file-list {
-      width: 300px;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 1rem;
-    }
-
-    .content-area {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .doc-content {
-      flex: 1;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 1.5rem;
-      overflow-y: auto;
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    .doc-content.empty {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      color: #666;
-    }
-
-    .doc-content img {
-      max-width: 100%;
-      height: auto;
-      display: block;
-      margin: 10px auto;
-      border-radius: 4px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    }
-
-    .doc-content table {
-      width: 100%;
-      border-collapse: collapse;
-      margin: 1rem 0;
-    }
-
-    .doc-content th,
-    .doc-content td {
-      border: 1px solid #e0e0e0;
-      padding: 0.75rem;
-      text-align: left;
-    }
-
-    .doc-content th {
-      background-color: #f8f9fa;
-      font-weight: 500;
-    }
-
-    .doc-content pre {
-      background-color: #f8f9fa;
-      border-radius: 4px;
-      padding: 1rem;
-      overflow-x: auto;
-      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-      font-size: 13px;
-      line-height: 1.5;
-      margin: 1rem 0;
-    }
-
-    .doc-content code {
-      background-color: #f8f9fa;
-      padding: 0.2em 0.4em;
-      border-radius: 3px;
-      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-      font-size: 85%;
-    }
-
-    .doc-content h1,
-    .doc-content h2,
-    .doc-content h3,
-    .doc-content h4 {
-      margin-top: 1.5rem;
-      margin-bottom: 1rem;
-      font-weight: 500;
-      line-height: 1.25;
-      color: #333;
-    }
-
-    .doc-content h1 { font-size: 2em; }
-    .doc-content h2 { font-size: 1.5em; }
-    .doc-content h3 { font-size: 1.25em; }
-    .doc-content h4 { font-size: 1em; }
-
-    .doc-content p {
-      margin: 1rem 0;
-    }
-
-    .doc-content ul,
-    .doc-content ol {
-      margin: 1rem 0;
-      padding-left: 2rem;
-    }
-
-    .doc-content li {
-      margin: 0.5rem 0;
-    }
-
-    .doc-content blockquote {
-      margin: 1rem 0;
-      padding: 0.5rem 1rem;
-      border-left: 4px solid #e0e0e0;
-      background-color: #f8f9fa;
-      color: #666;
-    }
-
-    .loading-message,
-    .error-message {
-      text-align: center;
-      padding: 2rem;
-      color: #666;
-    }
-
-    .error-message {
-      color: #dc3545;
-    }
-
-    #grade-panel {
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 1.5rem;
-    }
-
-    #grade-panel h4 {
-      margin-top: 0;
-      color: #333;
-      font-weight: 500;
-    }
-
-    #grade-buttons {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-      margin: 1rem 0;
-    }
-
-    #grade-buttons button {
-      padding: 0.5rem 1rem;
-      border: none;
-      border-radius: 4px;
-      background-color: #f0f0f0;
-      color: #333;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-
-    #grade-buttons button:hover {
-      background-color: #e0e0e0;
-    }
-
-    #grade-buttons button.selected {
-      background-color: #4CAF50;
-      color: white;
-    }
-
-    #recommendation {
-      margin: 1rem 0;
-      padding: 0.5rem;
-      background-color: #f8f9fa;
-      border-radius: 4px;
-      color: #666;
-    }
-
-    .action-buttons {
-      display: flex;
-      gap: 0.5rem;
-      margin-top: 1rem;
-    }
-
-    .action-button {
-      padding: 0.5rem 1rem;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: all 0.3s;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .primary-button {
-      background-color: #4CAF50;
-      color: white;
-    }
-
-    .primary-button:hover {
-      background-color: #45a049;
-    }
-
-    .secondary-button {
-      background-color: #f0f0f0;
-      color: #333;
-    }
-
-    .secondary-button:hover {
-      background-color: #e0e0e0;
-    }
-
-    .container {
-      display: flex;
-      height: 100vh;
-    }
-
-    .file-list {
-      width: 300px;
-      border-right: 1px solid #ccc;
-      padding: 20px;
-    }
-
-    .content-area {
-      flex: 1;
-      padding: 20px;
+    .file-info {
+        margin-top: 5px;
+        font-size: 14px;
+        color: #666;
     }
 
     .doc-content {
-      flex: 1;
-      margin-bottom: 20px;
-      border: 1px solid #ccc;
-      padding: 15px;
-      overflow-y: auto;
-      background-color: #fff;
-      min-height: 200px;
+        background: white;
+        padding: 20px;
+        border-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        min-height: 200px;
     }
 
-    .doc-content img {
-      max-width: 100%;
-      height: auto;
-      display: block;
-      margin: 10px auto;
+    .grade-panel {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: white;
+        padding: 15px 20px;
+        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 
-    .doc-content table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 10px 0;
+    .grade-buttons {
+        display: flex;
+        gap: 10px;
     }
 
-    .doc-content th, .doc-content td {
-      border: 1px solid #ddd;
-      padding: 8px;
-      text-align: left;
+    .grade-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        background: #f0f0f0;
+        cursor: pointer;
+        font-size: 16px;
+        transition: all 0.2s;
     }
 
-    .doc-content th {
-      background-color: #f5f5f5;
+    .grade-btn:hover {
+        background: #e0e0e0;
     }
 
-    .doc-content h1, .doc-content h2, .doc-content h3, .doc-content h4 {
-      margin-top: 20px;
-      margin-bottom: 10px;
-      color: #333;
+    .grade-btn.selected {
+        background: #007bff;
+        color: white;
     }
 
-    .doc-content p {
-      margin: 10px 0;
-      line-height: 1.6;
+    .grade-actions {
+        display: flex;
+        gap: 10px;
     }
 
-    .doc-content pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      background-color: #f5f5f5;
-      padding: 10px;
-      border-radius: 4px;
-      font-family: monospace;
+    .action-btn {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.2s;
     }
 
-    #grade-buttons button {
-      margin: 5px;
-      padding: 10px;
+    .save-btn {
+        background: #28a745;
+        color: white;
     }
 
-    .jstree-proton {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
+    .save-btn:hover {
+        background: #218838;
     }
 
-    #grade-tree {
-      overflow: auto;
-      height: calc(100vh - 200px);
-      padding: 10px;
-      background: white;
-      border-radius: 4px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    .next-btn {
+        background: #6c757d;
+        color: white;
     }
 
-    .jstree-default .jstree-themeicon-custom {
-      background-size: contain !important;
+    .next-btn:hover {
+        background: #5a6268;
     }
 
-    .file-browser {
-      width: 300px;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      padding: 1rem;
-      display: flex;
-      flex-direction: column;
+    .loading-overlay {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(255,255,255,0.8);
+        z-index: 1000;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
     }
 
-    .file-browser-header {
-      margin-bottom: 1rem;
-      padding-bottom: 0.5rem;
-      border-bottom: 1px solid #eee;
-      font-weight: 500;
-      color: #333;
-    }
-
-    /* 添加对话框样式 */
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 1000;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(0,0,0,0.4);
-    }
-
-    .modal-content {
-      background-color: #fefefe;
-      margin: 15% auto;
-      padding: 20px;
-      border: 1px solid #888;
-      width: 80%;
-      max-width: 500px;
-      border-radius: 5px;
-    }
-
-    .modal-content h3 {
-      margin-top: 0;
-    }
-
-    .modal-content select, .modal-content input {
-      width: 100%;
-      padding: 8px;
-      margin: 10px 0;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-    }
-
-    .modal-content button {
-      margin: 10px 5px;
-      padding: 8px 15px;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-
-    .modal-content button.primary {
-      background-color: #4CAF50;
-      color: white;
-    }
-
-    .modal-content button.secondary {
-      background-color: #f1f1f1;
-    }
-
-    /* 添加新的样式 */
-    .modal-content select:disabled {
-      background-color: #f5f5f5;
-      cursor: not-allowed;
-    }
-
-    .modal-content .input-group {
-      margin-bottom: 15px;
-    }
-
-    .modal-content .input-group label {
-      display: block;
-      margin-bottom: 5px;
-      font-weight: bold;
-      color: #333;
-    }
-
-    .modal-content .input-container {
-      position: relative;
-    }
-
-    .modal-content .hint {
-      font-size: 12px;
-      color: #666;
-      margin-top: 4px;
-    }
-
-    .modal-content .error {
-      color: #dc3545;
-      font-size: 12px;
-      margin-top: 4px;
-      display: none;
-    }
-
-    .modal-content button {
-      transition: all 0.3s ease;
-    }
-
-    .modal-content button:disabled {
-      background-color: #cccccc;
-      cursor: not-allowed;
-    }
-
-    .modal-content button.primary:hover:not(:disabled) {
-      background-color: #45a049;
-    }
-
-    .modal-content button.secondary:hover:not(:disabled) {
-      background-color: #e2e2e2;
-    }
-
-    /* 加载动画 */
     .loading-spinner {
-      display: inline-block;
-      width: 20px;
-      height: 20px;
-      border: 3px solid #f3f3f3;
-      border-top: 3px solid #3498db;
-      border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-right: 10px;
-      vertical-align: middle;
+        width: 40px;
+        height: 40px;
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #3498db;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-bottom: 10px;
+    }
+
+    .loading-text {
+        color: #666;
+        font-size: 16px;
     }
 
     @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
     }
 
-    /* 添加到现有的 style 标签中 */
-    .file-structure {
-      font-family: monospace;
-      font-size: 14px;
-      line-height: 1.5;
-      margin: 10px 0;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      padding: 10px;
+    /* jstree 样式优化 */
+    .jstree-default .jstree-anchor {
+        padding: 4px 8px;
+        border-radius: 4px;
     }
-    
-    .file-structure div {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+
+    .jstree-default .jstree-anchor:hover {
+        background: #f0f0f0;
     }
-    
-    .file-structure div:hover {
-      background-color: #f5f5f5;
+
+    .jstree-default .jstree-clicked {
+        background: #e3f2fd;
     }
-  </style>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.15/themes/default/style.min.css">
-</head>
 
-<body>
-  {% csrf_token %}
-  <div id="loading" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(255,255,255,0.9); padding: 20px; border-radius: 5px; box-shadow: 0 0 10px rgba(0,0,0,0.1); z-index: 1000;">加载中...</div>
-  
-  <div class="container-fluid">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="#">作业评分系统</a>
-            <div>
-                <button onclick="handleDirectoryUpload()" class="btn btn-outline-light me-2">
-                    <i class="mdi mdi-upload"></i> 上传目录
-                </button>
-                <button onclick="createNewDirectory()" class="btn btn-outline-light">
-                    <i class="mdi mdi-folder-plus"></i> 新建目录
-                </button>
-                <a href="/" class="btn btn-outline-light ms-2">返回首页</a>
-            </div>
-        </div>
-    </nav>
+    .jstree-default .jstree-icon {
+        color: #666;
+    }
 
-    <div class="row">
-        <!-- 左侧面板 -->
-        <div class="col-md-3">
-            <div class="card mb-4">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">作业目录</h5>
-                    <div>
-                        <button onclick="handleDirectoryUpload()" class="btn btn-sm btn-outline-primary">
-                            <i class="mdi mdi-upload"></i>
-                        </button>
-                        <button onclick="createNewDirectory()" class="btn btn-sm btn-outline-primary ms-1">
-                            <i class="mdi mdi-folder-plus"></i>
-                        </button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="grade-tree"></div>
-                </div>
-            </div>
-        </div>
+    .jstree-default .jstree-file {
+        background: none;
+    }
 
-        <!-- 右侧面板 -->
-        <div class="col-md-9">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h5 class="card-title mb-0">作业内容</h5>
-                    <div class="grade-buttons" id="grade-buttons">
-                        <button class="btn btn-success btn-sm" data-grade="A">A</button>
-                        <button class="btn btn-primary btn-sm" data-grade="B">B</button>
-                        <button class="btn btn-warning btn-sm" data-grade="C">C</button>
-                        <button class="btn btn-danger btn-sm" data-grade="D">D</button>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <div id="loading" style="display: none;">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">加载中...</span>
-                        </div>
-                    </div>
-                    <div id="docContent" class="doc-content empty">
-                        <i class="mdi mdi-file-document-outline" style="font-size: 48px; margin-bottom: 1rem;"></i>
-                        <p>请从左侧选择要查看的文件</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-  </div>
+    .jstree-default .jstree-folder {
+        background: none;
+    }
+</style>
+{% endblock %}
 
-  <script>
+{% block extra_js %}
+<script>
     let currentFile = '';
     let selectedGrade = '';
+    let currentSubmission = null;
 
-    function getCookie(name) {
-      let cookieValue = null;
-      if (document.cookie && document.cookie !== '') {
-        const cookies = document.cookie.split(';');
-        for (let i = 0; i < cookies.length; i++) {
-          const cookie = cookies[i].trim();
-          if (cookie.substring(0, name.length + 1) === (name + '=')) {
-            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-            break;
-          }
-        }
-      }
-      return cookieValue;
-    }
+    function initTree() {
+        const tree = document.getElementById('grade-tree');
+        if (!tree) return;
 
-    function getCSRFToken() {
-      const tokenElement = document.querySelector('[name=csrfmiddlewaretoken]');
-      if (tokenElement) {
-        return tokenElement.value;
-      }
-      return getCookie('csrftoken');
-    }
+        $(tree).jstree({
+            'core': {
+                'data': function (node, cb) {
+                    const token = getCSRFToken();
+                    if (!token) {
+                        cb.call(this, []);
+                        return;
+                    }
+                    
+                    // 如果是根节点，使用仓库基础目录
+                    const path = node.id === '#' ? '' : node.id;
+                    
+                    fetch('/grading/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRFToken': token
+                        },
+                        body: `action=get_directory_tree&file_path=${encodeURIComponent(path)}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'success') {
+                            // 处理返回的数据，确保正确显示文件和目录
+                            const children = data.children.map(item => ({
+                                id: item.path,
+                                text: item.name,
+                                type: item.type,
+                                children: item.children || false
+                            }));
+                            cb.call(this, children);
+                        } else {
+                            console.error('Failed to load directory tree:', data.message);
+                            cb.call(this, []);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Failed to load directory tree:', error);
+                        cb.call(this, []);
+                    });
+                },
+                'check_callback': true,
+                'themes': {
+                    'responsive': true,
+                    'dots': true,
+                    'icons': true
+                }
+            },
+            'types': {
+                'root': {
+                    'icon': 'jstree-folder'
+                },
+                'folder': {
+                    'icon': 'jstree-folder'
+                },
+                'file': {
+                    'icon': 'jstree-file'
+                }
+            },
+            'plugins': ['types', 'wholerow'],
+            'state': {
+                'key': 'grading_tree'
+            }
+        });
 
-    function setDirectory() {
-      const path = document.getElementById('dirPath').value;
-      fetch('/grading/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRFToken': getCSRFToken() },
-        body: `file_path=${encodeURIComponent(path)}&action=get_files`
-      })
-        .then(r => r.json())
-        .then(data => {
-          const list = data.files.map(f => `<div class="file-item" onclick="loadFile('${f}')">${f}</div>`);
-          document.getElementById('fileList').innerHTML = list.join('');
+        // 绑定节点选择事件
+        $(tree).on('select_node.jstree', function (e, data) {
+            if (data.node.type === 'file') {
+                loadFile(data.node.id);
+            }
         });
     }
 
     function loadFile(filePath) {
-      if (!filePath) return;
-      
-      currentFile = filePath;
-      $('#loading').show();
-      document.getElementById('docContent').innerHTML = '<div class="loading-message">加载中...</div>';
-      
-      fetch('/grading/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-CSRFToken': getCSRFToken()
-        },
-        body: `file_path=${encodeURIComponent(filePath)}&action=get_content`
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.status === 'success' && data.content) {
-          showContent(data.content);
-          selectedGrade = '';
-          document.querySelectorAll('#grade-buttons button').forEach(btn => {
-            btn.classList.remove('selected');
-          });
-        } else {
-          throw new Error(data.message || '加载失败');
-        }
-      })
-      .catch(error => {
-        console.error('Error loading document:', error);
-        document.getElementById('docContent').innerHTML = `<div class="error-message">加载失败: ${error.message}</div>`;
-      })
-      .finally(() => {
-        $('#loading').hide();
-      });
-    }
-
-    function selectGrade(grade) {
-      selectedGrade = grade;
-      document.querySelectorAll('#grade-buttons button').forEach(btn =>
-        btn.style.backgroundColor = btn.textContent.includes(grade) ? '#4CAF50' : '');
-    }
-
-    function submitGrade() {
-      if (!selectedGrade) {
-        alert('请选择评分等级');
-        return;
-      }
-      if (!currentFile) {
-        alert('请先选择要评分的文件');
-        return;
-      }
-      
-      const path = document.getElementById('dirPath').value;
-      fetch('/grading/', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-CSRFToken': getCSRFToken()
-        },
-        body: `file_path=${encodeURIComponent(path)}&action=save_grade&filename=${encodeURIComponent(currentFile)}&grade=${encodeURIComponent(selectedGrade)}`
-      })
-      .then(response => response.json())
-      .then(data => {
-        if (data.status === 'success') {
-          alert('评分已保存');
-          loadFile(currentFile);
-        } else {
-          alert('保存失败：' + (data.message || '未知错误'));
-        }
-      })
-      .catch(error => {
-        alert('保存失败：' + error.message);
-      });
+        if (!filePath) return;
+        
+        currentFile = filePath;
+        document.getElementById('current-file').textContent = filePath;
+        $('#loading').show();
+        document.getElementById('docContent').innerHTML = '<div class="loading-message">加载中...</div>';
+        
+        fetch('/grading/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': getCSRFToken()
+            },
+            body: `action=get_content&file_path=${encodeURIComponent(filePath)}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success' && data.content) {
+                showContent(data.content);
+                selectedGrade = '';
+                document.querySelectorAll('#grade-buttons button').forEach(btn => {
+                    btn.classList.remove('selected');
+                });
+            } else {
+                throw new Error(data.message || '加载失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading document:', error);
+            document.getElementById('docContent').innerHTML = `<div class="error-message">加载失败: ${error.message}</div>`;
+        })
+        .finally(() => {
+            $('#loading').hide();
+        });
     }
 
     function showContent(content) {
-      const docContent = document.getElementById('docContent');
-      
-      if (!content) {
-        docContent.className = 'doc-content empty';
-        docContent.innerHTML = `
-          <div style="text-align: center; color: #666; margin-top: 2rem;">
-            <i class="mdi mdi-file-document-outline" style="font-size: 3rem;"></i>
-            <p>请从左侧选择要评阅的文件</p>
-          </div>
-        `;
-        return;
-      }
-
-      try {
-        docContent.className = 'doc-content';
-        
-        // 检测内容类型
-        let cleanHtml = '';
-        if (content.startsWith('<')) {
-          // HTML 内容（如 Word 文档）
-          cleanHtml = DOMPurify.sanitize(content, {
-            ADD_TAGS: ['style', 'img'],
-            ADD_ATTR: ['src', 'style', 'class'],
-            FORBID_TAGS: ['script'],
-            FORBID_ATTR: ['onerror', 'onload']
-          });
-        } else {
-          // 纯文本内容
-          cleanHtml = `<pre>${DOMPurify.sanitize(content)}</pre>`;
-        }
-        
-        docContent.innerHTML = cleanHtml;
-
-        // 处理图片
-        docContent.querySelectorAll('img').forEach(img => {
-          img.style.maxWidth = '100%';
-          img.style.height = 'auto';
-          img.style.display = 'block';
-          img.style.margin = '10px auto';
-          
-          // 添加加载错误处理
-          img.onerror = function() {
-            this.style.display = 'none';
-            const errorMsg = document.createElement('div');
-            errorMsg.className = 'error-message';
-            errorMsg.textContent = '图片加载失败';
-            this.parentNode.insertBefore(errorMsg, this);
-          };
-        });
-
-        // 处理表格
-        docContent.querySelectorAll('table').forEach(table => {
-          if (!table.classList.contains('styled')) {
-            table.classList.add('styled');
-            table.style.width = '100%';
-            table.style.borderCollapse = 'collapse';
-            table.style.marginBottom = '1rem';
-          }
-        });
-
-      } catch (error) {
-        console.error('Error displaying content:', error);
-        docContent.className = 'doc-content';
-        docContent.innerHTML = `
-          <div class="error-message">
-            <i class="mdi mdi-alert-circle-outline" style="font-size: 2rem;"></i>
-            <p>显示内容失败: ${error.message}</p>
-          </div>
-        `;
-      }
+        const docContent = document.getElementById('docContent');
+        docContent.innerHTML = content;
     }
 
-    function handleDirectoryUpload() {
-      console.log('开始处理目录上传...');
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.webkitdirectory = true;
-      input.directory = true;
-      input.multiple = true;
-      
-      input.addEventListener('change', function(e) {
-        console.log('文件选择变更:', e.target.files);
-        const files = Array.from(e.target.files);
-        if (files.length === 0) {
-          alert('请选择要上传的文件');
-          return;
-        }
-        
-        // 获取当前选中的节点作为上传目标
-        const tree = $('#grade-tree').jstree(true);
-        const selectedNodes = tree.get_selected(true);
-        const targetPath = selectedNodes.length > 0 ? selectedNodes[0].id : '';
-        
-        console.log('上传目标路径:', targetPath);
-        uploadFiles(files, targetPath);
-      });
-      
-      console.log('触发文件选择对话框');
-      input.click();
-    }
-
-    function uploadFiles(files, targetPath) {
-      console.log('开始上传文件:', files.length, '个文件');
-      const formData = new FormData();
-      
-      files.forEach(file => {
-        console.log('添加文件:', file.webkitRelativePath);
-        formData.append('files[]', file);
-        formData.append('file_paths[]', file.webkitRelativePath);
-      });
-
-      formData.append('action', 'upload_directory');
-      formData.append('target_path', targetPath);
-
-      $('#loading').show();
-      console.log('发送上传请求...');
-
-      fetch('/grading/', {
-        method: 'POST',
-        headers: {
-          'X-CSRFToken': getCSRFToken()
-        },
-        body: formData
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('上传响应:', data);
-        if (data.status === 'success') {
-          alert('上传成功：' + data.message);
-          $('#grade-tree').jstree(true).refresh();
-        } else {
-          throw new Error(data.message || '上传失败');
-        }
-      })
-      .catch(error => {
-        console.error('上传错误:', error);
-        alert('上传失败：' + error.message);
-      })
-      .finally(() => {
-        $('#loading').hide();
-      });
-    }
-
-    // 统一文档加载事件
-    document.addEventListener('DOMContentLoaded', function() {
-      initTree();
-      
-      // 绑定评分按钮事件
-      document.querySelectorAll('#grade-buttons button').forEach(button => {
-        button.addEventListener('click', function() {
-          const grade = this.getAttribute('data-grade');
-          selectGrade(grade);
+    function gradeSubmission(grade) {
+        selectedGrade = grade;
+        document.querySelectorAll('#grade-buttons button').forEach(btn => {
+            btn.classList.remove('selected');
         });
-      });
-      
-      // 绑定其他事件监听器
-      const tree = document.getElementById('grade-tree');
-      if (tree) {
-        $(tree).on('select_node.jstree', function (e, data) {
-          if (data.node.type === 'file') {
-            loadFile(data.node.id);
-          }
-        });
-      }
-    });
-
-    // 修改 initTree 函数
-    function initTree() {
-      const tree = document.getElementById('grade-tree');
-      if (!tree) return;
-
-      $(tree).jstree({
-        'core': {
-          'data': function (node, cb) {
-            const token = getCSRFToken();
-            if (!token) {
-              cb.call(this, []);
-              return;
-            }
-            
-            fetch('/grading/', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': token
-              },
-              body: `action=get_directory_tree&file_path=${encodeURIComponent(node.id)}`
-            })
-            .then(response => response.json())
-            .then(data => {
-              if (data.status === 'success') {
-                cb.call(this, data.children || []);
-              } else {
-                console.error('Failed to load directory tree:', data.message);
-                cb.call(this, []);
-              }
-            })
-            .catch(error => {
-              console.error('Failed to load directory tree:', error);
-              cb.call(this, []);
-            });
-          },
-          'check_callback': true,
-          'themes': {
-            'responsive': true,
-            'dots': true,
-            'icons': true
-          }
-        },
-        'types': {
-          'root': {
-            'icon': 'jstree-folder'
-          },
-          'folder': {
-            'icon': 'jstree-folder'
-          },
-          'file': {
-            'icon': 'jstree-file'
-          }
-        },
-        'plugins': ['types', 'wholerow']
-      });
+        event.target.classList.add('selected');
     }
 
-    function createNewDirectory() {
-      // 创建一个隐藏的文件输入元素
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.webkitdirectory = true;
-      input.style.display = 'none';
-      document.body.appendChild(input);
-
-      // 监听文件选择事件
-      input.addEventListener('change', async (e) => {
-        if (e.target.files.length === 0) {
-          alert('请选择一个 Git 仓库目录');
-          return;
+    function saveGrade() {
+        if (!selectedGrade) {
+            alert('请先选择评分等级');
+            return;
         }
 
-        const firstFile = e.target.files[0];
-        const relativePath = firstFile.webkitRelativePath || firstFile.relativePath || firstFile.mozRelativePath || '';
-        
-        if (!relativePath) {
-          alert('无法获取目录路径，请使用支持目录选择的浏览器');
-          return;
-        }
+        const token = getCSRFToken();
+        if (!token) return;
 
-        // 获取第一级目录名称
-        const pathParts = relativePath.split('/');
-        const repoName = pathParts[0];
-        
-        // 尝试获取完整路径
-        let sourcePath;
-        try {
-          if (firstFile.path) {
-            // 如果浏览器支持完整路径
-            sourcePath = firstFile.path.split(repoName)[0] + repoName;
-          } else {
-            // 如果浏览器不支持完整路径，使用相对路径
-            const fullPath = Array.from(e.target.files)
-              .map(f => f.webkitRelativePath)
-              .find(path => path.split('/').length === 1);
-              
-            if (!fullPath) {
-              throw new Error('无法确定仓库路径');
-            }
-            sourcePath = fullPath;
-          }
-        } catch (error) {
-          console.error('获取路径失败:', error);
-          alert('无法获取仓库路径，请重试');
-          document.body.removeChild(input);
-          return;
-        }
-
-        console.log('选择的仓库目录:', repoName);
-        console.log('源仓库路径:', sourcePath);
-
-        // 显示加载提示
-        document.getElementById('loading').style.display = 'block';
-        document.getElementById('loading').innerHTML = '正在克隆仓库，请稍候...';
-
-        try {
-          const response = await fetch('/grading/create_directory/', {
+        fetch('/grading/', {
             method: 'POST',
             headers: {
-              'Content-Type': 'application/json',
-              'X-CSRFToken': getCookie('csrftoken')
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRFToken': token
             },
-            body: JSON.stringify({
-              repo_name: repoName,
-              source_path: sourcePath
-            })
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-          }
-
-          const data = await response.json();
-          console.log('服务器响应:', data);
-
-          if (data.status === 'success') {
-            alert('仓库克隆成功：' + data.repo_name);
-            // 刷新目录树
-            $('#grade-tree').jstree(true).refresh();
-          } else {
-            alert('克隆失败：' + data.message);
-          }
-        } catch (error) {
-          console.error('克隆失败:', error);
-          alert('克隆失败：' + (error.message || '请检查控制台日志'));
-        } finally {
-          document.getElementById('loading').innerHTML = '加载中...';
-          document.getElementById('loading').style.display = 'none';
-          // 移除文件输入元素
-          document.body.removeChild(input);
-        }
-      });
-
-      // 触发文件选择对话框
-      input.click();
+            body: `action=save_grade&grade=${selectedGrade}&file_path=${encodeURIComponent(currentFile)}`
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert('评分保存成功');
+            } else {
+                throw new Error(data.message || '保存失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error saving grade:', error);
+            alert('保存评分失败: ' + error.message);
+        });
     }
-  </script>
-</body>
 
-</html>
+    function nextSubmission() {
+        // 实现下一个提交的逻辑
+    }
+
+    function getCSRFToken() {
+        const name = 'csrftoken';
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // 页面加载完成后初始化
+    $(document).ready(function() {
+        initTree();
+    });
+</script>
+{% endblock %}

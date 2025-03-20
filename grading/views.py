@@ -16,6 +16,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .utils import FileHandler, DirectoryHandler, GradeHandler, GitHandler
 from .config import WORD_STYLE_MAP, DIRECTORY_STRUCTURE
 from django.views.decorators.http import require_http_methods
+from .models import GlobalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -135,85 +136,61 @@ def grading_page(request):
         elif action == 'get_directory_tree':
             try:
                 file_path = request.POST.get('file_path', '')
-                logger.info(f'获取目录树请求: {file_path}')
                 
-                # 处理根节点请求
-                if file_path == '#' or not file_path:
+                # 从全局配置获取仓库基础目录
+                config = GlobalConfig.objects.first()
+                if not config or not config.repo_base_dir:
                     return JsonResponse({
-                        'status': 'success',
-                        'children': [{
-                            'id': 'media/grades',
-                            'text': '作业目录',
-                            'type': 'folder',
-                            'children': True,
-                            'state': {
-                                'opened': True
-                            }
-                        }]
+                        'status': 'error',
+                        'message': '未配置仓库基础目录'
                     })
                 
-                # 构建完整的文件路径
-                full_path = os.path.join(settings.BASE_DIR, file_path)
-                logger.info(f'完整路径: {full_path}')
+                base_dir = config.repo_base_dir
                 
-                # 检查路径安全性
+                # 如果是根路径，使用基础目录
+                if not file_path:
+                    full_path = base_dir
+                else:
+                    full_path = os.path.join(base_dir, file_path)
+                
+                # 确保路径在基础目录内
+                if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+                    return JsonResponse({'status': 'error', 'message': 'Invalid path'})
+                
                 if not os.path.exists(full_path):
-                    logger.error(f'目录不存在: {full_path}')
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '目录不存在'
-                    })
+                    return JsonResponse({'status': 'error', 'message': 'Path does not exist'})
                 
-                if not os.path.isdir(full_path):
-                    logger.error(f'不是有效的目录: {full_path}')
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '不是有效的目录'
-                    })
-                
-                grades_dir = os.path.join(settings.BASE_DIR, 'media', 'grades')
-                if not os.path.commonpath([full_path, grades_dir]) == grades_dir:
-                    logger.error(f'无权访问目录: {full_path}')
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '无权访问该目录'
-                    })
-                
-                # 获取目录结构
-                try:
-                    items = []
-                    for item in sorted(os.listdir(full_path)):
-                        item_path = os.path.join(full_path, item)
-                        rel_path = os.path.relpath(item_path, settings.BASE_DIR)
-                        is_dir = os.path.isdir(item_path)
-                        
-                        node = {
-                            'id': rel_path,
-                            'text': item,
-                            'type': 'folder' if is_dir else 'file',
-                            'children': is_dir,
-                            'icon': 'jstree-folder' if is_dir else 'jstree-file'
-                        }
-                        items.append(node)
+                # 获取目录内容
+                items = []
+                for item in os.listdir(full_path):
+                    item_path = os.path.join(full_path, item)
+                    relative_path = os.path.relpath(item_path, base_dir)
                     
-                    logger.info(f'成功获取目录结构，共 {len(items)} 个项目')
-                    return JsonResponse({
-                        'status': 'success',
-                        'children': items
-                    })
-                except Exception as e:
-                    logger.error(f'获取目录结构失败: {str(e)}')
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': f'获取目录结构失败: {str(e)}'
-                    })
+                    if os.path.isdir(item_path):
+                        items.append({
+                            'path': relative_path,
+                            'name': item,
+                            'type': 'folder',
+                            'children': True  # 表示这是一个目录，可能有子项
+                        })
+                    else:
+                        items.append({
+                            'path': relative_path,
+                            'name': item,
+                            'type': 'file',
+                            'children': False
+                        })
+                
+                # 按类型和名称排序：目录在前，文件在后
+                items.sort(key=lambda x: (x['type'] != 'folder', x['name'].lower()))
+                
+                return JsonResponse({
+                    'status': 'success',
+                    'children': items
+                })
                 
             except Exception as e:
-                logger.error(f'获取目录树失败: {str(e)}\n{traceback.format_exc()}')
-                return JsonResponse({
-                    'status': 'error',
-                    'message': str(e)
-                })
+                return JsonResponse({'status': 'error', 'message': str(e)})
         
         # 处理获取内容请求
         elif action == 'get_content':
@@ -225,39 +202,38 @@ def grading_page(request):
                         'message': '未提供文件路径'
                     })
 
-                # 确保文件路径在 media/grades 目录下
-                if 'media/grades' not in file_path:
+                # 从全局配置获取仓库基础目录
+                config = GlobalConfig.objects.first()
+                if not config or not config.repo_base_dir:
                     return JsonResponse({
                         'status': 'error',
-                        'message': '只能查看作业目录下的文件'
+                        'message': '未配置仓库基础目录'
                     })
                 
-                # 构建完整的文件路径
-                full_path = os.path.join(settings.BASE_DIR, file_path.lstrip('/'))
+                base_dir = config.repo_base_dir
+                full_path = os.path.join(base_dir, file_path)
                 
-                # 规范化路径并检查安全性
-                normalized_path = os.path.normpath(full_path)
-                grades_dir = os.path.join(settings.BASE_DIR, 'media', 'grades')
-                if not normalized_path.startswith(grades_dir):
+                # 确保路径在基础目录内
+                if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
                     return JsonResponse({
                         'status': 'error',
                         'message': '无权访问该文件'
                     })
 
-                if not os.path.exists(normalized_path):
+                if not os.path.exists(full_path):
                     return JsonResponse({
                         'status': 'error',
                         'message': '文件不存在'
                     })
 
-                if not os.path.isfile(normalized_path):
+                if not os.path.isfile(full_path):
                     return JsonResponse({
                         'status': 'error',
                         'message': '不是有效的文件'
                     })
                 
                 # 检查文件类型
-                mime_type = FileHandler.get_mime_type(normalized_path)
+                mime_type = FileHandler.get_mime_type(full_path)
                 if not mime_type:
                     return JsonResponse({
                         'status': 'error',
@@ -268,7 +244,7 @@ def grading_page(request):
                 
                 # 处理 Word 文档
                 if mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-                    content = FileHandler.handle_docx(normalized_path)
+                    content = FileHandler.handle_docx(full_path)
                     if not content:
                         return JsonResponse({
                             'status': 'error',
@@ -276,7 +252,7 @@ def grading_page(request):
                         })
                 # 处理文本文件
                 elif mime_type.startswith('text/'):
-                    content = FileHandler.read_text_file(normalized_path)
+                    content = FileHandler.read_text_file(full_path)
                     if not content:
                         return JsonResponse({
                             'status': 'error',
