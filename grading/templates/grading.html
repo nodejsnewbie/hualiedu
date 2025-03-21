@@ -6,7 +6,7 @@
 {% block content %}
 <div class="grading-container">
     <!-- 左侧面板 -->
-    <div class="left-panel">
+    <div class="left-panel" id="leftPanel">
         <div class="panel-header">
             <h2>文件列表</h2>
         </div>
@@ -15,8 +15,11 @@
         </div>
     </div>
 
+    <!-- 分隔条 -->
+    <div class="resizer" id="resizer"></div>
+
     <!-- 右侧面板 -->
-    <div class="right-panel">
+    <div class="right-panel" id="rightPanel">
         <div class="panel-header">
             <h2>文件内容</h2>
             <div class="file-info">
@@ -57,9 +60,20 @@
         display: flex;
         height: calc(100vh - 60px);
         background: #f5f5f5;
+        position: relative;
     }
 
-    .left-panel, .right-panel {
+    .left-panel {
+        width: 300px;
+        display: flex;
+        flex-direction: column;
+        background: white;
+        margin: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .right-panel {
         flex: 1;
         display: flex;
         flex-direction: column;
@@ -67,6 +81,20 @@
         margin: 10px;
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        min-width: 400px;
+    }
+
+    .resizer {
+        width: 6px;
+        background: #f0f0f0;
+        cursor: col-resize;
+        margin: 10px 0;
+        border-radius: 3px;
+        transition: background 0.2s;
+    }
+
+    .resizer:hover, .resizer.resizing {
+        background: #007bff;
     }
 
     .panel-header {
@@ -86,6 +114,7 @@
         flex: 1;
         overflow: auto;
         padding: 20px;
+        position: relative;
     }
 
     .file-info {
@@ -100,6 +129,65 @@
         border-radius: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         min-height: 200px;
+        height: 100%;
+        position: relative;
+    }
+
+    .pdf-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        flex-direction: column;
+        background: #f8f9fa;
+        border-radius: 4px;
+        overflow: hidden;
+    }
+
+    .pdf-toolbar {
+        padding: 10px;
+        background: #fff;
+        border-bottom: 1px solid #ddd;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .pdf-toolbar button {
+        padding: 5px 10px;
+        border: 1px solid #ddd;
+        background: #fff;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+    .pdf-toolbar button:hover {
+        background: #f0f0f0;
+    }
+
+    .pdf-toolbar input {
+        width: 50px;
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        text-align: center;
+    }
+
+    .pdf-viewer {
+        flex: 1;
+        overflow: auto;
+        padding: 20px;
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        background: #e9ecef;
+    }
+
+    .pdf-page-canvas {
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        background: white;
     }
 
     .grade-panel {
@@ -237,7 +325,11 @@
 <script>
     let currentFile = '';
     let selectedGrade = '';
-    let currentSubmission = null;
+    let pdfDoc = null;
+    let pageNum = 1;
+    let pageRendering = false;
+    let pageNumPending = null;
+    let scale = 1.5;
 
     function initTree() {
         const tree = document.getElementById('grade-tree');
@@ -316,8 +408,113 @@
         });
     }
 
+    function showPDF(url) {
+        const container = document.getElementById('docContent');
+        container.innerHTML = `
+            <div class="pdf-container">
+                <div class="pdf-toolbar">
+                    <button onclick="onPrevPage()">上一页</button>
+                    <input type="number" id="pageNum" min="1" onchange="onPageChange(this.value)">
+                    <span>/ <span id="pageCount">0</span></span>
+                    <button onclick="onNextPage()">下一页</button>
+                    <button onclick="onZoomIn()">放大</button>
+                    <button onclick="onZoomOut()">缩小</button>
+                </div>
+                <div class="pdf-viewer">
+                    <canvas id="pdfCanvas" class="pdf-page-canvas"></canvas>
+                </div>
+            </div>
+        `;
+
+        // 加载 PDF 文档
+        pdfjsLib.getDocument(url).promise.then(function(pdf) {
+            pdfDoc = pdf;
+            document.getElementById('pageCount').textContent = pdf.numPages;
+            document.getElementById('pageNum').value = pageNum;
+            document.getElementById('pageNum').max = pdf.numPages;
+            
+            // 渲染第一页
+            renderPage(pageNum);
+        }).catch(function(error) {
+            console.error('Error loading PDF:', error);
+            container.innerHTML = `
+                <div class="error-message">
+                    PDF 加载失败。
+                    <a href="${url}" target="_blank">点击下载</a>
+                </div>
+            `;
+        });
+    }
+
+    function renderPage(num) {
+        pageRendering = true;
+        pdfDoc.getPage(num).then(function(page) {
+            const canvas = document.getElementById('pdfCanvas');
+            const ctx = canvas.getContext('2d');
+            const viewport = page.getViewport({scale: scale});
+
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+
+            const renderContext = {
+                canvasContext: ctx,
+                viewport: viewport
+            };
+
+            page.render(renderContext).promise.then(function() {
+                pageRendering = false;
+                if (pageNumPending !== null) {
+                    renderPage(pageNumPending);
+                    pageNumPending = null;
+                }
+            });
+        });
+    }
+
+    function queueRenderPage(num) {
+        if (pageRendering) {
+            pageNumPending = num;
+        } else {
+            renderPage(num);
+        }
+    }
+
+    function onPrevPage() {
+        if (pageNum <= 1) return;
+        pageNum--;
+        document.getElementById('pageNum').value = pageNum;
+        queueRenderPage(pageNum);
+    }
+
+    function onNextPage() {
+        if (pageNum >= pdfDoc.numPages) return;
+        pageNum++;
+        document.getElementById('pageNum').value = pageNum;
+        queueRenderPage(pageNum);
+    }
+
+    function onPageChange(value) {
+        const num = parseInt(value);
+        if (num >= 1 && num <= pdfDoc.numPages) {
+            pageNum = num;
+            queueRenderPage(pageNum);
+        }
+    }
+
+    function onZoomIn() {
+        scale *= 1.2;
+        queueRenderPage(pageNum);
+    }
+
+    function onZoomOut() {
+        scale /= 1.2;
+        queueRenderPage(pageNum);
+    }
+
     function loadFile(filePath) {
-        if (!filePath) return;
+        if (!filePath) {
+            return;
+        }
         
         currentFile = filePath;
         document.getElementById('current-file').textContent = filePath;
@@ -334,8 +531,14 @@
         })
         .then(response => response.json())
         .then(data => {
-            if (data.status === 'success' && data.content) {
-                showContent(data.content);
+            if (data.status === 'success') {
+                if (filePath.toLowerCase().endsWith('.pdf')) {
+                    // 对于 PDF 文件，使用 PDF.js 渲染
+                    showPDF(`/grading/file/${filePath}`);
+                } else {
+                    // 其他文件类型保持原样显示
+                    showContent(data.content);
+                }
                 selectedGrade = '';
                 document.querySelectorAll('#grade-buttons button').forEach(btn => {
                     btn.classList.remove('selected');
@@ -420,6 +623,36 @@
     // 页面加载完成后初始化
     $(document).ready(function() {
         initTree();
+    });
+
+    // 添加面板大小调节功能
+    document.addEventListener('DOMContentLoaded', function() {
+        const resizer = document.getElementById('resizer');
+        const leftPanel = document.getElementById('leftPanel');
+        let isResizing = false;
+        let startX;
+        let startWidth;
+
+        resizer.addEventListener('mousedown', function(e) {
+            isResizing = true;
+            startX = e.pageX;
+            startWidth = leftPanel.offsetWidth;
+            resizer.classList.add('resizing');
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isResizing) return;
+
+            const width = startWidth + (e.pageX - startX);
+            if (width > 200 && width < window.innerWidth - 400) {
+                leftPanel.style.width = width + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', function() {
+            isResizing = false;
+            resizer.classList.remove('resizing');
+        });
     });
 </script>
 {% endblock %}

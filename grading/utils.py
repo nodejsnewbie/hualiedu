@@ -7,6 +7,7 @@ from .config import ALLOWED_FILE_TYPES, FILE_ENCODINGS, FILE_PROCESSING
 import mammoth
 import base64
 import shutil
+from .models import GlobalConfig
 
 logger = logging.getLogger(__name__)
 
@@ -94,12 +95,18 @@ class FileHandler:
     @staticmethod
     def is_safe_path(path):
         """检查路径是否在允许的范围内"""
-        normalized_path = os.path.normpath(path)
-        grades_dir = os.path.join(settings.BASE_DIR, 'media', 'grades')
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return False
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        normalized_path = os.path.abspath(path)
+        
         try:
             # 使用 os.path.commonpath 检查路径是否在允许的目录下
-            common_path = os.path.commonpath([normalized_path, grades_dir])
-            return common_path == grades_dir
+            return os.path.commonpath([normalized_path, base_dir]) == base_dir
         except ValueError:
             # 如果路径不在同一个挂载点，commonpath 会抛出 ValueError
             return False

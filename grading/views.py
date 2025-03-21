@@ -145,7 +145,18 @@ def grading_page(request):
                         'message': '未配置仓库基础目录'
                     })
                 
-                base_dir = config.repo_base_dir
+                # 展开路径中的用户目录符号（~）
+                base_dir = os.path.expanduser(config.repo_base_dir)
+                
+                # 如果目录不存在，尝试创建它
+                if not os.path.exists(base_dir):
+                    try:
+                        os.makedirs(base_dir, exist_ok=True)
+                    except Exception as e:
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'无法创建目录: {str(e)}'
+                        })
                 
                 # 如果是根路径，使用基础目录
                 if not file_path:
@@ -210,7 +221,8 @@ def grading_page(request):
                         'message': '未配置仓库基础目录'
                     })
                 
-                base_dir = config.repo_base_dir
+                # 展开路径中的用户目录符号（~）
+                base_dir = os.path.expanduser(config.repo_base_dir)
                 full_path = os.path.join(base_dir, file_path)
                 
                 # 确保路径在基础目录内
@@ -250,6 +262,19 @@ def grading_page(request):
                             'status': 'error',
                             'message': '无法读取 Word 文档内容'
                         })
+                # 处理 PDF 文件
+                elif mime_type == 'application/pdf':
+                    content = f'''
+                    <div class="pdf-container">
+                        <object data="/grading/file/{file_path}" type="application/pdf" width="100%" height="100%">
+                            <p>您的浏览器不支持 PDF 预览，<a href="/grading/file/{file_path}" target="_blank">点击下载</a></p>
+                        </object>
+                    </div>
+                    '''
+                    return JsonResponse({
+                        'status': 'success',
+                        'content': content
+                    })
                 # 处理文本文件
                 elif mime_type.startswith('text/'):
                     content = FileHandler.read_text_file(full_path)
@@ -442,3 +467,37 @@ def create_directory(request):
     except Exception as e:
         logger.error(f'创建目录时发生错误: {str(e)}')
         return JsonResponse({'status': 'error', 'message': str(e)})
+
+def serve_file(request, file_path):
+    """提供文件下载服务"""
+    try:
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return HttpResponse('未配置仓库基础目录', status=400)
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, file_path)
+        
+        # 确保路径在基础目录内
+        if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+            return HttpResponse('无权访问该文件', status=403)
+
+        if not os.path.exists(full_path):
+            return HttpResponse('文件不存在', status=404)
+
+        # 获取文件类型
+        content_type, _ = mimetypes.guess_type(full_path)
+        if not content_type:
+            content_type = 'application/octet-stream'
+
+        # 以二进制模式读取文件
+        with open(full_path, 'rb') as f:
+            response = HttpResponse(f.read(), content_type=content_type)
+            response['Content-Disposition'] = f'inline; filename="{os.path.basename(file_path)}"'
+            return response
+
+    except Exception as e:
+        logger.error(f'文件服务失败: {str(e)}')
+        return HttpResponse('服务器错误', status=500)
