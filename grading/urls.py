@@ -1,5 +1,6 @@
 from django.urls import path
 from . import views
+from .admin import admin_site
 
 app_name = 'grading'
 

@@ -1,49 +1,78 @@
-{% extends 'base.html' %}
+{% extends 'admin/base_site.html' %}
 {% load static %}
 
 {% block title %}评分系统{% endblock %}
 
 {% block content %}
-<div class="grading-container">
-    <!-- 左侧面板 -->
-    <div class="left-panel" id="leftPanel">
-        <div class="panel-header">
-            <h2>文件列表</h2>
-        </div>
-        <div class="panel-content">
-            <div id="grade-tree"></div>
-        </div>
-    </div>
-
-    <!-- 分隔条 -->
-    <div class="resizer" id="resizer"></div>
-
-    <!-- 右侧面板 -->
-    <div class="right-panel" id="rightPanel">
-        <div class="panel-header">
-            <h2>文件内容</h2>
-            <div class="file-info">
-                <span id="current-file"></span>
+<div class="content-wrapper">
+    <!-- 顶部导航栏 -->
+    <div class="content-header">
+        <div class="container-fluid">
+            <div class="row mb-2">
+                <div class="col-sm-6">
+                    <h1 class="m-0">评分系统</h1>
+                </div>
+                <div class="col-sm-6">
+                    <ol class="breadcrumb float-sm-right">
+                        <li class="breadcrumb-item"><a href="{% url 'admin:index' %}">管理后台</a></li>
+                        <li class="breadcrumb-item active">评分系统</li>
+                    </ol>
+                </div>
             </div>
         </div>
-        <div class="panel-content">
-            <div id="docContent" class="doc-content"></div>
+    </div>
+
+    <!-- 主要内容区域 -->
+    <div class="content">
+        <div class="container-fluid">
+            <div class="row">
+                <!-- 左侧面板 -->
+                <div class="col-md-3">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">文件列表</h3>
+                        </div>
+                        <div class="card-body">
+                            <div id="grade-tree"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右侧面板 -->
+                <div class="col-md-9">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3 class="card-title">文件内容</h3>
+                            <div class="card-tools">
+                                <span id="current-file" class="badge badge-info"></span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="docContent" class="doc-content"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
 
-<!-- 评分按钮面板 -->
-<div class="grade-panel">
-    <div class="grade-buttons" id="grade-buttons">
-        <button class="grade-btn" onclick="gradeSubmission('A')">A</button>
-        <button class="grade-btn" onclick="gradeSubmission('B')">B</button>
-        <button class="grade-btn" onclick="gradeSubmission('C')">C</button>
-        <button class="grade-btn" onclick="gradeSubmission('D')">D</button>
-        <button class="grade-btn" onclick="gradeSubmission('F')">F</button>
-    </div>
-    <div class="grade-actions">
-        <button class="action-btn save-btn" onclick="saveGrade()">保存评分</button>
-        <button class="action-btn next-btn" onclick="nextSubmission()">下一个</button>
+    <!-- 评分按钮面板 -->
+    <div class="card-footer">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="btn-group">
+                    <button class="btn btn-primary" onclick="gradeSubmission('A')">A</button>
+                    <button class="btn btn-primary" onclick="gradeSubmission('B')">B</button>
+                    <button class="btn btn-primary" onclick="gradeSubmission('C')">C</button>
+                    <button class="btn btn-primary" onclick="gradeSubmission('D')">D</button>
+                    <button class="btn btn-primary" onclick="gradeSubmission('F')">F</button>
+                </div>
+            </div>
+            <div class="col-md-6 text-right">
+                <button class="btn btn-success" onclick="saveGrade()">保存评分</button>
+                <button class="btn btn-secondary" onclick="nextSubmission()">下一个</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -55,210 +84,53 @@
 {% endblock %}
 
 {% block extra_css %}
+{{ block.super }}
 <style>
-    .grading-container {
-        display: flex;
-        height: calc(100vh - 60px);
-        background: #f5f5f5;
-        position: relative;
+    .content-wrapper {
+        min-height: calc(100vh - 3.5rem);
     }
-
-    .left-panel {
-        width: 300px;
-        display: flex;
-        flex-direction: column;
-        background: white;
-        margin: 10px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    .right-panel {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        background: white;
-        margin: 10px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        min-width: 400px;
-    }
-
-    .resizer {
-        width: 6px;
-        background: #f0f0f0;
-        cursor: col-resize;
-        margin: 10px 0;
-        border-radius: 3px;
-        transition: background 0.2s;
-    }
-
-    .resizer:hover, .resizer.resizing {
-        background: #007bff;
-    }
-
-    .panel-header {
-        padding: 15px 20px;
-        border-bottom: 1px solid #eee;
+    
+    .content-header {
         background: #f8f9fa;
-        border-radius: 8px 8px 0 0;
+        padding: 1rem;
+        border-bottom: 1px solid #dee2e6;
     }
-
-    .panel-header h2 {
+    
+    .card {
+        margin-bottom: 1rem;
+        box-shadow: 0 0 1px rgba(0,0,0,.125), 0 1px 3px rgba(0,0,0,.2);
+    }
+    
+    .card-header {
+        background-color: #f8f9fa;
+        border-bottom: 1px solid #dee2e6;
+        padding: 0.75rem 1.25rem;
+    }
+    
+    .card-title {
         margin: 0;
-        font-size: 18px;
-        color: #333;
+        font-size: 1.1rem;
+        font-weight: 400;
     }
-
-    .panel-content {
-        flex: 1;
-        overflow: auto;
-        padding: 20px;
-        position: relative;
+    
+    .card-body {
+        padding: 1.25rem;
     }
-
-    .file-info {
-        margin-top: 5px;
-        font-size: 14px;
-        color: #666;
+    
+    .card-footer {
+        background-color: #f8f9fa;
+        border-top: 1px solid #dee2e6;
+        padding: 1rem;
     }
-
-    .doc-content {
-        background: white;
-        padding: 20px;
-        border-radius: 4px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        min-height: 200px;
-        height: 100%;
-        position: relative;
+    
+    .btn-group {
+        margin-right: 0.5rem;
     }
-
-    .pdf-container {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        display: flex;
-        flex-direction: column;
-        background: #f8f9fa;
-        border-radius: 4px;
-        overflow: hidden;
+    
+    .btn-group .btn {
+        margin-right: 0.25rem;
     }
-
-    .pdf-toolbar {
-        padding: 10px;
-        background: #fff;
-        border-bottom: 1px solid #ddd;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .pdf-toolbar button {
-        padding: 5px 10px;
-        border: 1px solid #ddd;
-        background: #fff;
-        border-radius: 4px;
-        cursor: pointer;
-    }
-
-    .pdf-toolbar button:hover {
-        background: #f0f0f0;
-    }
-
-    .pdf-toolbar input {
-        width: 50px;
-        padding: 5px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        text-align: center;
-    }
-
-    .pdf-viewer {
-        flex: 1;
-        overflow: auto;
-        padding: 20px;
-        display: flex;
-        justify-content: center;
-        align-items: flex-start;
-        background: #e9ecef;
-    }
-
-    .pdf-page-canvas {
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        background: white;
-    }
-
-    .grade-panel {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        background: white;
-        padding: 15px 20px;
-        box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .grade-buttons {
-        display: flex;
-        gap: 10px;
-    }
-
-    .grade-btn {
-        padding: 8px 16px;
-        border: none;
-        border-radius: 4px;
-        background: #f0f0f0;
-        cursor: pointer;
-        font-size: 16px;
-        transition: all 0.2s;
-    }
-
-    .grade-btn:hover {
-        background: #e0e0e0;
-    }
-
-    .grade-btn.selected {
-        background: #007bff;
-        color: white;
-    }
-
-    .grade-actions {
-        display: flex;
-        gap: 10px;
-    }
-
-    .action-btn {
-        padding: 8px 16px;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 14px;
-        transition: all 0.2s;
-    }
-
-    .save-btn {
-        background: #28a745;
-        color: white;
-    }
-
-    .save-btn:hover {
-        background: #218838;
-    }
-
-    .next-btn {
-        background: #6c757d;
-        color: white;
-    }
-
-    .next-btn:hover {
-        background: #5a6268;
-    }
-
+    
     .loading-overlay {
         display: none;
         position: fixed;
@@ -272,7 +144,7 @@
         align-items: center;
         flex-direction: column;
     }
-
+    
     .loading-spinner {
         width: 40px;
         height: 40px;
@@ -282,41 +154,27 @@
         animation: spin 1s linear infinite;
         margin-bottom: 10px;
     }
-
+    
     .loading-text {
         color: #666;
         font-size: 16px;
     }
-
+    
     @keyframes spin {
         0% { transform: rotate(0deg); }
         100% { transform: rotate(360deg); }
     }
-
-    /* jstree 样式优化 */
-    .jstree-default .jstree-anchor {
-        padding: 4px 8px;
-        border-radius: 4px;
+    
+    .doc-content {
+        min-height: 500px;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        padding: 1rem;
     }
-
-    .jstree-default .jstree-anchor:hover {
-        background: #f0f0f0;
-    }
-
-    .jstree-default .jstree-clicked {
-        background: #e3f2fd;
-    }
-
-    .jstree-default .jstree-icon {
-        color: #666;
-    }
-
-    .jstree-default .jstree-file {
-        background: none;
-    }
-
-    .jstree-default .jstree-folder {
-        background: none;
+    
+    .badge {
+        font-size: 0.875rem;
+        padding: 0.5em 0.75em;
     }
 </style>
 {% endblock %}

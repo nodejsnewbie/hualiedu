@@ -18,6 +18,41 @@ from pathlib import Path
 from urllib.parse import urlparse
 from django.core.exceptions import ValidationError
 
+# 定义所有 Admin 类
+class StudentAdmin(admin.ModelAdmin):
+    list_display = ['student_id', 'name', 'class_name']
+    search_fields = ['student_id', 'name', 'class_name']
+    list_filter = ['class_name']
+
+class AssignmentAdmin(admin.ModelAdmin):
+    list_display = ['name', 'description', 'due_date', 'created_at']
+    search_fields = ['name', 'description']
+    list_filter = ['due_date', 'created_at']
+    date_hierarchy = 'due_date'
+
+class SubmissionAdmin(admin.ModelAdmin):
+    list_display = ['student', 'assignment', 'submitted_at', 'grade', 'status']
+    search_fields = ['student__name', 'student__student_id', 'assignment__name']
+    list_filter = ['status', 'submitted_at', 'assignment']
+    date_hierarchy = 'submitted_at'
+    raw_id_fields = ['student', 'assignment']
+
+class CustomAdminSite(admin.AdminSite):
+    def get_app_list(self, request):
+        app_list = super().get_app_list(request)
+        # 添加评分系统链接
+        app_list.append({
+            'name': '评分系统',
+            'app_label': 'grading_system',
+            'url': '/grading/',
+            'has_module_perms': True,
+            'models': []
+        })
+        return app_list
+
+# 创建自定义 AdminSite 实例
+admin_site = CustomAdminSite(name='admin')
+
 class SSHKeyFileInput(forms.ClearableFileInput):
     template_name = 'django/forms/widgets/clearable_file_input.html'
     
@@ -404,6 +439,72 @@ class RepositoryAdmin(admin.ModelAdmin):
     readonly_fields = ('branch', 'get_last_sync_time', 'get_sync_status')
     change_list_template = 'admin/grading/repository/change_list.html'
     
+    def get_site_header(self):
+        """自定义站点标题"""
+        return '评分系统管理'
+    
+    def get_site_title(self):
+        """自定义浏览器标签页标题"""
+        return '评分系统管理'
+    
+    def get_index_title(self):
+        """自定义首页标题"""
+        return '评分系统管理'
+    
+    def get_urls(self):
+        """添加自定义 URL"""
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                'grading/',
+                self.admin_site.admin_view(self.grading_view),
+                name='grading_system',
+            ),
+            path(
+                '<int:repo_id>/clone/',
+                self.admin_site.admin_view(self.clone_repository),
+                name='grading_repository_clone',
+            ),
+            path(
+                '<int:repo_id>/sync/',
+                self.admin_site.admin_view(self.sync_repository),
+                name='grading_repository_sync',
+            ),
+            path(
+                '<int:repo_id>/push/',
+                self.admin_site.admin_view(self.push_repository),
+                name='grading_repository_push',
+            ),
+            path(
+                '<int:repo_id>/clear/',
+                self.admin_site.admin_view(self.clear_repository),
+                name='grading_repository_clear',
+            ),
+            path(
+                '<int:repo_id>/change_branch/',
+                self.admin_site.admin_view(self.change_branch),
+                name='grading_repository_change_branch',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def grading_view(self, request):
+        """评分系统视图"""
+        return HttpResponseRedirect('/grading/')
+    
+    def get_app_list(self, request):
+        """自定义应用列表"""
+        app_list = super().get_app_list(request)
+        # 添加评分系统链接
+        app_list.append({
+            'name': '评分系统',
+            'app_label': 'grading_system',
+            'url': '/grading/',
+            'has_module_perms': True,
+            'models': []
+        })
+        return app_list
+
     def add_view(self, request, form_url='', extra_context=None):
         """重定向到列表页面"""
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
@@ -483,38 +584,6 @@ class RepositoryAdmin(admin.ModelAdmin):
             obj.name
         )
     get_action_buttons.short_description = '操作'
-
-    def get_urls(self):
-        from django.urls import path
-        urls = super().get_urls()
-        custom_urls = [
-            path(
-                '<int:repo_id>/clone/',
-                self.admin_site.admin_view(self.clone_repository),
-                name='grading_repository_clone',
-            ),
-            path(
-                '<int:repo_id>/sync/',
-                self.admin_site.admin_view(self.sync_repository),
-                name='grading_repository_sync',
-            ),
-            path(
-                '<int:repo_id>/push/',
-                self.admin_site.admin_view(self.push_repository),
-                name='grading_repository_push',
-            ),
-            path(
-                '<int:repo_id>/clear/',
-                self.admin_site.admin_view(self.clear_repository),
-                name='grading_repository_clear',
-            ),
-            path(
-                '<int:repo_id>/change_branch/',
-                self.admin_site.admin_view(self.change_branch),
-                name='grading_repository_change_branch',
-            ),
-        ]
-        return custom_urls + urls
 
     def clone_repository(self, request, repo_id):
         """克隆仓库"""
@@ -970,23 +1039,8 @@ class RepositoryAdmin(admin.ModelAdmin):
             messages.error(request, f'移除 {error_count} 个仓库失败')
 
 # 注册其他模型
-@admin.register(Student)
-class StudentAdmin(admin.ModelAdmin):
-    list_display = ['student_id', 'name', 'class_name']
-    search_fields = ['student_id', 'name', 'class_name']
-    list_filter = ['class_name']
-
-@admin.register(Assignment)
-class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ['name', 'description', 'due_date', 'created_at']
-    search_fields = ['name', 'description']
-    list_filter = ['due_date', 'created_at']
-    date_hierarchy = 'due_date'
-
-@admin.register(Submission)
-class SubmissionAdmin(admin.ModelAdmin):
-    list_display = ['student', 'assignment', 'submitted_at', 'grade', 'status']
-    search_fields = ['student__name', 'student__student_id', 'assignment__name']
-    list_filter = ['status', 'submitted_at', 'assignment']
-    date_hierarchy = 'submitted_at'
-    raw_id_fields = ['student', 'assignment']
+admin_site.register(Student, StudentAdmin)
+admin_site.register(Assignment, AssignmentAdmin)
+admin_site.register(Submission, SubmissionAdmin)
+admin_site.register(Repository, RepositoryAdmin)
+admin_site.register(GlobalConfig, GlobalConfigAdmin)

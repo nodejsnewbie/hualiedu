@@ -202,7 +202,11 @@ JAZZMIN_SETTINGS = {
     "navigation_expanded": True,
     "theme": "default",
     "dark_mode_theme": "darkly",
-    "show_ui_builder": True
+    "show_ui_builder": True,
+    "topmenu_links": [
+        {"name": "首页", "url": "http://127.0.0.1:8000/", "new_window": False},
+        {"name": "评分页面", "url": "/grading/", "new_window": False},
+    ]
 }
 
 JAZZMIN_UI_TWEAKS = {
