@@ -239,17 +239,35 @@ class RepositoryForm(forms.ModelForm):
     """仓库表单"""
     class Meta:
         model = Repository
-        fields = ['url', 'branch']
-        help_texts = {
-            'url': '支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git'
+        fields = ['url', 'name', 'branch']
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'vTextField',
+                'style': 'width: 100%;',
+                'placeholder': '输入仓库名称，如果不输入则自动从 URL 生成'
+            }),
+            'url': forms.TextInput(attrs={
+                'class': 'vTextField',
+                'style': 'width: 100%;',
+                'oninput': 'updateRepoName(this.value)'
+            })
         }
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 如果是新建仓库，隐藏 branch 字段
-        if not self.instance.pk:
-            if 'branch' in self.fields:
-                self.fields['branch'].widget = forms.HiddenInput()
+        if not self.instance.pk and 'branch' in self.fields:
+            self.fields['branch'].widget = forms.HiddenInput()
+        
+        # 如果是编辑仓库，禁用 URL 字段
+        if self.instance.pk:
+            self.fields['url'].widget.attrs['readonly'] = True
+            self.fields['url'].widget.attrs['style'] = 'width: 100%; background-color: #f5f5f5;'
+            self.fields['url'].help_text = '编辑仓库时不允许修改 URL'
+        
+        # 保存原始 URL，用于判断是否修改了 URL
+        if self.instance.pk:
+            self.instance._original_url = self.instance.url
 
     def clean(self):
         """验证表单数据"""
@@ -383,22 +401,12 @@ class RepositoryForm(forms.ModelForm):
 class RepositoryAdmin(admin.ModelAdmin):
     form = RepositoryForm
     list_display = ('name', 'url', 'get_branch', 'get_last_sync_time', 'get_sync_status', 'get_action_buttons')
-    list_filter = ('branch',)
-    search_fields = ('name', 'url')
     readonly_fields = ('branch', 'get_last_sync_time', 'get_sync_status')
     change_list_template = 'admin/grading/repository/change_list.html'
     
-    fieldsets = (
-        ('基本信息', {
-            'fields': ('name', 'url', 'branch'),
-            'description': '仓库的基本信息，包括名称、URL 和分支。'
-        }),
-        ('同步信息', {
-            'fields': ('get_last_sync_time', 'get_sync_status'),
-            'classes': ('collapse',),
-            'description': '仓库的同步状态信息。'
-        }),
-    )
+    def add_view(self, request, form_url='', extra_context=None):
+        """重定向到列表页面"""
+        return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
     
     def changelist_view(self, request, extra_context=None):
         """自定义列表视图"""
