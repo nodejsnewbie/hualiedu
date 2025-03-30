@@ -150,6 +150,9 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
+# History directory
+.history/
+
 # mkdocs documentation
 /site
 
