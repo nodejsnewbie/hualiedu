@@ -239,25 +239,18 @@ class RepositoryForm(forms.ModelForm):
     """仓库表单"""
     class Meta:
         model = Repository
-        fields = ['name', 'url', 'branch']
-        widgets = {
-            'name': forms.TextInput(attrs={
-                'class': 'vTextField',
-                'style': 'width: 100%;',
-                'placeholder': '输入仓库名称，如果不输入则自动从 URL 生成'
-            })
+        fields = ['url', 'branch']
+        help_texts = {
+            'url': '支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git'
         }
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 如果是新建仓库，隐藏 branch 字段
-        if not self.instance.pk and 'branch' in self.fields:
-            self.fields['branch'].widget = forms.HiddenInput()
-        
-        # 保存原始 URL，用于判断是否修改了 URL
-        if self.instance.pk:
-            self.instance._original_url = self.instance.url
-    
+        if not self.instance.pk:
+            if 'branch' in self.fields:
+                self.fields['branch'].widget = forms.HiddenInput()
+
     def clean(self):
         """验证表单数据"""
         cleaned_data = super().clean()
@@ -382,6 +375,9 @@ class RepositoryForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+    class Media:
+        js = ('admin/js/repository_form.js',)
 
 @admin.register(Repository)
 class RepositoryAdmin(admin.ModelAdmin):
