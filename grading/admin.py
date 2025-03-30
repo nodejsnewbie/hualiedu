@@ -16,6 +16,7 @@ from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from pathlib import Path
 from urllib.parse import urlparse
+from django.core.exceptions import ValidationError
 
 class SSHKeyFileInput(forms.ClearableFileInput):
     template_name = 'django/forms/widgets/clearable_file_input.html'
@@ -235,144 +236,148 @@ class GlobalConfigAdmin(admin.ModelAdmin):
             return JsonResponse({'error': str(e)}, status=500)
 
 class RepositoryForm(forms.ModelForm):
+    """仓库表单"""
     class Meta:
         model = Repository
-        fields = ['url', 'branch']
-        help_texts = {
-            'url': '支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git'
+        fields = ['name', 'url', 'branch']
+        widgets = {
+            'name': forms.TextInput(attrs={
+                'class': 'vTextField',
+                'style': 'width: 100%;',
+                'placeholder': '输入仓库名称，如果不输入则自动从 URL 生成'
+            })
         }
-
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 如果是新建仓库，隐藏 branch 字段
-        if not self.instance.pk:
-            if 'branch' in self.fields:
-                self.fields['branch'].widget = forms.HiddenInput()
-
+        if not self.instance.pk and 'branch' in self.fields:
+            self.fields['branch'].widget = forms.HiddenInput()
+        
+        # 保存原始 URL，用于判断是否修改了 URL
+        if self.instance.pk:
+            self.instance._original_url = self.instance.url
+    
     def clean(self):
+        """验证表单数据"""
         cleaned_data = super().clean()
         url = cleaned_data.get('url')
+        
         if url:
             try:
-                # 处理 SSH 格式
+                # 验证 URL 格式
                 if url.startswith('git@'):
-                    # 验证 SSH URL 格式
-                    parts = url.split(':')
-                    if len(parts) != 2:
-                        raise forms.ValidationError('无效的 SSH URL 格式，正确格式为：git@host:username/repository.git')
-                    
-                    # 验证路径部分
-                    path_parts = parts[1].split('/')
-                    if len(path_parts) < 2:
-                        raise forms.ValidationError('无效的仓库路径格式，正确格式为：username/repository.git')
-                    
-                    # 添加 .git 后缀（如果没有）
-                    if not url.endswith('.git'):
-                        url = url + '.git'
-                    cleaned_data['url'] = url
-                
-                # 处理 HTTPS 格式
-                elif url.startswith(('http://', 'https://')):
+                    # SSH 格式：git@host:username/repository
+                    if ':' not in url:
+                        raise ValidationError('无效的 SSH URL 格式')
+                    host, repo_path = url.split(':', 1)
+                    if not repo_path or '/' not in repo_path:
+                        raise ValidationError('无效的仓库路径')
+                else:
+                    # HTTPS 格式：https://host/username/repository
                     parsed = urlparse(url)
                     if not parsed.scheme or not parsed.netloc:
-                        raise forms.ValidationError('无效的 HTTPS URL 格式')
-                    
-                    # 检查用户名和密码
-                    if '@' not in parsed.netloc:
-                        config = GlobalConfig.objects.first()
-                        if not config or not (config.https_username and config.https_password):
-                            raise forms.ValidationError('使用 HTTPS 协议需要在 URL 中包含用户名和密码，或在全局配置中设置认证信息')
-                    
-                    # 添加 .git 后缀（如果没有）
-                    if not url.endswith('.git'):
-                        url = url + '.git'
-                    cleaned_data['url'] = url
+                        raise ValidationError('无效的 HTTPS URL 格式')
+                    if not parsed.path or len(parsed.path.strip('/').split('/')) < 2:
+                        raise ValidationError('无效的仓库路径')
                 
-                else:
-                    raise forms.ValidationError('无效的 URL 格式，仅支持 SSH（git@...）或 HTTPS 格式')
+                # 如果没有提供名称，从 URL 生成
+                if not cleaned_data.get('name'):
+                    cleaned_data['name'] = Repository.generate_name_from_url(url)
                 
-                return cleaned_data
-            except forms.ValidationError as e:
-                raise e
+                # 验证名称唯一性
+                name = cleaned_data.get('name')
+                if name:
+                    existing = Repository.objects.filter(name=name)
+                    if self.instance.pk:
+                        existing = existing.exclude(pk=self.instance.pk)
+                    if existing.exists():
+                        raise ValidationError('该仓库名称已存在')
+                
+                # 验证 URL 唯一性
+                existing = Repository.objects.filter(url=url)
+                if self.instance.pk:
+                    existing = existing.exclude(pk=self.instance.pk)
+                if existing.exists():
+                    raise ValidationError('该仓库 URL 已存在')
+                
             except Exception as e:
-                raise forms.ValidationError(f'URL 验证失败: {str(e)}')
+                raise ValidationError(f'URL 验证失败: {str(e)}')
+        
         return cleaned_data
 
     def save(self, commit=True):
         """保存表单数据"""
         instance = super().save(commit=False)
         
-        # 从 URL 生成仓库名称
-        if not instance.name:
-            instance.name = Repository.generate_name_from_url(instance.url)
-        
-        # 获取仓库分支列表
-        try:
-            config = GlobalConfig.objects.first()
-            if not config:
-                raise ValueError('请先配置全局认证信息')
-            
-            # 准备环境变量
-            env = os.environ.copy()
-            if instance.is_ssh_protocol() and config.ssh_key:
-                # 创建临时 SSH 密钥文件
-                ssh_key_path = os.path.join(os.path.expanduser('~'), '.ssh', 'id_rsa_temp')
-                os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
-                with open(ssh_key_path, 'w') as f:
-                    f.write(config.ssh_key)
-                os.chmod(ssh_key_path, 0o600)
-                env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no'
-            
-            # 使用 git ls-remote 获取分支列表
-            clone_url = instance.get_clone_url()
-            result = subprocess.run(
-                ['git', 'ls-remote', '--heads', clone_url],
-                env=env,
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0:
-                # 解析分支列表
-                branches = []
-                for line in result.stdout.splitlines():
-                    if line.strip():
-                        # 提取分支名
-                        branch = line.split('refs/heads/')[-1]
-                        branches.append(branch)
+        # 只有在新建仓库或修改 URL 时才获取分支列表
+        if not instance.pk or instance.url != getattr(instance, '_original_url', None):
+            try:
+                config = GlobalConfig.objects.first()
+                if not config:
+                    raise ValueError('请先配置全局认证信息')
                 
-                if not branches:
-                    raise ValueError('仓库没有可用的分支')
+                # 准备环境变量
+                env = os.environ.copy()
+                if instance.is_ssh_protocol() and config.ssh_key:
+                    # 创建临时 SSH 密钥文件
+                    ssh_key_path = os.path.join(os.path.expanduser('~'), '.ssh', 'id_rsa_temp')
+                    os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
+                    with open(ssh_key_path, 'w') as f:
+                        f.write(config.ssh_key)
+                    os.chmod(ssh_key_path, 0o600)
+                    env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no'
                 
-                # 设置分支列表
-                instance.branches = branches
+                # 使用 git ls-remote 获取分支列表
+                clone_url = instance.get_clone_url()
+                result = subprocess.run(
+                    ['git', 'ls-remote', '--heads', clone_url],
+                    env=env,
+                    capture_output=True,
+                    text=True
+                )
                 
-                # 设置默认分支
-                if 'main' in branches:
-                    instance.branch = 'main'
-                elif 'master' in branches:
-                    instance.branch = 'master'
-                else:
-                    instance.branch = branches[0]
-            else:
-                raise ValueError(f'获取分支列表失败：{result.stderr}')
-            
-            # 清理临时文件
-            if instance.is_ssh_protocol() and config.ssh_key:
-                try:
-                    os.remove(ssh_key_path)
-                except:
-                    pass
+                if result.returncode == 0:
+                    # 解析分支列表
+                    branches = []
+                    for line in result.stdout.splitlines():
+                        if line.strip():
+                            # 提取分支名
+                            branch = line.split('refs/heads/')[-1]
+                            branches.append(branch)
                     
-        except Exception as e:
-            self.add_error('url', format_html(
-                '<div class="alert alert-danger" style="margin-top: 10px;">'
-                '<strong>获取分支列表失败</strong><br>'
-                '错误信息：{}'
-                '</div>',
-                str(e)
-            ))
-            return instance
+                    if not branches:
+                        raise ValueError('仓库没有可用的分支')
+                    
+                    # 设置分支列表
+                    instance.branches = branches
+                    
+                    # 设置默认分支
+                    if 'main' in branches:
+                        instance.branch = 'main'
+                    elif 'master' in branches:
+                        instance.branch = 'master'
+                    else:
+                        instance.branch = branches[0]
+                else:
+                    raise ValueError(f'获取分支列表失败：{result.stderr}')
+                
+                # 清理临时文件
+                if instance.is_ssh_protocol() and config.ssh_key:
+                    try:
+                        os.remove(ssh_key_path)
+                    except:
+                        pass
+                        
+            except Exception as e:
+                self.add_error('url', format_html(
+                    '<div class="alert alert-danger" style="margin-top: 10px;">'
+                    '<strong>获取分支列表失败</strong><br>'
+                    '错误信息：{}'
+                    '</div>',
+                    str(e)
+                ))
+                return instance
         
         if commit:
             instance.save()
@@ -384,8 +389,20 @@ class RepositoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'url', 'get_branch', 'get_last_sync_time', 'get_sync_status', 'get_action_buttons')
     list_filter = ('branch',)
     search_fields = ('name', 'url')
-    readonly_fields = ('name', 'branch', 'get_last_sync_time', 'get_sync_status')
+    readonly_fields = ('branch', 'get_last_sync_time', 'get_sync_status')
     change_list_template = 'admin/grading/repository/change_list.html'
+    
+    fieldsets = (
+        ('基本信息', {
+            'fields': ('name', 'url', 'branch'),
+            'description': '仓库的基本信息，包括名称、URL 和分支。'
+        }),
+        ('同步信息', {
+            'fields': ('get_last_sync_time', 'get_sync_status'),
+            'classes': ('collapse',),
+            'description': '仓库的同步状态信息。'
+        }),
+    )
     
     def changelist_view(self, request, extra_context=None):
         """自定义列表视图"""
@@ -410,7 +427,7 @@ class RepositoryAdmin(admin.ModelAdmin):
         if not obj:  # 添加页面
             return (
                 (None, {
-                    'fields': ('url',),
+                    'fields': ('name', 'url'),
                     'description': '输入仓库的 URL，系统会自动提取仓库名称并使用默认分支。'
                 }),
             )
@@ -571,28 +588,58 @@ class RepositoryAdmin(admin.ModelAdmin):
             local_path = repo.get_local_path()
             
             # 检查目录是否存在
+            if not local_path:
+                self.message_user(request, 
+                    '无法获取仓库本地路径，请检查全局配置中的仓库基础目录设置', 
+                    level=messages.ERROR)
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            print(f"仓库本地路径: {local_path}")  # 调试信息
+            
             if not os.path.exists(local_path):
-                self.message_user(request, f'仓库目录不存在：{local_path}', level=messages.ERROR)
+                self.message_user(request, 
+                    f'仓库目录不存在：{local_path}\n'
+                    '请先克隆仓库，然后再进行同步操作。', 
+                    level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查目录权限
             if not os.access(local_path, os.R_OK | os.W_OK):
-                self.message_user(request, f'仓库目录权限不足：{local_path}', level=messages.ERROR)
+                self.message_user(request, 
+                    f'仓库目录权限不足：{local_path}\n'
+                    '请检查目录权限设置。', 
+                    level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
-            # 获取 Git 仓库对象
-            git_repo = git.Repo(local_path)
+            # 检查目录是否是 Git 仓库
+            try:
+                git_repo = git.Repo(local_path)
+                print(f"Git 仓库对象创建成功: {git_repo.git_dir}")  # 调试信息
+            except git.InvalidGitRepositoryError:
+                self.message_user(request, 
+                    f'目录不是有效的 Git 仓库：{local_path}\n'
+                    '请重新克隆仓库。', 
+                    level=messages.ERROR)
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查远程仓库配置
             if not git_repo.remotes:
-                self.message_user(request, '仓库没有配置远程地址', level=messages.ERROR)
+                self.message_user(request, 
+                    '仓库没有配置远程地址\n'
+                    '请重新克隆仓库。', 
+                    level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            print(f"远程仓库配置: {[remote.name for remote in git_repo.remotes]}")  # 调试信息
             
             # 检查 SSH 密钥配置
             if repo.is_ssh_protocol():
                 config = GlobalConfig.objects.first()
                 if not config or not config.ssh_key:
-                    self.message_user(request, 'SSH 密钥未配置，请先在全局配置中设置 SSH 密钥', level=messages.ERROR)
+                    self.message_user(request, 
+                        'SSH 密钥未配置\n'
+                        '请先在全局配置中设置 SSH 密钥', 
+                        level=messages.ERROR)
                     return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                 
                 # 创建临时 SSH 密钥文件
@@ -604,13 +651,17 @@ class RepositoryAdmin(admin.ModelAdmin):
                 try:
                     # 设置 SSH 密钥文件权限
                     os.chmod(key_path, 0o600)
+                    print(f"SSH 密钥文件创建成功: {key_path}")  # 调试信息
                     
                     # 配置 Git 使用临时 SSH 密钥
                     with git_repo.git.custom_environment(GIT_SSH_COMMAND=f'ssh -i {key_path} -o StrictHostKeyChecking=no'):
                         # 尝试获取远程信息
                         try:
+                            print("开始获取远程信息...")  # 调试信息
                             git_repo.git.fetch('-v', '--all')
+                            print("远程信息获取成功")  # 调试信息
                         except git.exc.GitCommandError as e:
+                            print(f"Git 操作失败: {str(e)}")  # 调试信息
                             if 'Could not read from remote repository' in str(e):
                                 self.message_user(request, 
                                     '无法访问远程仓库，请检查：\n'
@@ -624,10 +675,13 @@ class RepositoryAdmin(admin.ModelAdmin):
                         
                         # 检查分支是否存在
                         try:
+                            print(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
                             git_repo.git.show_ref(f'refs/remotes/origin/{repo.branch}')
+                            print("分支存在")  # 调试信息
                         except git.exc.GitCommandError:
                             # 获取所有可用分支
                             branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                            print(f"可用分支: {branches}")  # 调试信息
                             self.message_user(request, 
                                 f'分支 {repo.branch} 不存在。\n'
                                 f'可用的分支有：\n' + 
@@ -637,7 +691,9 @@ class RepositoryAdmin(admin.ModelAdmin):
                             return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                         
                         # 更新代码
+                        print("开始更新代码...")  # 调试信息
                         git_repo.git.pull('origin', repo.branch)
+                        print("代码更新成功")  # 调试信息
                         repo.last_sync_time = timezone.now()
                         repo.save()
                         self.message_user(request, '仓库同步成功')
@@ -645,13 +701,17 @@ class RepositoryAdmin(admin.ModelAdmin):
                     # 清理临时文件
                     try:
                         os.unlink(key_path)
+                        print("临时 SSH 密钥文件已清理")  # 调试信息
                     except:
                         pass
             else:
                 # HTTPS 方式
                 config = GlobalConfig.objects.first()
                 if not config or not config.https_username or not config.https_password:
-                    self.message_user(request, 'HTTPS 认证信息未配置，请先在全局配置中设置用户名和密码', level=messages.ERROR)
+                    self.message_user(request, 
+                        'HTTPS 认证信息未配置\n'
+                        '请先在全局配置中设置用户名和密码', 
+                        level=messages.ERROR)
                     return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                 
                 # 配置 Git 使用 HTTPS 认证
@@ -661,14 +721,19 @@ class RepositoryAdmin(admin.ModelAdmin):
                     GIT_PASSWORD=config.https_password
                 ):
                     try:
+                        print("开始获取远程信息...")  # 调试信息
                         git_repo.git.fetch('-v', '--all')
+                        print("远程信息获取成功")  # 调试信息
                         
                         # 检查分支是否存在
                         try:
+                            print(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
                             git_repo.git.show_ref(f'refs/remotes/origin/{repo.branch}')
+                            print("分支存在")  # 调试信息
                         except git.exc.GitCommandError:
                             # 获取所有可用分支
                             branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
+                            print(f"可用分支: {branches}")  # 调试信息
                             self.message_user(request, 
                                 f'分支 {repo.branch} 不存在。\n'
                                 f'可用的分支有：\n' + 
@@ -677,11 +742,14 @@ class RepositoryAdmin(admin.ModelAdmin):
                                 level=messages.ERROR)
                             return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                         
+                        print("开始更新代码...")  # 调试信息
                         git_repo.git.pull('origin', repo.branch)
+                        print("代码更新成功")  # 调试信息
                         repo.last_sync_time = timezone.now()
                         repo.save()
                         self.message_user(request, '仓库同步成功')
                     except git.exc.GitCommandError as e:
+                        print(f"Git 操作失败: {str(e)}")  # 调试信息
                         self.message_user(request, 
                             '仓库同步失败，请检查：\n'
                             '1. HTTPS 认证信息是否正确\n'
@@ -692,7 +760,8 @@ class RepositoryAdmin(admin.ModelAdmin):
         except Repository.DoesNotExist:
             self.message_user(request, '仓库不存在', level=messages.ERROR)
         except Exception as e:
-            self.message_user(request, f'同步失败：{str(e)}', level=messages.ERROR)
+            print(f"同步失败: {str(e)}")  # 调试信息
+            self.message_user(request, f'同步失败：{str(e)}\n请检查仓库配置和权限设置。', level=messages.ERROR)
         
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
 
@@ -705,7 +774,12 @@ class RepositoryAdmin(admin.ModelAdmin):
         config = GlobalConfig.objects.first()
         
         try:
-            git_repo = git.Repo(repo.local_path)
+            local_path = repo.get_local_path()
+            if not local_path or not os.path.exists(local_path):
+                messages.error(request, '仓库本地目录不存在，请先克隆仓库')
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+            
+            git_repo = git.Repo(local_path)
             
             # 添加所有更改
             git_repo.git.add('--all')

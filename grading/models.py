@@ -137,7 +137,23 @@ class Repository(models.Model):
         config = GlobalConfig.objects.first()
         if not config or not config.repo_base_dir:
             return None
-        return os.path.join(config.repo_base_dir, self.name)
+        
+        # 展开用户目录
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        
+        # 确保基础目录存在
+        if not os.path.exists(base_dir):
+            try:
+                os.makedirs(base_dir, exist_ok=True)
+            except Exception as e:
+                print(f"创建基础目录失败: {str(e)}")
+                return None
+        
+        # 构建完整的仓库路径
+        repo_path = os.path.join(base_dir, self.name)
+        
+        # 确保路径是绝对路径
+        return os.path.abspath(repo_path)
 
     def is_cloned(self):
         """检查仓库是否已克隆"""
@@ -165,28 +181,25 @@ class Repository(models.Model):
     @staticmethod
     def generate_name_from_url(url):
         """从 URL 生成仓库名称"""
-        # 生成随机字符串
-        def random_string(length=8):
-            return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+        # 移除 .git 后缀
+        url = url.rstrip('.git')
         
-        # 移除 .git 后缀（如果有）
-        url = url.replace('.git', '')
-        
-        # 分割主机和路径
+        # 如果是 SSH 格式，提取仓库名
         if url.startswith('git@'):
-            # SSH 格式：git@host:username/repository
-            parts = url.split(':')
-            if len(parts) == 2:
-                path_parts = parts[1].split('/')
-                if len(path_parts) >= 2:
-                    # 使用用户名和仓库名，添加随机字符串
-                    return f"{path_parts[-2]}_{path_parts[-1]}_{random_string()}"
-        elif url.startswith('http://') or url.startswith('https://'):
-            # HTTPS 格式：https://host/username/repository
-            path_parts = url.split('/')
-            if len(path_parts) >= 4:
-                # 使用用户名和仓库名，添加随机字符串
-                return f"{path_parts[-2]}_{path_parts[-1]}_{random_string()}"
+            # 获取最后一个冒号后的部分
+            repo_part = url.split(':')[-1]
+            # 获取最后一个斜杠后的部分
+            return repo_part.split('/')[-1]
         
-        # 如果无法解析，使用 URL 的最后一部分
-        return f"repo_{random_string()}"
+        # 如果是 HTTPS 格式，提取仓库名
+        elif url.startswith(('http://', 'https://')):
+            # 移除协议和域名部分
+            path = url.split('://')[-1].split('/')[-1]
+            return path
+        
+        return url
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            self._original_url = self.url
+        super().save(*args, **kwargs)
