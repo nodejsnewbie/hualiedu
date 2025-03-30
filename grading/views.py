@@ -16,7 +16,10 @@ from django.views.decorators.csrf import csrf_exempt
 from .utils import FileHandler, DirectoryHandler, GradeHandler, GitHandler
 from .config import WORD_STYLE_MAP, DIRECTORY_STRUCTURE
 from django.views.decorators.http import require_http_methods
-from .models import GlobalConfig
+from .models import GlobalConfig, Repository
+from django.contrib import messages
+from django.contrib.auth.decorators import login_required
+from django.urls import reverse
 
 logger = logging.getLogger(__name__)
 
@@ -501,3 +504,26 @@ def serve_file(request, file_path):
     except Exception as e:
         logger.error(f'文件服务失败: {str(e)}')
         return HttpResponse('服务器错误', status=500)
+
+@login_required
+def change_branch(request, repo_id):
+    """切换仓库分支"""
+    try:
+        repo = Repository.objects.get(id=repo_id)
+        if request.method == 'POST':
+            branch = request.POST.get('branch')
+            if branch in repo.branches:
+                repo.branch = branch
+                repo.save()
+                messages.success(request, f'已切换到分支 {branch}')
+                return redirect('admin:grading_repository_changelist')
+            else:
+                messages.error(request, f'分支 {branch} 不存在')
+        return render(request, 'admin/grading/repository/change_branch.html', {
+            'repo': repo,
+            'branches': repo.branches,
+            'current_branch': repo.branch
+        })
+    except Repository.DoesNotExist:
+        messages.error(request, '仓库不存在')
+        return redirect('admin:grading_repository_changelist')

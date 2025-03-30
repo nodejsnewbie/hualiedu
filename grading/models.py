@@ -114,13 +114,23 @@ class Repository(models.Model):
     name = models.CharField(max_length=255, unique=True)
     url = models.CharField(max_length=255, unique=True)
     branch = models.CharField(max_length=255, default='main')
-    branches = models.JSONField(default=list, help_text='仓库的所有分支列表')
+    _branches = models.JSONField(default=list, help_text='仓库的所有分支列表', db_column='branches')
     last_sync_time = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.name
+
+    @property
+    def branches(self):
+        """获取分支列表"""
+        return self._branches if isinstance(self._branches, list) else []
+
+    @branches.setter
+    def branches(self, value):
+        """设置分支列表"""
+        self._branches = value if isinstance(value, list) else []
 
     def get_local_path(self):
         """获取本地路径"""

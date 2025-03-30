@@ -15,6 +15,7 @@ from .models import Student, Assignment, Submission, Repository, GlobalConfig
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from pathlib import Path
+from urllib.parse import urlparse
 
 class SSHKeyFileInput(forms.ClearableFileInput):
     template_name = 'django/forms/widgets/clearable_file_input.html'
@@ -236,242 +237,74 @@ class GlobalConfigAdmin(admin.ModelAdmin):
 class RepositoryForm(forms.ModelForm):
     class Meta:
         model = Repository
-        fields = ['url']
+        fields = ['url', 'branch']
         help_texts = {
             'url': '支持 SSH 和 HTTPS 格式。SSH 格式示例：git@gitee.com:username/repository.git，HTTPS 格式示例：https://gitee.com/username/repository.git'
         }
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 如果是新建仓库，隐藏 branch 字段
+        if not self.instance.pk:
+            if 'branch' in self.fields:
+                self.fields['branch'].widget = forms.HiddenInput()
+
     def clean(self):
-        """验证表单数据"""
         cleaned_data = super().clean()
         url = cleaned_data.get('url')
-        
         if url:
-            # 检查 URL 是否已存在（排除当前实例）
-            existing_repo = Repository.objects.filter(url=url).exclude(pk=self.instance.pk if self.instance else None).first()
-            if existing_repo:
-                self.add_error('url', format_html(
-                    '<div class="alert alert-warning" style="margin-top: 10px;">'
-                    '<strong>该仓库已存在：</strong><br>'
-                    '仓库名称：{}<br>'
-                    '仓库 URL：{}<br>'
-                    '最后同步：{}'
-                    '</div>',
-                    existing_repo.name,
-                    existing_repo.url,
-                    existing_repo.last_sync_time.strftime("%Y-%m-%d %H:%M:%S") if existing_repo.last_sync_time else "未同步"
-                ))
-                return cleaned_data
-            
-            # 检查认证信息
-            config = GlobalConfig.objects.first()
-            if not config:
-                self.add_error('url', format_html(
-                    '<div class="alert alert-danger" style="margin-top: 10px;">'
-                    '<strong>请先配置全局认证信息</strong><br>'
-                    '点击<a href="{}">这里</a>进行配置'
-                    '</div>',
-                    reverse('admin:grading_globalconfig_add')
-                ))
-                return cleaned_data
-            
-            # 验证 URL 格式并提取仓库名称
-            is_ssh = url.startswith('git@') or url.startswith('ssh://')
-            repo_name = None
-            
-            if is_ssh:
-                if not config.ssh_key:
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        '<strong>使用 SSH 协议需要配置 SSH 私钥</strong><br>'
-                        '点击<a href="{}">这里</a>配置 SSH 私钥'
-                        '</div>',
-                        reverse('admin:grading_globalconfig_change', args=[config.pk])
-                    ))
-                    return cleaned_data
-                # 验证 SSH 密钥格式
-                key_content = config.ssh_key.strip()
-                if not (key_content.startswith('-----BEGIN') and key_content.endswith('PRIVATE KEY-----')):
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        '<strong>SSH 私钥格式无效</strong><br>'
-                        '请检查全局配置中的 SSH 私钥格式'
-                        '</div>'
-                    ))
-                    return cleaned_data
-                # 验证 SSH URL 格式
+            try:
+                # 处理 SSH 格式
                 if url.startswith('git@'):
-                    # 移除 .git 后缀（如果有）
-                    url = url.replace('.git', '')
-                    # 分割主机和路径
+                    # 验证 SSH URL 格式
                     parts = url.split(':')
                     if len(parts) != 2:
-                        self.add_error('url', format_html(
-                            '<div class="alert alert-danger" style="margin-top: 10px;">'
-                            '<strong>无效的 SSH URL 格式</strong><br>'
-                            '正确格式为：git@host:username/repository<br>'
-                            '示例：git@gitee.com:username/repository'
-                            '</div>'
-                        ))
-                        return cleaned_data
+                        raise forms.ValidationError('无效的 SSH URL 格式，正确格式为：git@host:username/repository.git')
+                    
                     # 验证路径部分
                     path_parts = parts[1].split('/')
                     if len(path_parts) < 2:
-                        self.add_error('url', format_html(
-                            '<div class="alert alert-danger" style="margin-top: 10px;">'
-                            '<strong>无效的仓库路径格式</strong><br>'
-                            '正确格式为：username/repository<br>'
-                            '示例：username/repository'
-                            '</div>'
-                        ))
-                        return cleaned_data
-                    repo_name = path_parts[-1]
-            elif url.startswith('http://') or url.startswith('https://'):
-                if not (config.https_username and config.https_password):
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        '<strong>使用 HTTPS 协议需要配置用户名和密码</strong><br>'
-                        '点击<a href="{}">这里</a>配置 HTTPS 认证信息'
-                        '</div>',
-                        reverse('admin:grading_globalconfig_change', args=[config.pk])
-                    ))
-                    return cleaned_data
-                # 从 HTTPS URL 提取仓库名称
-                from urllib.parse import urlparse
-                path = urlparse(url).path.strip('/')
-                if path.endswith('.git'):
-                    path = path[:-4]
-                path_parts = path.split('/')
-                if len(path_parts) < 2:
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        '<strong>无效的 HTTPS URL 格式</strong><br>'
-                        '无法提取仓库名称'
-                        '</div>'
-                    ))
-                    return cleaned_data
-                repo_name = path_parts[-1]
-            else:
-                self.add_error('url', format_html(
-                    '<div class="alert alert-danger" style="margin-top: 10px;">'
-                    '<strong>无效的 URL 格式</strong><br>'
-                    '请使用以下格式之一：<br>'
-                    '1. SSH 格式：git@host:username/repository.git<br>'
-                    '2. HTTPS 格式：https://host/username/repository.git'
-                    '</div>'
-                ))
-                return cleaned_data
-            
-            # 设置仓库名称和分支
-            if repo_name:
-                # 检查名称是否已存在
-                existing_repo = Repository.objects.filter(name=repo_name).exclude(pk=self.instance.pk if self.instance else None).first()
-                if existing_repo:
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-warning" style="margin-top: 10px;">'
-                        '<strong>该仓库名称已存在：</strong><br>'
-                        '仓库名称：{}<br>'
-                        '仓库 URL：{}<br>'
-                        '最后同步：{}'
-                        '</div>',
-                        existing_repo.name,
-                        existing_repo.url,
-                        existing_repo.last_sync_time.strftime("%Y-%m-%d %H:%M:%S") if existing_repo.last_sync_time else "未同步"
-                    ))
-                    return cleaned_data
+                        raise forms.ValidationError('无效的仓库路径格式，正确格式为：username/repository.git')
+                    
+                    # 添加 .git 后缀（如果没有）
+                    if not url.endswith('.git'):
+                        url = url + '.git'
+                    cleaned_data['url'] = url
                 
-                # 获取远端分支列表
-                try:
-                    # 准备环境变量
-                    env = os.environ.copy()
-                    if is_ssh and config.ssh_key:
-                        # 创建临时 SSH 密钥文件
-                        ssh_key_path = os.path.join(os.path.expanduser('~'), '.ssh', 'id_rsa_temp')
-                        os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
-                        with open(ssh_key_path, 'w') as f:
-                            f.write(config.ssh_key)
-                        os.chmod(ssh_key_path, 0o600)
-                        env['GIT_SSH_COMMAND'] = f'ssh -i {ssh_key_path} -o StrictHostKeyChecking=no'
+                # 处理 HTTPS 格式
+                elif url.startswith(('http://', 'https://')):
+                    parsed = urlparse(url)
+                    if not parsed.scheme or not parsed.netloc:
+                        raise forms.ValidationError('无效的 HTTPS URL 格式')
                     
-                    # 使用 git ls-remote 获取分支列表
-                    clone_url = url
-                    if not is_ssh and config.https_username and config.https_password:
-                        from urllib.parse import urlparse, urlunparse
-                        parsed = urlparse(url)
-                        netloc = f"{config.https_username}:{config.https_password}@{parsed.netloc}"
-                        clone_url = urlunparse(parsed._replace(netloc=netloc))
+                    # 检查用户名和密码
+                    if '@' not in parsed.netloc:
+                        config = GlobalConfig.objects.first()
+                        if not config or not (config.https_username and config.https_password):
+                            raise forms.ValidationError('使用 HTTPS 协议需要在 URL 中包含用户名和密码，或在全局配置中设置认证信息')
                     
-                    result = subprocess.run(
-                        ['git', 'ls-remote', '--heads', clone_url],
-                        env=env,
-                        capture_output=True,
-                        text=True
-                    )
-                    
-                    if result.returncode == 0:
-                        # 解析分支列表
-                        branches = []
-                        for line in result.stdout.splitlines():
-                            if line.strip():
-                                # 提取分支名
-                                branch = line.split('refs/heads/')[-1]
-                                branches.append(branch)
-                        
-                        # 设置分支列表
-                        cleaned_data['branches'] = branches
-                        
-                        # 验证选择的分支是否存在
-                        selected_branch = cleaned_data.get('branch', 'main')
-                        if selected_branch not in branches:
-                            self.add_error('branch', format_html(
-                                '<div class="alert alert-danger" style="margin-top: 10px;">'
-                                '<strong>选择的分支不存在</strong><br>'
-                                '分支 {} 在远端仓库中不存在。<br>'
-                                '可用的分支有：<br>' + 
-                                '<br>'.join(f'- {branch}' for branch in branches),
-                                selected_branch
-                            ))
-                            return cleaned_data
-                        
-                        # 设置仓库名称和分支
-                        cleaned_data['name'] = repo_name
-                        cleaned_data['branch'] = selected_branch
-                    else:
-                        self.add_error('url', format_html(
-                            '<div class="alert alert-danger" style="margin-top: 10px;">'
-                            '<strong>获取分支列表失败</strong><br>'
-                            '错误信息：{}'
-                            '</div>',
-                            result.stderr
-                        ))
-                        return cleaned_data
-                    
-                    # 清理临时文件
-                    if is_ssh and config.ssh_key:
-                        try:
-                            os.remove(ssh_key_path)
-                        except:
-                            pass
-                            
-                except Exception as e:
-                    self.add_error('url', format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        '<strong>获取分支列表失败</strong><br>'
-                        '错误信息：{}'
-                        '</div>',
-                        str(e)
-                    ))
-                    return cleaned_data
-        
+                    # 添加 .git 后缀（如果没有）
+                    if not url.endswith('.git'):
+                        url = url + '.git'
+                    cleaned_data['url'] = url
+                
+                else:
+                    raise forms.ValidationError('无效的 URL 格式，仅支持 SSH（git@...）或 HTTPS 格式')
+                
+                return cleaned_data
+            except forms.ValidationError as e:
+                raise e
+            except Exception as e:
+                raise forms.ValidationError(f'URL 验证失败: {str(e)}')
         return cleaned_data
 
     def save(self, commit=True):
         """保存表单数据"""
         instance = super().save(commit=False)
+        
+        # 从 URL 生成仓库名称
         if not instance.name:
-            instance.name = self.cleaned_data.get('name')
-        if not instance.branch:
-            instance.branch = self.cleaned_data.get('branch', 'main')
+            instance.name = Repository.generate_name_from_url(instance.url)
         
         # 获取仓库分支列表
         try:
@@ -508,17 +341,19 @@ class RepositoryForm(forms.ModelForm):
                         branch = line.split('refs/heads/')[-1]
                         branches.append(branch)
                 
+                if not branches:
+                    raise ValueError('仓库没有可用的分支')
+                
                 # 设置分支列表
                 instance.branches = branches
                 
-                # 如果没有设置默认分支，使用 main 或 master
-                if not instance.branch:
-                    if 'main' in branches:
-                        instance.branch = 'main'
-                    elif 'master' in branches:
-                        instance.branch = 'master'
-                    else:
-                        instance.branch = branches[0] if branches else 'main'
+                # 设置默认分支
+                if 'main' in branches:
+                    instance.branch = 'main'
+                elif 'master' in branches:
+                    instance.branch = 'master'
+                else:
+                    instance.branch = branches[0]
             else:
                 raise ValueError(f'获取分支列表失败：{result.stderr}')
             
