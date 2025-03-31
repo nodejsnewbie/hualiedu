@@ -126,9 +126,9 @@ STATICFILES_DIRS = [
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
-# Media files configuration
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+# Media files (User uploaded files)
 MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # 确保 grades 目录存在
 os.makedirs(os.path.join(MEDIA_ROOT, 'grades'), exist_ok=True)
@@ -158,8 +158,9 @@ LOGGING = {
         },
         'file': {
             'class': 'logging.FileHandler',
-            'filename': 'debug.log',
+            'filename': os.path.join(BASE_DIR, 'debug.log'),
             'formatter': 'verbose',
+            'mode': 'a',  # 追加模式
         },
     },
     'loggers': {

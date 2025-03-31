@@ -8,6 +8,7 @@ import mammoth
 import base64
 import shutil
 from .models import GlobalConfig
+import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -108,23 +109,46 @@ class FileHandler:
     def get_mime_type(file_path):
         """获取文件的 MIME 类型"""
         try:
+            logger.info(f'开始获取文件类型: {file_path}')
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                logger.error(f'文件不存在: {file_path}')
+                return None
+            
+            # 检查文件是否可读
+            if not os.access(file_path, os.R_OK):
+                logger.error(f'文件不可读: {file_path}')
+                return None
+            
+            # 初始化 mimetypes 模块
+            mimetypes.init()
+            logger.info('mimetypes 模块已初始化')
+            
             # 首先尝试使用 mimetypes 模块
             mime_type, _ = mimetypes.guess_type(file_path)
             if mime_type:
+                logger.info(f'使用 mimetypes 模块识别文件类型: {file_path} -> {mime_type}')
                 return mime_type
             
             # 如果 mimetypes 无法识别，根据文件扩展名判断
             ext = os.path.splitext(file_path)[1].lower()
+            logger.info(f'文件扩展名: {ext}')
+            
             if ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml']:
+                logger.info(f'使用扩展名识别文本文件: {file_path} -> text/plain')
                 return 'text/plain'
             elif ext in ['.docx']:
+                logger.info(f'使用扩展名识别 Word 文件: {file_path} -> application/vnd.openxmlformats-officedocument.wordprocessingml.document')
                 return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
             elif ext in ['.pdf']:
+                logger.info(f'使用扩展名识别 PDF 文件: {file_path} -> application/pdf')
                 return 'application/pdf'
             
+            logger.warning(f'无法识别文件类型: {file_path}')
             return None
         except Exception as e:
-            logger.error(f'获取文件类型失败: {str(e)}')
+            logger.error(f'获取文件类型失败: {str(e)}\n{traceback.format_exc()}')
             return None
 
     @staticmethod

@@ -31,363 +31,107 @@ def index(request):
 
 
 def grading_page(request):
+    """评分页面"""
     if request.method == 'POST':
         action = request.POST.get('action')
-        
-        # 处理创建目录请求
-        if request.headers.get('Content-Type') == 'application/json':
-            data = json.loads(request.body)
-            action = data.get('action')
-            
-            if action == 'create_directory':
-                try:
-                    repo_path = data.get('repo_path')
-                    if not repo_path:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '未提供仓库路径'
-                        })
-                    
-                    logger.info(f'收到克隆仓库请求，源路径: {repo_path}')
-                    
-                    # 检查是否为 Git 仓库
-                    if not GitHandler.is_git_repo(repo_path):
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '所选路径不是有效的 Git 仓库'
-                        })
-                    
-                    # 获取仓库名称
-                    repo_name = GitHandler.get_repo_name(repo_path)
-                    logger.info(f'获取到仓库名称: {repo_name}')
-                    
-                    # 构建目标路径
-                    target_path = os.path.join(settings.BASE_DIR, 'media', 'grades', repo_name)
-                    logger.info(f'目标路径: {target_path}')
-                    
-                    # 克隆仓库
-                    if not GitHandler.clone_repo(repo_path, target_path):
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '克隆仓库失败，请检查日志'
-                        })
-                    
-                    return JsonResponse({
-                        'status': 'success',
-                        'message': '仓库克隆成功',
-                        'repo_name': repo_name
-                    })
-                except Exception as e:
-                    logger.error(f'克隆仓库失败: {str(e)}')
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': str(e)
-                    })
-        
-        # 处理文件上传请求
-        if action == 'upload_directory':
-            try:
-                target_path = request.POST.get('target_path')
-                files = request.FILES.getlist('files[]')
-                file_paths = request.POST.getlist('file_paths[]')
-                
-                if not FileHandler.is_safe_path(target_path):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '无效的上传路径'
-                    })
-                
-                uploaded_files = []
-                for file, rel_path in zip(files, file_paths):
-                    # 构建目标文件路径
-                    target_file_path = os.path.join(
-                        settings.BASE_DIR,
-                        target_path.lstrip('/'),
-                        os.path.dirname(rel_path)
-                    )
-                    
-                    # 创建必要的目录
-                    DirectoryHandler.ensure_directory(target_file_path)
-                    
-                    # 构建完整的文件路径
-                    full_file_path = os.path.join(target_file_path, os.path.basename(rel_path))
-                    
-                    # 检查文件类型
-                    if not FileHandler.is_allowed_file(full_file_path):
-                        continue
-                    
-                    # 保存文件
-                    with open(full_file_path, 'wb+') as destination:
-                        for chunk in file.chunks():
-                            destination.write(chunk)
-                    
-                    uploaded_files.append(rel_path)
-                
-                return JsonResponse({
-                    'status': 'success',
-                    'message': f'成功上传 {len(uploaded_files)} 个文件',
-                    'files': uploaded_files
-                })
-            except Exception as e:
-                logger.error(f'文件上传失败: {str(e)}')
-                return JsonResponse({
-                    'status': 'error',
-                    'message': str(e)
-                })
-        
-        # 处理获取目录树请求
-        elif action == 'get_directory_tree':
-            try:
-                file_path = request.POST.get('file_path', '')
-                
-                # 从全局配置获取仓库基础目录
-                config = GlobalConfig.objects.first()
-                if not config or not config.repo_base_dir:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '未配置仓库基础目录'
-                    })
-                
-                # 展开路径中的用户目录符号（~）
-                base_dir = os.path.expanduser(config.repo_base_dir)
-                
-                # 如果目录不存在，尝试创建它
-                if not os.path.exists(base_dir):
-                    try:
-                        os.makedirs(base_dir, exist_ok=True)
-                    except Exception as e:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': f'无法创建目录: {str(e)}'
-                        })
-                
-                # 如果是根路径，使用基础目录
-                if not file_path:
-                    full_path = base_dir
-                else:
-                    full_path = os.path.join(base_dir, file_path)
-                
-                # 确保路径在基础目录内
-                if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
-                    return JsonResponse({'status': 'error', 'message': 'Invalid path'})
-                
-                if not os.path.exists(full_path):
-                    return JsonResponse({'status': 'error', 'message': 'Path does not exist'})
-                
-                # 获取目录内容
-                items = []
-                for item in os.listdir(full_path):
-                    item_path = os.path.join(full_path, item)
-                    relative_path = os.path.relpath(item_path, base_dir)
-                    
-                    if os.path.isdir(item_path):
-                        items.append({
-                            'path': relative_path,
-                            'name': item,
-                            'type': 'folder',
-                            'children': True  # 表示这是一个目录，可能有子项
-                        })
-                    else:
-                        items.append({
-                            'path': relative_path,
-                            'name': item,
-                            'type': 'file',
-                            'children': False
-                        })
-                
-                # 按类型和名称排序：目录在前，文件在后
-                items.sort(key=lambda x: (x['type'] != 'folder', x['name'].lower()))
-                
-                return JsonResponse({
-                    'status': 'success',
-                    'children': items
-                })
-                
-            except Exception as e:
-                return JsonResponse({'status': 'error', 'message': str(e)})
-        
-        # 处理获取内容请求
+        if action == 'get_directory_tree':
+            file_path = request.POST.get('file_path', '')
+            items = get_directory_tree(file_path)
+            print(f"Returning directory tree data: {items}")
+            return JsonResponse({
+                'status': 'success',
+                'data': items
+            })
         elif action == 'get_content':
+            path = request.POST.get('path')
             try:
-                file_path = request.POST.get('file_path')
-                if not file_path:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '未提供文件路径'
-                    })
-
-                # 从全局配置获取仓库基础目录
                 config = GlobalConfig.objects.first()
-                if not config or not config.repo_base_dir:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '未配置仓库基础目录'
-                    })
-                
-                # 展开路径中的用户目录符号（~）
+                if not config:
+                    config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
                 base_dir = os.path.expanduser(config.repo_base_dir)
-                full_path = os.path.join(base_dir, file_path)
+                full_path = os.path.join(base_dir, path)
+                print(f"Loading file content from: {full_path}")
                 
-                # 确保路径在基础目录内
-                if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '无权访问该文件'
-                    })
-
-                if not os.path.exists(full_path):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '文件不存在'
-                    })
-
-                if not os.path.isfile(full_path):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '不是有效的文件'
-                    })
-                
-                # 检查文件类型
-                mime_type = FileHandler.get_mime_type(full_path)
-                if not mime_type:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '无法识别的文件类型'
-                    })
-
-                content = None
-                
-                # 处理 Word 文档
-                if mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
-                    content = FileHandler.handle_docx(full_path)
-                    if not content:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '无法读取 Word 文档内容'
-                        })
-                # 处理 PDF 文件
-                elif mime_type == 'application/pdf':
-                    content = f'''
-                    <div class="pdf-container">
-                        <object data="/grading/file/{file_path}" type="application/pdf" width="100%" height="100%">
-                            <p>您的浏览器不支持 PDF 预览，<a href="/grading/file/{file_path}" target="_blank">点击下载</a></p>
-                        </object>
-                    </div>
-                    '''
+                if os.path.exists(full_path):
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
                     return JsonResponse({
                         'status': 'success',
                         'content': content
                     })
-                # 处理文本文件
-                elif mime_type.startswith('text/'):
-                    content = FileHandler.read_text_file(full_path)
-                    if not content:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '无法读取文本文件内容'
-                        })
                 else:
                     return JsonResponse({
                         'status': 'error',
-                        'message': '不支持的文件类型'
+                        'message': '文件不存在'
                     })
-                
-                return JsonResponse({
-                    'status': 'success',
-                    'content': content
-                })
             except Exception as e:
-                logger.error(f'读取文件失败: {str(e)}\n{traceback.format_exc()}')
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'读取文件失败: {str(e)}'
-                })
-        
-        # 处理保存评分请求
-        elif action == 'save_grade':
-            try:
-                grade = request.POST.get('grade')
-                if not grade or not GradeHandler.validate_grade(grade):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '无效的评分'
-                    })
-                
-                # TODO: 实现评分保存逻辑
-                
-                return JsonResponse({
-                    'status': 'success',
-                    'message': f'评分已保存: {GradeHandler.get_grade_description(grade)}'
-                })
-            except Exception as e:
-                logger.error(f'保存评分失败: {str(e)}')
+                print(f"Error loading file content: {str(e)}")
                 return JsonResponse({
                     'status': 'error',
                     'message': str(e)
                 })
-        
-        # 处理获取课程列表请求
-        elif action == 'get_courses':
+        elif action == 'save_grade':
+            path = request.POST.get('path')
+            grade = request.POST.get('grade')
             try:
-                # 获取grades目录下的所有课程目录
-                grades_dir = os.path.join(settings.MEDIA_ROOT, 'grades')
-                os.makedirs(grades_dir, exist_ok=True)
-                courses = [d for d in os.listdir(grades_dir) 
-                         if os.path.isdir(os.path.join(grades_dir, d))]
+                config = GlobalConfig.objects.first()
+                if not config:
+                    config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
+                base_dir = os.path.expanduser(config.repo_base_dir)
+                full_path = os.path.join(base_dir, path)
+                print(f"Saving grade for file: {full_path}")
                 
-                return JsonResponse({
-                    'status': 'success',
-                    'courses': courses
-                })
-            except Exception as e:
-                logger.error(f'获取课程列表失败: {str(e)}')
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'获取课程列表失败: {str(e)}'
-                })
-
-        # 处理获取班级列表请求
-        elif action == 'get_classes':
-            try:
-                course_name = request.POST.get('course_name')
-                if not course_name:
+                if os.path.exists(full_path):
+                    # 保存评分
+                    grade_file = os.path.join(base_dir, 'grades.json')
+                    grades = {}
+                    if os.path.exists(grade_file):
+                        with open(grade_file, 'r', encoding='utf-8') as f:
+                            grades = json.load(f)
+                    grades[path] = grade
+                    with open(grade_file, 'w', encoding='utf-8') as f:
+                        json.dump(grades, f, ensure_ascii=False, indent=2)
+                    return JsonResponse({'status': 'success'})
+                else:
                     return JsonResponse({
                         'status': 'error',
-                        'message': '未提供课程名称'
+                        'message': '文件不存在'
                     })
-
-                # 获取课程目录下的所有班级目录
-                course_dir = os.path.join(settings.MEDIA_ROOT, 'grades', course_name)
-                if not os.path.exists(course_dir):
-                    return JsonResponse({
-                        'status': 'success',
-                        'classes': []
-                    })
-
-                classes = [d for d in os.listdir(course_dir) 
-                         if os.path.isdir(os.path.join(course_dir, d))]
-                
-                return JsonResponse({
-                    'status': 'success',
-                    'classes': classes
-                })
             except Exception as e:
-                logger.error(f'获取班级列表失败: {str(e)}')
+                print(f"Error saving grade: {str(e)}")
                 return JsonResponse({
                     'status': 'error',
-                    'message': f'获取班级列表失败: {str(e)}'
+                    'message': str(e)
                 })
-        
-        else:
-            return JsonResponse({
-                'status': 'error',
-                'message': '无效的操作'
-            })
     
-    # GET 请求返回页面
-    return render(request, 'grading.html', {
-        'upload_path': '/media/grades'
-    })
+    # GET 请求，返回初始页面
+    try:
+        config = GlobalConfig.objects.first()
+        if not config:
+            config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
+        
+        # 确保基础目录存在
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+        
+        # 获取初始目录树数据
+        items = get_directory_tree()
+        print(f"Initial directory tree data: {items}")
+        
+        # 将目录树数据转换为 JSON 字符串
+        initial_tree_data = json.dumps(items, ensure_ascii=False)
+        print(f"Initial tree data JSON: {initial_tree_data}")
+        
+        return render(request, 'grading.html', {
+            'initial_tree_data': initial_tree_data
+        })
+    except Exception as e:
+        print(f"Error in grading_page: {str(e)}")
+        return render(request, 'grading.html', {
+            'error': str(e),
+            'initial_tree_data': '[]'
+        })
 
 
 def get_directory_structure(root_dir):
@@ -606,7 +350,9 @@ def grading_view(request):
             logger.error('未配置仓库基础目录')
             return render(request, 'grading.html', {
                 'files': [],
-                'error': '未配置仓库基础目录'
+                'error': '未配置仓库基础目录',
+                'config': config,
+                'base_dir': None
             })
         
         # 展开路径中的用户目录符号（~）
@@ -622,7 +368,9 @@ def grading_view(request):
                 logger.error(f'创建目录失败: {str(e)}')
                 return render(request, 'grading.html', {
                     'files': [],
-                    'error': f'无法创建目录: {str(e)}'
+                    'error': f'无法创建目录: {str(e)}',
+                    'config': config,
+                    'base_dir': base_dir
                 })
         
         # 获取所有文件
@@ -636,6 +384,7 @@ def grading_view(request):
         except Exception as e:
             logger.error(f'目录权限检查失败: {str(e)}')
         
+        # 遍历所有目录和文件
         for root, dirs, filenames in os.walk(base_dir):
             # 过滤掉隐藏文件和目录
             dirs[:] = [d for d in dirs if not d.startswith('.')]
@@ -648,6 +397,10 @@ def grading_view(request):
                 # 构建相对路径
                 rel_path = os.path.relpath(os.path.join(root, filename), base_dir)
                 full_path = os.path.join(root, filename)
+                
+                logger.info(f'处理文件: {filename}')
+                logger.info(f'相对路径: {rel_path}')
+                logger.info(f'完整路径: {full_path}')
                 
                 # 检查文件类型
                 mime_type = FileHandler.get_mime_type(full_path)
@@ -662,6 +415,8 @@ def grading_view(request):
                         'type': mime_type
                     })
                     logger.info(f'添加文件: {filename} ({mime_type})')
+                else:
+                    logger.info(f'跳过文件: {filename} (不支持的文件类型)')
         
         # 按文件名排序
         files.sort(key=lambda x: x['name'].lower())
@@ -673,12 +428,76 @@ def grading_view(request):
         
         return render(request, 'grading.html', {
             'files': files,
-            'error': None
+            'error': None,
+            'config': config,
+            'base_dir': base_dir
         })
         
     except Exception as e:
         logger.error(f'获取文件列表失败: {str(e)}\n{traceback.format_exc()}')
         return render(request, 'grading.html', {
             'files': [],
-            'error': f'获取文件列表失败: {str(e)}'
+            'error': f'获取文件列表失败: {str(e)}',
+            'config': config if 'config' in locals() else None,
+            'base_dir': base_dir if 'base_dir' in locals() else None
         })
+
+def get_directory_tree(file_path=''):
+    """获取目录树结构"""
+    try:
+        # 获取基础目录
+        config = GlobalConfig.objects.first()
+        if not config:
+            config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        print(f"Base directory: {base_dir}")
+        
+        # 确保基础目录存在
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+            print(f"Created base directory: {base_dir}")
+        
+        # 构建完整路径
+        full_path = os.path.join(base_dir, file_path)
+        print(f"Full path: {full_path}")
+        
+        # 获取目录内容
+        items = []
+        for item in os.listdir(full_path):
+            # 跳过隐藏文件和目录（以.开头的文件和目录）
+            if item.startswith('.'):
+                continue
+                
+            item_path = os.path.join(full_path, item)
+            print(f"Processing item: {item_path}")
+            
+            # 获取相对路径
+            rel_path = os.path.relpath(item_path, base_dir)
+            print(f"Relative path: {rel_path}")
+            
+            # 构建树节点
+            node = {
+                'id': rel_path,
+                'text': item,
+                'type': 'folder' if os.path.isdir(item_path) else 'file',
+                'children': os.path.isdir(item_path)
+            }
+            print(f"Created node: {node}")
+            items.append(node)
+        
+        # 按文件夹在前，文件在后的顺序排序
+        items.sort(key=lambda x: (x['type'] != 'folder', x['text'].lower()))
+        print(f"Final items: {items}")
+        
+        return items
+    except Exception as e:
+        print(f"Error in get_directory_tree: {str(e)}")
+        return []
+
+def get_file_content(file_path):
+    # Implementation of get_file_content function
+    pass
+
+def save_file_grade(file_path, grade):
+    # Implementation of save_file_grade function
+    pass

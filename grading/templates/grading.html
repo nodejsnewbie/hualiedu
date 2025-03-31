@@ -1,340 +1,77 @@
+{% extends 'base.html' %}
 {% load static %}
-<!DOCTYPE html>
-<html lang="zh">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>评分系统</title>
-    <!-- 使用本地静态文件 -->
-    <link href="{% static 'grading/css/bootstrap.min.css' %}" rel="stylesheet">
-    <style>
-        body {
-            background-color: #f8f9fa;
-        }
-        .navbar {
-            background-color: #2c3e50;
-            padding: 1rem;
-        }
-        .navbar-brand {
-            color: white;
-            font-size: 1.5rem;
-        }
-        .navbar-nav .nav-link {
-            color: rgba(255,255,255,.8);
-        }
-        .navbar-nav .nav-link:hover {
-            color: white;
-        }
-        .main-content {
-            display: flex;
-            height: calc(100vh - 72px);
-            padding: 1rem;
-            gap: 1rem;
-        }
-        .file-tree {
-            width: 300px;
-            background: white;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,.1);
-            padding: 1rem;
-            overflow-y: auto;
-        }
-        .file-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: white;
-            border-radius: 4px;
-            box-shadow: 0 1px 3px rgba(0,0,0,.1);
-        }
-        .file-header {
-            padding: 1rem;
-            border-bottom: 1px solid #dee2e6;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .file-body {
-            flex: 1;
-            padding: 1rem;
-            overflow-y: auto;
-        }
-        .grading-panel {
-            padding: 1rem;
-            background: #f8f9fa;
-            border-top: 1px solid #dee2e6;
-        }
-        .grade-btn {
-            margin-right: 0.5rem;
-        }
-        .grade-btn.selected {
-            background-color: #0d6efd;
-            color: white;
-        }
-        .file-item {
-            padding: 0.5rem;
-            border-bottom: 1px solid #dee2e6;
-            cursor: pointer;
-        }
-        .file-item:hover {
-            background-color: #f8f9fa;
-        }
-        .file-item.active {
-            background-color: #e9ecef;
-        }
-        .file-icon {
-            margin-right: 0.5rem;
-        }
-        .error-message {
-            padding: 1rem;
-            margin: 1rem;
-            background-color: #f8d7da;
-            border: 1px solid #f5c6cb;
-            border-radius: 4px;
-            color: #721c24;
-        }
-        .loading {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.8);
-            z-index: 1000;
-            justify-content: center;
-            align-items: center;
-        }
-        .loading-spinner {
-            width: 50px;
-            height: 50px;
-            border: 5px solid #f3f3f3;
-            border-top: 5px solid #3498db;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-</head>
-<body>
-    <!-- 加载中遮罩 -->
-    <div class="loading" id="loading">
-        <div class="loading-spinner"></div>
-    </div>
 
-    <!-- 导航栏 -->
-    <nav class="navbar">
-        <div class="container-fluid">
-            <span class="navbar-brand">评分系统</span>
-            <ul class="navbar-nav">
-                <li class="nav-item">
-                    <a class="nav-link" href="{% url 'admin:index' %}">返回管理后台</a>
-                </li>
-            </ul>
-        </div>
-    </nav>
+{% block extra_css %}
+<!-- jstree CSS -->
+<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/jstree/3.3.12/themes/default/style.min.css" crossorigin="anonymous">
+{% endblock %}
 
-    <!-- 主要内容 -->
-    <div class="main-content">
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
         <!-- 左侧文件树 -->
-        <div class="file-tree">
-            <h5 class="mb-3">文件列表</h5>
-            {% if error %}
-            <div class="error-message">
-                {{ error }}
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">文件列表</h5>
+                </div>
+                <div class="card-body">
+                    <div id="grade-tree"></div>
+                </div>
             </div>
-            {% else %}
-            <div id="file-list">
-                {% if files %}
-                    <div class="text-muted mb-2">找到 {{ files|length }} 个文件</div>
-                    {% for file in files %}
-                    <div class="file-item" onclick="loadFile('{{ file.path }}')">
-                        <span class="file-icon">
-                            {% if file.type == 'application/pdf' %}
-                                📄
-                            {% elif file.type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' %}
-                                📝
-                            {% else %}
-                                📄
-                            {% endif %}
-                        </span>
-                        {{ file.name }}
-                        <small class="text-muted d-block">{{ file.path }}</small>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <div class="text-muted">暂无文件</div>
-                {% endif %}
-            </div>
-            {% endif %}
         </div>
 
-        <!-- 右侧内容 -->
-        <div class="file-content">
-            <div class="file-header">
-                <h5 class="mb-0">文件内容</h5>
-                <span id="current-file" class="badge bg-info"></span>
-            </div>
-            <div class="file-body">
-                <div id="file-content"></div>
-            </div>
-            <div class="grading-panel">
-                <div class="btn-group mb-3" role="group" aria-label="评分选项">
-                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('A')">A</button>
-                    <button type="button" class="btn btn-outline-primary grade-btn selected" onclick="selectGrade('B')">B</button>
-                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('C')">C</button>
-                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('D')">D</button>
-                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('E')">E</button>
+        <!-- 右侧内容区 -->
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">评分</h5>
                 </div>
-                <div class="d-flex justify-content-end">
-                    <button class="btn btn-success me-2" onclick="saveGrade()">保存评分</button>
-                    <button class="btn btn-secondary" onclick="nextFile()">下一个</button>
+                <div class="card-body">
+                    <!-- 评分按钮组 -->
+                    <div class="btn-group mb-3" role="group" aria-label="评分选项">
+                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
+                        <button type="button" class="btn btn-outline-primary grade-button active" data-grade="B">B</button>
+                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="C">C</button>
+                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
+                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="F">F</button>
+                    </div>
+
+                    <!-- 加载指示器 -->
+                    <div id="loading" style="display: none;">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="visually-hidden">加载中...</span>
+                        </div>
+                    </div>
+
+                    <!-- 文件内容显示区域 -->
+                    <div id="file-content" class="mt-3">
+                        {% if error %}
+                            <div class="alert alert-danger">
+                                {{ error }}
+                            </div>
+                        {% else %}
+                            <div class="alert alert-info">
+                                请从左侧选择要评分的文件
+                            </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
+{% endblock %}
 
-    <!-- 使用本地静态文件 -->
-    <script src="{% static 'grading/js/jquery.min.js' %}"></script>
-    <script src="{% static 'grading/js/bootstrap.bundle.min.js' %}"></script>
-    <script>
-        let currentFile = '';
-        let selectedGrade = 'B';  // 默认评分为B
-        let retryCount = 0;
-        const MAX_RETRIES = 3;
-        const TIMEOUT = 30000; // 30秒超时
+{% block extra_js %}
+<!-- jstree JavaScript -->
+<script src="https://cdn.bootcdn.net/ajax/libs/jstree/3.3.12/jstree.min.js" crossorigin="anonymous"></script>
+<script src="{% static 'grading/js/grading.js' %}"></script>
 
-        // 显示加载中
-        function showLoading() {
-            $('#loading').css('display', 'flex');
-        }
-
-        // 隐藏加载中
-        function hideLoading() {
-            $('#loading').css('display', 'none');
-        }
-
-        // 加载文件内容
-        function loadFile(path) {
-            currentFile = path;
-            $('#current-file').text(path);
-            
-            // 更新选中状态
-            $('.file-item').removeClass('active');
-            $(`.file-item:contains('${path.split('/').pop()}')`).addClass('active');
-            
-            showLoading();
-            retryCount = 0;
-            
-            function tryLoadFile() {
-                $.ajax({
-                    url: '/grading/',
-                    method: 'POST',
-                    data: {
-                        action: 'get_content',
-                        path: path,
-                        csrfmiddlewaretoken: getCsrfToken()
-                    },
-                    timeout: TIMEOUT,
-                    success: function(response) {
-                        hideLoading();
-                        if (response.status === 'success') {
-                            $('#file-content').html(response.content);
-                        } else {
-                            $('#file-content').html('<div class="alert alert-danger">加载失败：' + response.message + '</div>');
-                        }
-                    },
-                    error: function(xhr, status, error) {
-                        hideLoading();
-                        if (status === 'timeout') {
-                            if (retryCount < MAX_RETRIES) {
-                                retryCount++;
-                                $('#file-content').html(`<div class="alert alert-warning">加载超时，正在重试 (${retryCount}/${MAX_RETRIES})...</div>`);
-                                setTimeout(tryLoadFile, 2000); // 2秒后重试
-                            } else {
-                                $('#file-content').html('<div class="alert alert-danger">加载失败：请求超时，请稍后重试</div>');
-                            }
-                        } else {
-                            $('#file-content').html('<div class="alert alert-danger">加载失败：' + error + '</div>');
-                        }
-                    }
-                });
-            }
-            
-            tryLoadFile();
-        }
-
-        // 选择评分
-        function selectGrade(grade) {
-            selectedGrade = grade;
-            $('.grade-btn').removeClass('selected');
-            $(`.grade-btn:contains('${grade}')`).addClass('selected');
-        }
-
-        // 保存评分
-        function saveGrade() {
-            if (!currentFile) {
-                alert('请先选择要评分的文件');
-                return;
-            }
-
-            showLoading();
-            $.ajax({
-                url: '/grading/',
-                method: 'POST',
-                data: {
-                    action: 'save_grade',
-                    path: currentFile,
-                    grade: selectedGrade,
-                    csrfmiddlewaretoken: getCsrfToken()
-                },
-                timeout: TIMEOUT,
-                success: function(response) {
-                    hideLoading();
-                    if (response.status === 'success') {
-                        alert('评分已保存');
-                        loadFile(currentFile);  // 重新加载文件内容
-                    } else {
-                        alert('保存失败：' + response.message);
-                    }
-                },
-                error: function(xhr, status, error) {
-                    hideLoading();
-                    alert('保存失败：' + error);
-                }
-            });
-        }
-
-        // 下一个文件
-        function nextFile() {
-            const files = $('.file-item').map(function() {
-                return $(this).text().trim();
-            }).get();
-            
-            if (files.length === 0) return;
-            
-            const currentIndex = files.indexOf(currentFile.split('/').pop());
-            if (currentIndex === -1 || currentIndex === files.length - 1) {
-                loadFile(files[0]);
-            } else {
-                loadFile(files[currentIndex + 1]);
-            }
-        }
-
-        // 获取CSRF Token
-        function getCsrfToken() {
-            return document.querySelector('[name=csrfmiddlewaretoken]').value;
-        }
-
-        // 页面加载完成后初始化
-        $(document).ready(function() {
-            // 默认选中B评分
-            selectGrade('B');
-        });
-    </script>
-    {% csrf_token %}
-</body>
-</html> 
+<!-- 初始化数据 -->
+<script>
+    // 将初始数据传递给 JavaScript
+    window.initialTreeData = JSON.parse('{{ initial_tree_data|escapejs }}');
+    console.log('Initial tree data in template:', window.initialTreeData);
+</script>
+{% endblock %} 

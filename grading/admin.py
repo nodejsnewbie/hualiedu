@@ -117,8 +117,7 @@ class GlobalConfigForm(forms.ModelForm):
             'repo_base_dir': forms.TextInput(attrs={
                 'class': 'vTextField',
                 'style': 'width: 100%;',
-                'placeholder': '例如：~/repo',
-                'readonly': True
+                'placeholder': '例如：~/jobs'
             })
         }
 
@@ -127,6 +126,9 @@ class GlobalConfigForm(forms.ModelForm):
         if self.instance and self.instance.pk and self.instance.ssh_key:
             self.initial['ssh_key'] = self.instance.ssh_key
             self.fields['ssh_key'].widget.attrs['style'] = 'display: block !important; width: 100%; height: 200px; font-family: monospace; margin-bottom: 10px;'
+        # 设置 repo_base_dir 的默认值
+        if not self.instance.pk:
+            self.initial['repo_base_dir'] = '~/jobs'
 
     def clean(self):
         """验证表单数据"""
@@ -170,7 +172,7 @@ class GlobalConfigAdmin(admin.ModelAdmin):
         }),
         ('仓库配置', {
             'fields': ('repo_base_dir',),
-            'description': '配置仓库克隆的基础目录。默认为 ~/repo。'
+            'description': '配置仓库克隆的基础目录。默认为 ~/jobs。'
         }),
         ('系统信息', {
             'fields': ('created_at', 'updated_at'),
