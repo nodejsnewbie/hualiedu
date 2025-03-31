@@ -527,3 +527,158 @@ def change_branch(request, repo_id):
     except Repository.DoesNotExist:
         messages.error(request, '仓库不存在')
         return redirect('admin:grading_repository_changelist')
+
+@login_required
+def grading_view(request):
+    logger.info('开始处理评分页面请求')
+    
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        logger.info(f'收到 POST 请求，action: {action}')
+        
+        if action == 'get_content':
+            path = request.POST.get('path')
+            logger.info(f'请求获取文件内容，路径: {path}')
+            try:
+                # 从全局配置获取仓库基础目录
+                config = GlobalConfig.objects.first()
+                if not config or not config.repo_base_dir:
+                    logger.error('未配置仓库基础目录')
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': '未配置仓库基础目录'
+                    })
+                
+                # 展开路径中的用户目录符号（~）
+                base_dir = os.path.expanduser(config.repo_base_dir)
+                full_path = os.path.join(base_dir, path)
+                
+                logger.info(f'尝试读取文件: {full_path}')
+                
+                # 检查文件是否存在
+                if not os.path.exists(full_path):
+                    logger.error(f'文件不存在: {full_path}')
+                    return JsonResponse({
+                        'status': 'error',
+                        'message': '文件不存在'
+                    })
+                
+                # 读取文件内容
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                logger.info(f'成功读取文件: {full_path}')
+                return JsonResponse({
+                    'status': 'success',
+                    'content': content
+                })
+            except Exception as e:
+                logger.error(f'读取文件失败: {str(e)}\n{traceback.format_exc()}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': str(e)
+                })
+                
+        elif action == 'save_grade':
+            path = request.POST.get('path')
+            grade = request.POST.get('grade')
+            logger.info(f'保存评分: 文件={path}, 评分={grade}')
+            try:
+                # 这里可以添加保存评分的逻辑
+                # 例如保存到数据库或文件中
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '评分已保存'
+                })
+            except Exception as e:
+                logger.error(f'保存评分失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': str(e)
+                })
+    
+    # GET 请求，显示评分页面
+    try:
+        logger.info('处理 GET 请求，准备显示评分页面')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return render(request, 'grading.html', {
+                'files': [],
+                'error': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        logger.info(f'使用仓库基础目录: {base_dir}')
+        
+        # 如果目录不存在，尝试创建它
+        if not os.path.exists(base_dir):
+            try:
+                os.makedirs(base_dir, exist_ok=True)
+                logger.info(f'创建目录: {base_dir}')
+            except Exception as e:
+                logger.error(f'创建目录失败: {str(e)}')
+                return render(request, 'grading.html', {
+                    'files': [],
+                    'error': f'无法创建目录: {str(e)}'
+                })
+        
+        # 获取所有文件
+        files = []
+        logger.info('开始扫描文件...')
+        
+        # 检查目录权限
+        try:
+            os.access(base_dir, os.R_OK)
+            logger.info(f'目录 {base_dir} 可读')
+        except Exception as e:
+            logger.error(f'目录权限检查失败: {str(e)}')
+        
+        for root, dirs, filenames in os.walk(base_dir):
+            # 过滤掉隐藏文件和目录
+            dirs[:] = [d for d in dirs if not d.startswith('.')]
+            filenames = [f for f in filenames if not f.startswith('.')]
+            
+            logger.info(f'扫描目录: {root}')
+            logger.info(f'发现文件: {filenames}')
+            
+            for filename in filenames:
+                # 构建相对路径
+                rel_path = os.path.relpath(os.path.join(root, filename), base_dir)
+                full_path = os.path.join(root, filename)
+                
+                # 检查文件类型
+                mime_type = FileHandler.get_mime_type(full_path)
+                logger.info(f'文件类型检查: {filename} -> {mime_type}')
+                
+                if mime_type and (mime_type.startswith('text/') or 
+                                mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' or
+                                mime_type == 'application/pdf'):
+                    files.append({
+                        'name': filename,
+                        'path': rel_path,
+                        'type': mime_type
+                    })
+                    logger.info(f'添加文件: {filename} ({mime_type})')
+        
+        # 按文件名排序
+        files.sort(key=lambda x: x['name'].lower())
+        
+        # 添加调试信息
+        logger.info(f'找到 {len(files)} 个文件')
+        for file in files:
+            logger.info(f'文件: {file["name"]}, 路径: {file["path"]}, 类型: {file["type"]}')
+        
+        return render(request, 'grading.html', {
+            'files': files,
+            'error': None
+        })
+        
+    except Exception as e:
+        logger.error(f'获取文件列表失败: {str(e)}\n{traceback.format_exc()}')
+        return render(request, 'grading.html', {
+            'files': [],
+            'error': f'获取文件列表失败: {str(e)}'
+        })

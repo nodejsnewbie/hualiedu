@@ -102,32 +102,49 @@ class FileHandler:
         
         # 展开路径中的用户目录符号（~）
         base_dir = os.path.expanduser(config.repo_base_dir)
-        normalized_path = os.path.abspath(path)
-        
-        try:
-            # 使用 os.path.commonpath 检查路径是否在允许的目录下
-            return os.path.commonpath([normalized_path, base_dir]) == base_dir
-        except ValueError:
-            # 如果路径不在同一个挂载点，commonpath 会抛出 ValueError
-            return False
+        return os.path.abspath(path).startswith(os.path.abspath(base_dir))
 
     @staticmethod
     def get_mime_type(file_path):
-        """获取文件的MIME类型"""
-        mime_type, _ = mimetypes.guess_type(file_path)
-        return mime_type
+        """获取文件的 MIME 类型"""
+        try:
+            # 首先尝试使用 mimetypes 模块
+            mime_type, _ = mimetypes.guess_type(file_path)
+            if mime_type:
+                return mime_type
+            
+            # 如果 mimetypes 无法识别，根据文件扩展名判断
+            ext = os.path.splitext(file_path)[1].lower()
+            if ext in ['.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml']:
+                return 'text/plain'
+            elif ext in ['.docx']:
+                return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            elif ext in ['.pdf']:
+                return 'application/pdf'
+            
+            return None
+        except Exception as e:
+            logger.error(f'获取文件类型失败: {str(e)}')
+            return None
 
     @staticmethod
     def is_allowed_file(file_path):
-        """检查文件类型是否允许"""
-        mime_type = FileHandler.get_mime_type(file_path)
-        if not mime_type:
+        """检查文件是否允许上传"""
+        try:
+            mime_type = FileHandler.get_mime_type(file_path)
+            if not mime_type:
+                return False
+            
+            # 检查文件类型是否在允许列表中
+            allowed_types = [
+                'text/plain',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'application/pdf'
+            ]
+            return mime_type in allowed_types
+        except Exception as e:
+            logger.error(f'检查文件类型失败: {str(e)}')
             return False
-        
-        for file_type in ALLOWED_FILE_TYPES.values():
-            if mime_type in file_type['mime_types']:
-                return True
-        return False
 
     @staticmethod
     def read_text_file(file_path):

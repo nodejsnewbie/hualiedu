@@ -1,516 +1,340 @@
-{% extends 'admin/base_site.html' %}
 {% load static %}
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>评分系统</title>
+    <!-- 使用本地静态文件 -->
+    <link href="{% static 'grading/css/bootstrap.min.css' %}" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .navbar {
+            background-color: #2c3e50;
+            padding: 1rem;
+        }
+        .navbar-brand {
+            color: white;
+            font-size: 1.5rem;
+        }
+        .navbar-nav .nav-link {
+            color: rgba(255,255,255,.8);
+        }
+        .navbar-nav .nav-link:hover {
+            color: white;
+        }
+        .main-content {
+            display: flex;
+            height: calc(100vh - 72px);
+            padding: 1rem;
+            gap: 1rem;
+        }
+        .file-tree {
+            width: 300px;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.1);
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        .file-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,.1);
+        }
+        .file-header {
+            padding: 1rem;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .file-body {
+            flex: 1;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        .grading-panel {
+            padding: 1rem;
+            background: #f8f9fa;
+            border-top: 1px solid #dee2e6;
+        }
+        .grade-btn {
+            margin-right: 0.5rem;
+        }
+        .grade-btn.selected {
+            background-color: #0d6efd;
+            color: white;
+        }
+        .file-item {
+            padding: 0.5rem;
+            border-bottom: 1px solid #dee2e6;
+            cursor: pointer;
+        }
+        .file-item:hover {
+            background-color: #f8f9fa;
+        }
+        .file-item.active {
+            background-color: #e9ecef;
+        }
+        .file-icon {
+            margin-right: 0.5rem;
+        }
+        .error-message {
+            padding: 1rem;
+            margin: 1rem;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            color: #721c24;
+        }
+        .loading {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <!-- 加载中遮罩 -->
+    <div class="loading" id="loading">
+        <div class="loading-spinner"></div>
+    </div>
 
-{% block title %}评分系统{% endblock %}
-
-{% block content %}
-<div class="content-wrapper">
-    <!-- 顶部导航栏 -->
-    <div class="content-header">
+    <!-- 导航栏 -->
+    <nav class="navbar">
         <div class="container-fluid">
-            <div class="row mb-2">
-                <div class="col-sm-6">
-                    <h1 class="m-0">评分系统</h1>
-                </div>
-                <div class="col-sm-6">
-                    <ol class="breadcrumb float-sm-right">
-                        <li class="breadcrumb-item"><a href="{% url 'admin:index' %}">管理后台</a></li>
-                        <li class="breadcrumb-item active">评分系统</li>
-                    </ol>
-                </div>
-            </div>
+            <span class="navbar-brand">评分系统</span>
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link" href="{% url 'admin:index' %}">返回管理后台</a>
+                </li>
+            </ul>
         </div>
-    </div>
+    </nav>
 
-    <!-- 主要内容区域 -->
-    <div class="content">
-        <div class="container-fluid">
-            <div class="row">
-                <!-- 左侧面板 -->
-                <div class="col-md-3">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">文件列表</h3>
-                        </div>
-                        <div class="card-body">
-                            <div id="grade-tree"></div>
-                        </div>
+    <!-- 主要内容 -->
+    <div class="main-content">
+        <!-- 左侧文件树 -->
+        <div class="file-tree">
+            <h5 class="mb-3">文件列表</h5>
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% else %}
+            <div id="file-list">
+                {% if files %}
+                    <div class="text-muted mb-2">找到 {{ files|length }} 个文件</div>
+                    {% for file in files %}
+                    <div class="file-item" onclick="loadFile('{{ file.path }}')">
+                        <span class="file-icon">
+                            {% if file.type == 'application/pdf' %}
+                                📄
+                            {% elif file.type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' %}
+                                📝
+                            {% else %}
+                                📄
+                            {% endif %}
+                        </span>
+                        {{ file.name }}
+                        <small class="text-muted d-block">{{ file.path }}</small>
                     </div>
-                </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-muted">暂无文件</div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
 
-                <!-- 右侧面板 -->
-                <div class="col-md-9">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3 class="card-title">文件内容</h3>
-                            <div class="card-tools">
-                                <span id="current-file" class="badge badge-info"></span>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div id="docContent" class="doc-content"></div>
-                        </div>
-                    </div>
+        <!-- 右侧内容 -->
+        <div class="file-content">
+            <div class="file-header">
+                <h5 class="mb-0">文件内容</h5>
+                <span id="current-file" class="badge bg-info"></span>
+            </div>
+            <div class="file-body">
+                <div id="file-content"></div>
+            </div>
+            <div class="grading-panel">
+                <div class="btn-group mb-3" role="group" aria-label="评分选项">
+                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('A')">A</button>
+                    <button type="button" class="btn btn-outline-primary grade-btn selected" onclick="selectGrade('B')">B</button>
+                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('C')">C</button>
+                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('D')">D</button>
+                    <button type="button" class="btn btn-outline-primary grade-btn" onclick="selectGrade('E')">E</button>
+                </div>
+                <div class="d-flex justify-content-end">
+                    <button class="btn btn-success me-2" onclick="saveGrade()">保存评分</button>
+                    <button class="btn btn-secondary" onclick="nextFile()">下一个</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 评分按钮面板 -->
-    <div class="card-footer">
-        <div class="row">
-            <div class="col-md-6">
-                <div class="btn-group">
-                    <button class="btn btn-primary" onclick="gradeSubmission('A')">A</button>
-                    <button class="btn btn-primary" onclick="gradeSubmission('B')">B</button>
-                    <button class="btn btn-primary" onclick="gradeSubmission('C')">C</button>
-                    <button class="btn btn-primary" onclick="gradeSubmission('D')">D</button>
-                    <button class="btn btn-primary" onclick="gradeSubmission('F')">F</button>
-                </div>
-            </div>
-            <div class="col-md-6 text-right">
-                <button class="btn btn-success" onclick="saveGrade()">保存评分</button>
-                <button class="btn btn-secondary" onclick="nextSubmission()">下一个</button>
-            </div>
-        </div>
-    </div>
-</div>
+    <!-- 使用本地静态文件 -->
+    <script src="{% static 'grading/js/jquery.min.js' %}"></script>
+    <script src="{% static 'grading/js/bootstrap.bundle.min.js' %}"></script>
+    <script>
+        let currentFile = '';
+        let selectedGrade = 'B';  // 默认评分为B
+        let retryCount = 0;
+        const MAX_RETRIES = 3;
+        const TIMEOUT = 30000; // 30秒超时
 
-<!-- 加载提示 -->
-<div id="loading" class="loading-overlay">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">加载中...</div>
-</div>
-{% endblock %}
+        // 显示加载中
+        function showLoading() {
+            $('#loading').css('display', 'flex');
+        }
 
-{% block extra_css %}
-{{ block.super }}
-<style>
-    .content-wrapper {
-        min-height: calc(100vh - 3.5rem);
-    }
-    
-    .content-header {
-        background: #f8f9fa;
-        padding: 1rem;
-        border-bottom: 1px solid #dee2e6;
-    }
-    
-    .card {
-        margin-bottom: 1rem;
-        box-shadow: 0 0 1px rgba(0,0,0,.125), 0 1px 3px rgba(0,0,0,.2);
-    }
-    
-    .card-header {
-        background-color: #f8f9fa;
-        border-bottom: 1px solid #dee2e6;
-        padding: 0.75rem 1.25rem;
-    }
-    
-    .card-title {
-        margin: 0;
-        font-size: 1.1rem;
-        font-weight: 400;
-    }
-    
-    .card-body {
-        padding: 1.25rem;
-    }
-    
-    .card-footer {
-        background-color: #f8f9fa;
-        border-top: 1px solid #dee2e6;
-        padding: 1rem;
-    }
-    
-    .btn-group {
-        margin-right: 0.5rem;
-    }
-    
-    .btn-group .btn {
-        margin-right: 0.25rem;
-    }
-    
-    .loading-overlay {
-        display: none;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: rgba(255,255,255,0.8);
-        z-index: 1000;
-        justify-content: center;
-        align-items: center;
-        flex-direction: column;
-    }
-    
-    .loading-spinner {
-        width: 40px;
-        height: 40px;
-        border: 4px solid #f3f3f3;
-        border-top: 4px solid #3498db;
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-        margin-bottom: 10px;
-    }
-    
-    .loading-text {
-        color: #666;
-        font-size: 16px;
-    }
-    
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-    
-    .doc-content {
-        min-height: 500px;
-        border: 1px solid #dee2e6;
-        border-radius: 0.25rem;
-        padding: 1rem;
-    }
-    
-    .badge {
-        font-size: 0.875rem;
-        padding: 0.5em 0.75em;
-    }
-</style>
-{% endblock %}
+        // 隐藏加载中
+        function hideLoading() {
+            $('#loading').css('display', 'none');
+        }
 
-{% block extra_js %}
-<script>
-    let currentFile = '';
-    let selectedGrade = '';
-    let pdfDoc = null;
-    let pageNum = 1;
-    let pageRendering = false;
-    let pageNumPending = null;
-    let scale = 1.5;
-
-    function initTree() {
-        const tree = document.getElementById('grade-tree');
-        if (!tree) return;
-
-        $(tree).jstree({
-            'core': {
-                'data': function (node, cb) {
-                    const token = getCSRFToken();
-                    if (!token) {
-                        cb.call(this, []);
-                        return;
-                    }
-                    
-                    // 如果是根节点，使用仓库基础目录
-                    const path = node.id === '#' ? '' : node.id;
-                    
-                    fetch('/grading/', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/x-www-form-urlencoded',
-                            'X-CSRFToken': token
-                        },
-                        body: `action=get_directory_tree&file_path=${encodeURIComponent(path)}`
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'success') {
-                            // 处理返回的数据，确保正确显示文件和目录
-                            const children = data.children.map(item => ({
-                                id: item.path,
-                                text: item.name,
-                                type: item.type,
-                                children: item.children || false
-                            }));
-                            cb.call(this, children);
-                        } else {
-                            console.error('Failed to load directory tree:', data.message);
-                            cb.call(this, []);
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Failed to load directory tree:', error);
-                        cb.call(this, []);
-                    });
-                },
-                'check_callback': true,
-                'themes': {
-                    'responsive': true,
-                    'dots': true,
-                    'icons': true
-                }
-            },
-            'types': {
-                'root': {
-                    'icon': 'jstree-folder'
-                },
-                'folder': {
-                    'icon': 'jstree-folder'
-                },
-                'file': {
-                    'icon': 'jstree-file'
-                }
-            },
-            'plugins': ['types', 'wholerow'],
-            'state': {
-                'key': 'grading_tree'
-            }
-        });
-
-        // 绑定节点选择事件
-        $(tree).on('select_node.jstree', function (e, data) {
-            if (data.node.type === 'file') {
-                loadFile(data.node.id);
-            }
-        });
-    }
-
-    function showPDF(url) {
-        const container = document.getElementById('docContent');
-        container.innerHTML = `
-            <div class="pdf-container">
-                <div class="pdf-toolbar">
-                    <button onclick="onPrevPage()">上一页</button>
-                    <input type="number" id="pageNum" min="1" onchange="onPageChange(this.value)">
-                    <span>/ <span id="pageCount">0</span></span>
-                    <button onclick="onNextPage()">下一页</button>
-                    <button onclick="onZoomIn()">放大</button>
-                    <button onclick="onZoomOut()">缩小</button>
-                </div>
-                <div class="pdf-viewer">
-                    <canvas id="pdfCanvas" class="pdf-page-canvas"></canvas>
-                </div>
-            </div>
-        `;
-
-        // 加载 PDF 文档
-        pdfjsLib.getDocument(url).promise.then(function(pdf) {
-            pdfDoc = pdf;
-            document.getElementById('pageCount').textContent = pdf.numPages;
-            document.getElementById('pageNum').value = pageNum;
-            document.getElementById('pageNum').max = pdf.numPages;
+        // 加载文件内容
+        function loadFile(path) {
+            currentFile = path;
+            $('#current-file').text(path);
             
-            // 渲染第一页
-            renderPage(pageNum);
-        }).catch(function(error) {
-            console.error('Error loading PDF:', error);
-            container.innerHTML = `
-                <div class="error-message">
-                    PDF 加载失败。
-                    <a href="${url}" target="_blank">点击下载</a>
-                </div>
-            `;
-        });
-    }
+            // 更新选中状态
+            $('.file-item').removeClass('active');
+            $(`.file-item:contains('${path.split('/').pop()}')`).addClass('active');
+            
+            showLoading();
+            retryCount = 0;
+            
+            function tryLoadFile() {
+                $.ajax({
+                    url: '/grading/',
+                    method: 'POST',
+                    data: {
+                        action: 'get_content',
+                        path: path,
+                        csrfmiddlewaretoken: getCsrfToken()
+                    },
+                    timeout: TIMEOUT,
+                    success: function(response) {
+                        hideLoading();
+                        if (response.status === 'success') {
+                            $('#file-content').html(response.content);
+                        } else {
+                            $('#file-content').html('<div class="alert alert-danger">加载失败：' + response.message + '</div>');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        hideLoading();
+                        if (status === 'timeout') {
+                            if (retryCount < MAX_RETRIES) {
+                                retryCount++;
+                                $('#file-content').html(`<div class="alert alert-warning">加载超时，正在重试 (${retryCount}/${MAX_RETRIES})...</div>`);
+                                setTimeout(tryLoadFile, 2000); // 2秒后重试
+                            } else {
+                                $('#file-content').html('<div class="alert alert-danger">加载失败：请求超时，请稍后重试</div>');
+                            }
+                        } else {
+                            $('#file-content').html('<div class="alert alert-danger">加载失败：' + error + '</div>');
+                        }
+                    }
+                });
+            }
+            
+            tryLoadFile();
+        }
 
-    function renderPage(num) {
-        pageRendering = true;
-        pdfDoc.getPage(num).then(function(page) {
-            const canvas = document.getElementById('pdfCanvas');
-            const ctx = canvas.getContext('2d');
-            const viewport = page.getViewport({scale: scale});
+        // 选择评分
+        function selectGrade(grade) {
+            selectedGrade = grade;
+            $('.grade-btn').removeClass('selected');
+            $(`.grade-btn:contains('${grade}')`).addClass('selected');
+        }
 
-            canvas.height = viewport.height;
-            canvas.width = viewport.width;
+        // 保存评分
+        function saveGrade() {
+            if (!currentFile) {
+                alert('请先选择要评分的文件');
+                return;
+            }
 
-            const renderContext = {
-                canvasContext: ctx,
-                viewport: viewport
-            };
-
-            page.render(renderContext).promise.then(function() {
-                pageRendering = false;
-                if (pageNumPending !== null) {
-                    renderPage(pageNumPending);
-                    pageNumPending = null;
+            showLoading();
+            $.ajax({
+                url: '/grading/',
+                method: 'POST',
+                data: {
+                    action: 'save_grade',
+                    path: currentFile,
+                    grade: selectedGrade,
+                    csrfmiddlewaretoken: getCsrfToken()
+                },
+                timeout: TIMEOUT,
+                success: function(response) {
+                    hideLoading();
+                    if (response.status === 'success') {
+                        alert('评分已保存');
+                        loadFile(currentFile);  // 重新加载文件内容
+                    } else {
+                        alert('保存失败：' + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    hideLoading();
+                    alert('保存失败：' + error);
                 }
             });
-        });
-    }
-
-    function queueRenderPage(num) {
-        if (pageRendering) {
-            pageNumPending = num;
-        } else {
-            renderPage(num);
         }
-    }
 
-    function onPrevPage() {
-        if (pageNum <= 1) return;
-        pageNum--;
-        document.getElementById('pageNum').value = pageNum;
-        queueRenderPage(pageNum);
-    }
-
-    function onNextPage() {
-        if (pageNum >= pdfDoc.numPages) return;
-        pageNum++;
-        document.getElementById('pageNum').value = pageNum;
-        queueRenderPage(pageNum);
-    }
-
-    function onPageChange(value) {
-        const num = parseInt(value);
-        if (num >= 1 && num <= pdfDoc.numPages) {
-            pageNum = num;
-            queueRenderPage(pageNum);
-        }
-    }
-
-    function onZoomIn() {
-        scale *= 1.2;
-        queueRenderPage(pageNum);
-    }
-
-    function onZoomOut() {
-        scale /= 1.2;
-        queueRenderPage(pageNum);
-    }
-
-    function loadFile(filePath) {
-        if (!filePath) {
-            return;
-        }
-        
-        currentFile = filePath;
-        document.getElementById('current-file').textContent = filePath;
-        $('#loading').show();
-        document.getElementById('docContent').innerHTML = '<div class="loading-message">加载中...</div>';
-        
-        fetch('/grading/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': getCSRFToken()
-            },
-            body: `action=get_content&file_path=${encodeURIComponent(filePath)}`
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                if (filePath.toLowerCase().endsWith('.pdf')) {
-                    // 对于 PDF 文件，使用 PDF.js 渲染
-                    showPDF(`/grading/file/${filePath}`);
-                } else {
-                    // 其他文件类型保持原样显示
-                    showContent(data.content);
-                }
-                selectedGrade = '';
-                document.querySelectorAll('#grade-buttons button').forEach(btn => {
-                    btn.classList.remove('selected');
-                });
+        // 下一个文件
+        function nextFile() {
+            const files = $('.file-item').map(function() {
+                return $(this).text().trim();
+            }).get();
+            
+            if (files.length === 0) return;
+            
+            const currentIndex = files.indexOf(currentFile.split('/').pop());
+            if (currentIndex === -1 || currentIndex === files.length - 1) {
+                loadFile(files[0]);
             } else {
-                throw new Error(data.message || '加载失败');
-            }
-        })
-        .catch(error => {
-            console.error('Error loading document:', error);
-            document.getElementById('docContent').innerHTML = `<div class="error-message">加载失败: ${error.message}</div>`;
-        })
-        .finally(() => {
-            $('#loading').hide();
-        });
-    }
-
-    function showContent(content) {
-        const docContent = document.getElementById('docContent');
-        docContent.innerHTML = content;
-    }
-
-    function gradeSubmission(grade) {
-        selectedGrade = grade;
-        document.querySelectorAll('#grade-buttons button').forEach(btn => {
-            btn.classList.remove('selected');
-        });
-        event.target.classList.add('selected');
-    }
-
-    function saveGrade() {
-        if (!selectedGrade) {
-            alert('请先选择评分等级');
-            return;
-        }
-
-        const token = getCSRFToken();
-        if (!token) return;
-
-        fetch('/grading/', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'X-CSRFToken': token
-            },
-            body: `action=save_grade&grade=${selectedGrade}&file_path=${encodeURIComponent(currentFile)}`
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.status === 'success') {
-                alert('评分保存成功');
-            } else {
-                throw new Error(data.message || '保存失败');
-            }
-        })
-        .catch(error => {
-            console.error('Error saving grade:', error);
-            alert('保存评分失败: ' + error.message);
-        });
-    }
-
-    function nextSubmission() {
-        // 实现下一个提交的逻辑
-    }
-
-    function getCSRFToken() {
-        const name = 'csrftoken';
-        let cookieValue = null;
-        if (document.cookie && document.cookie !== '') {
-            const cookies = document.cookie.split(';');
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.substring(0, name.length + 1) === (name + '=')) {
-                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
-                    break;
-                }
+                loadFile(files[currentIndex + 1]);
             }
         }
-        return cookieValue;
-    }
 
-    // 页面加载完成后初始化
-    $(document).ready(function() {
-        initTree();
-    });
+        // 获取CSRF Token
+        function getCsrfToken() {
+            return document.querySelector('[name=csrfmiddlewaretoken]').value;
+        }
 
-    // 添加面板大小调节功能
-    document.addEventListener('DOMContentLoaded', function() {
-        const resizer = document.getElementById('resizer');
-        const leftPanel = document.getElementById('leftPanel');
-        let isResizing = false;
-        let startX;
-        let startWidth;
-
-        resizer.addEventListener('mousedown', function(e) {
-            isResizing = true;
-            startX = e.pageX;
-            startWidth = leftPanel.offsetWidth;
-            resizer.classList.add('resizing');
+        // 页面加载完成后初始化
+        $(document).ready(function() {
+            // 默认选中B评分
+            selectGrade('B');
         });
-
-        document.addEventListener('mousemove', function(e) {
-            if (!isResizing) return;
-
-            const width = startWidth + (e.pageX - startX);
-            if (width > 200 && width < window.innerWidth - 400) {
-                leftPanel.style.width = width + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', function() {
-            isResizing = false;
-            resizer.classList.remove('resizing');
-        });
-    });
-</script>
-{% endblock %}
+    </script>
+    {% csrf_token %}
+</body>
+</html> 

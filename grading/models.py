@@ -64,7 +64,7 @@ class GlobalConfig(models.Model):
     https_password = models.CharField(max_length=100, blank=True, null=True, help_text='HTTPS 认证密码')
     ssh_key = models.TextField(blank=True, null=True, help_text='SSH 私钥内容')
     ssh_key_file = models.FileField(upload_to='ssh_keys/', null=True, blank=True, help_text='SSH 私钥文件')
-    repo_base_dir = models.CharField(max_length=255, default='~/repo', help_text='仓库克隆的基础目录，默认为 ~/repo')
+    repo_base_dir = models.CharField(max_length=255, default='~/jobs', help_text='仓库克隆的基础目录，默认为 ~/jobs')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -85,7 +85,7 @@ class GlobalConfig(models.Model):
                 'https_username': '',
                 'https_password': '',
                 'ssh_key': '',
-                'repo_base_dir': '~/repo'
+                'repo_base_dir': '~/jobs'
             }
         )
         return config

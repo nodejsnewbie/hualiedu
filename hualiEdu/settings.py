@@ -146,37 +146,27 @@ LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
     'formatters': {
-        'simple': {
-            'format': '[%(levelname)s] %(message)s'
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
         },
     },
     'handlers': {
         'console': {
-            'level': 'WARNING',
             'class': 'logging.StreamHandler',
-            'formatter': 'simple'
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': 'debug.log',
+            'formatter': 'verbose',
         },
     },
     'loggers': {
-        '': {
-            'handlers': ['console'],
-            'level': 'WARNING',
+        'grading': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
             'propagate': True,
-        },
-        'django.utils.autoreload': {
-            'handlers': ['console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'django.template': {
-            'handlers': ['console'],
-            'level': 'ERROR',
-            'propagate': False,
-        },
-        'django.db.backends': {
-            'handlers': ['console'],
-            'level': 'ERROR',
-            'propagate': False,
         },
     },
 }
