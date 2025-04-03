@@ -591,3 +591,551 @@ def get_template_list(request):
             'msg': str(e),
             'error': 'exceptions.ServerError'
         }, status=500)
+
+@login_required
+@require_http_methods(['POST'])
+def get_file_content(request):
+    """获取文件内容"""
+    try:
+        logger.info('开始处理获取文件内容请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'status': 'error',
+                'message': '请先登录'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限访问'
+            }, status=403)
+        
+        # 获取文件路径
+        path = request.POST.get('path')
+        if not path:
+            logger.error('未提供文件路径')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未提供文件路径'
+            })
+        
+        logger.info(f'请求获取文件内容，路径: {path}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, path)
+        
+        logger.info(f'尝试读取文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '文件不存在'
+            })
+        
+        # 检查文件权限
+        if not os.access(full_path, os.R_OK):
+            logger.error(f'无权限读取文件: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限读取文件'
+            })
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理内容
+        if ext == '.docx':
+            # 使用 mammoth 将 Word 文档转换为 HTML
+            with open(full_path, 'rb') as f:
+                result = mammoth.convert_to_html(f)
+                html = result.value
+                messages = result.messages
+                
+                # 添加样式
+                html = f'''
+                <div class="word-document">
+                    <style>
+                        .word-document {{
+                            font-family: Arial, sans-serif;
+                            line-height: 1.6;
+                            padding: 20px;
+                        }}
+                        .word-document p {{
+                            margin: 0 0 1em 0;
+                        }}
+                        .word-document h1, .word-document h2, .word-document h3 {{
+                            margin: 1em 0 0.5em 0;
+                        }}
+                    </style>
+                    {html}
+                </div>
+                '''
+                return JsonResponse({
+                    'status': 'success',
+                    'content': html,
+                    'type': 'docx'
+                })
+                
+        elif ext == '.pdf':
+            # 返回 PDF 文件的 URL
+            pdf_url = reverse('grading:serve_file', args=[path])
+            return JsonResponse({
+                'status': 'success',
+                'content': pdf_url,
+                'type': 'pdf'
+            })
+            
+        elif ext in ['.jpg', '.jpeg', '.png', '.gif']:
+            # 返回图片文件的 URL
+            image_url = reverse('grading:serve_file', args=[path])
+            return JsonResponse({
+                'status': 'success',
+                'content': image_url,
+                'type': 'image'
+            })
+            
+        else:
+            # 对于其他文本文件，尝试以文本方式读取
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return JsonResponse({
+                    'status': 'success',
+                    'content': content,
+                    'type': 'text'
+                })
+            except UnicodeDecodeError:
+                # 如果无法以文本方式读取，返回二进制文件提示
+                return JsonResponse({
+                    'status': 'success',
+                    'content': '二进制文件内容无法直接显示',
+                    'type': 'binary'
+                })
+            
+    except Exception as e:
+        logger.error(f'读取文件失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        })
+
+@login_required
+@require_http_methods(['POST'])
+def add_grade_to_file(request):
+    """添加评分到文件末尾"""
+    try:
+        logger.info('开始处理添加评分到文件请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'status': 'error',
+                'message': '请先登录'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限访问'
+            }, status=403)
+        
+        # 获取文件路径和评分
+        path = request.POST.get('path')
+        grade = request.POST.get('grade')
+        
+        if not path or not grade:
+            logger.error('未提供文件路径或评分')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未提供文件路径或评分'
+            })
+        
+        logger.info(f'请求添加评分到文件，路径: {path}, 评分: {grade}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, path)
+        
+        logger.info(f'尝试修改文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '文件不存在'
+            })
+        
+        # 检查文件权限
+        if not os.access(full_path, os.W_OK):
+            logger.error(f'无权限修改文件: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限修改文件'
+            })
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 添加评分
+            try:
+                doc = Document(full_path)
+                
+                # 检查最后一段是否已经是评分
+                if doc.paragraphs and doc.paragraphs[-1].text.startswith('老师评分：'):
+                    # 如果是评分，则删除它
+                    doc._body._body.remove(doc.paragraphs[-1]._p)
+                
+                # 添加一个空段落
+                doc.add_paragraph()
+                # 添加评分段落
+                doc.add_paragraph(f'老师评分：{grade}')
+                # 保存文档
+                doc.save(full_path)
+                logger.info(f'成功添加评分到 Word 文档: {full_path}')
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '评分已添加到文件末尾',
+                    'file_type': 'docx'
+                })
+            except Exception as e:
+                logger.error(f'添加评分到 Word 文档失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'添加评分到 Word 文档失败: {str(e)}'
+                })
+        else:
+            # 对于其他文件，尝试以文本方式添加
+            try:
+                with open(full_path, 'r+', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # 检查最后一行是否已经是评分
+                    if lines and lines[-1].strip().startswith('老师评分：'):
+                        # 如果是评分，则删除它
+                        lines = lines[:-1]
+                    
+                    # 移动到文件末尾
+                    f.seek(0)
+                    f.truncate()
+                    
+                    # 写入所有行（除了最后一个评分）
+                    f.writelines(lines)
+                    
+                    # 添加新行和评分
+                    f.write(f'\n老师评分：{grade}\n')
+                
+                logger.info(f'成功添加评分到文件: {full_path}')
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '评分已添加到文件末尾',
+                    'file_type': 'text'
+                })
+            except Exception as e:
+                logger.error(f'添加评分到文件失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'添加评分到文件失败: {str(e)}'
+                })
+            
+    except Exception as e:
+        logger.error(f'添加评分到文件失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        })
+
+@login_required
+@require_http_methods(['POST'])
+def save_grade(request):
+    """保存评分"""
+    try:
+        logger.info('开始处理保存评分请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'status': 'error',
+                'message': '请先登录'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限访问'
+            }, status=403)
+        
+        # 获取文件路径和评分
+        path = request.POST.get('path')
+        grade = request.POST.get('grade')
+        
+        if not path or not grade:
+            logger.error('未提供文件路径或评分')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未提供文件路径或评分'
+            })
+        
+        logger.info(f'请求保存评分，路径: {path}, 评分: {grade}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, path)
+        
+        logger.info(f'尝试修改文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '文件不存在'
+            })
+        
+        # 检查文件权限
+        if not os.access(full_path, os.W_OK):
+            logger.error(f'无权限修改文件: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限修改文件'
+            })
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 添加评分
+            try:
+                doc = Document(full_path)
+                # 添加一个空段落
+                doc.add_paragraph()
+                # 添加评分段落
+                doc.add_paragraph(f'老师评分：{grade}')
+                # 保存文档
+                doc.save(full_path)
+                logger.info(f'成功添加评分到 Word 文档: {full_path}')
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '评分已保存',
+                    'file_type': 'docx'
+                })
+            except Exception as e:
+                logger.error(f'添加评分到 Word 文档失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'添加评分到 Word 文档失败: {str(e)}'
+                })
+        else:
+            # 对于其他文件，尝试以文本方式添加
+            try:
+                with open(full_path, 'a', encoding='utf-8') as f:
+                    f.write(f'\n老师评分：{grade}\n')
+                logger.info(f'成功添加评分到文件: {full_path}')
+                return JsonResponse({
+                    'status': 'success',
+                    'message': '评分已保存',
+                    'file_type': 'text'
+                })
+            except Exception as e:
+                logger.error(f'添加评分到文件失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'添加评分到文件失败: {str(e)}'
+                })
+            
+    except Exception as e:
+        logger.error(f'保存评分失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        })
+
+@login_required
+@require_http_methods(['POST'])
+def remove_grade(request):
+    """删除文件中的评分"""
+    try:
+        logger.info('开始处理删除评分请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'status': 'error',
+                'message': '请先登录'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限访问'
+            }, status=403)
+        
+        # 获取文件路径
+        path = request.POST.get('path')
+        if not path:
+            logger.error('未提供文件路径')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未提供文件路径'
+            })
+        
+        logger.info(f'请求删除评分，路径: {path}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, path)
+        
+        logger.info(f'尝试修改文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '文件不存在'
+            })
+        
+        # 检查文件权限
+        if not os.access(full_path, os.W_OK):
+            logger.error(f'无权限修改文件: {full_path}')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限修改文件'
+            })
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 删除评分
+            try:
+                doc = Document(full_path)
+                
+                # 检查最后一段是否包含评分
+                if doc.paragraphs and doc.paragraphs[-1].text.startswith('老师评分：'):
+                    # 删除最后一段
+                    doc._body._body.remove(doc.paragraphs[-1]._p)
+                    # 保存文档
+                    doc.save(full_path)
+                    logger.info(f'成功从 Word 文档删除评分: {full_path}')
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': '评分已删除',
+                        'file_type': 'docx'
+                    })
+                else:
+                    logger.info(f'Word 文档中未找到评分: {full_path}')
+                    return JsonResponse({
+                        'status': 'success',
+                        'message': '文件中未找到评分',
+                        'file_type': 'docx'
+                    })
+            except Exception as e:
+                logger.error(f'从 Word 文档删除评分失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'从 Word 文档删除评分失败: {str(e)}'
+                })
+        else:
+            # 对于其他文件，尝试以文本方式删除
+            try:
+                with open(full_path, 'r+', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # 检查最后一行是否包含评分
+                    if lines and lines[-1].strip().startswith('老师评分：'):
+                        # 删除最后一行
+                        lines = lines[:-1]
+                        # 如果删除评分后最后一行是空行，也删除空行
+                        if lines and not lines[-1].strip():
+                            lines = lines[:-1]
+                        
+                        # 移动到文件开头
+                        f.seek(0)
+                        f.truncate()
+                        # 写入剩余内容
+                        f.writelines(lines)
+                        
+                        logger.info(f'成功从文件删除评分: {full_path}')
+                        return JsonResponse({
+                            'status': 'success',
+                            'message': '评分已删除',
+                            'file_type': 'text'
+                        })
+                    else:
+                        logger.info(f'文件中未找到评分: {full_path}')
+                        return JsonResponse({
+                            'status': 'success',
+                            'message': '文件中未找到评分',
+                            'file_type': 'text'
+                        })
+            except Exception as e:
+                logger.error(f'从文件删除评分失败: {str(e)}')
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'从文件删除评分失败: {str(e)}'
+                })
+            
+    except Exception as e:
+        logger.error(f'删除评分失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e)
+        })

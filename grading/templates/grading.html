@@ -8,6 +8,10 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css">
 <!-- Custom CSS -->
 <link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
+<!-- CodeMirror -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+<!-- Viewer.js -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.3/viewer.min.css">
 {% endblock %}
 
 {% block content %}
@@ -17,13 +21,10 @@
         <div class="col-md-3">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">文件列表</h5>
-                    {% if config %}
-                        <small class="text-muted">仓库路径: {{ config.repo_base_dir }}</small>
-                    {% endif %}
+                    <h5 class="card-title mb-0">文件目录</h5>
                 </div>
                 <div class="card-body">
-                    <div id="grade-tree"></div>
+                    <div id="directory-tree"></div>
                 </div>
             </div>
         </div>
@@ -32,18 +33,9 @@
         <div class="col-md-9">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">评分</h5>
+                    <h5 class="card-title mb-0">文件内容</h5>
                 </div>
                 <div class="card-body">
-                    <!-- 评分按钮组 -->
-                    <div class="btn-group mb-3" role="group" aria-label="评分选项">
-                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
-                        <button type="button" class="btn btn-outline-primary grade-button active" data-grade="B">B</button>
-                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="C">C</button>
-                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
-                        <button type="button" class="btn btn-outline-primary grade-button" data-grade="F">F</button>
-                    </div>
-
                     <!-- 加载指示器 -->
                     <div id="loading" style="display: none;">
                         <div class="spinner-border text-primary" role="status">
@@ -65,6 +57,31 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- 评分区域 -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">评分</h5>
+                </div>
+                <div class="card-body">
+                    <!-- 评分按钮组 -->
+                    <div class="d-flex align-items-center">
+                        <div class="btn-group me-3" role="group" aria-label="评分选项">
+                            <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
+                            <button type="button" class="btn btn-outline-primary grade-button active" data-grade="B">B</button>
+                            <button type="button" class="btn btn-outline-primary grade-button" data-grade="C">C</button>
+                            <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
+                            <button type="button" class="btn btn-outline-primary grade-button" data-grade="E">E</button>
+                        </div>
+                        <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
+                            确定
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" id="cancel-grade">
+                            撤销
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -79,7 +96,7 @@
 <!-- 初始化数据 -->
 <script>
     // 将初始数据传递给 JavaScript
-    window.initialTreeData = JSON.parse('{{ initial_tree_data|escapejs }}');
+    window.initialTreeData = {{ initial_tree_data|safe }};
     console.log('Initial tree data in template:', window.initialTreeData);
     
     // 设置 CSRF token
@@ -90,5 +107,17 @@
             }
         }
     });
+</script>
+
+<!-- CodeMirror -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<!-- Viewer.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.3/viewer.min.js"></script>
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+
+<script>
+    // 设置 PDF.js worker 路径
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 </script>
 {% endblock %} 
