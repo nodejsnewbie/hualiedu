@@ -52,28 +52,36 @@ function loadFile(path) {
   showLoading();
   currentFile = path;
 
+  // 添加超时处理
+  const timeout = setTimeout(() => {
+    hideLoading();
+    showError('加载文件超时，请重试');
+  }, 30000); // 30秒超时
+
   $.ajax({
     url: '/grading/',
     method: 'POST',
     data: {
       action: 'get_content',
-      path: path,
-      csrfmiddlewaretoken: getCSRFToken()
+      path: path
     },
     success: function(response) {
+      clearTimeout(timeout);
       if (response.status === 'success') {
         $('#file-content').html(response.content);
         // 设置默认评分按钮状态
         setGradeButtonState(selectedGrade);
       } else {
-        showError(response.message);
+        showError(response.message || '加载文件失败');
       }
     },
     error: function(xhr, status, error) {
+      clearTimeout(timeout);
       console.error('Error loading file:', error);
-      showError('加载文件失败：' + error);
+      showError('加载文件失败：' + (error || '未知错误'));
     },
     complete: function() {
+      clearTimeout(timeout);
       hideLoading();
     }
   });
@@ -96,8 +104,7 @@ function saveGrade(grade) {
     data: {
       action: 'save_grade',
       path: currentFile,
-      grade: grade,
-      csrfmiddlewaretoken: getCSRFToken()
+      grade: grade
     },
     success: function(response) {
       if (response.status === 'success') {
@@ -136,7 +143,11 @@ function initTree() {
     $('#grade-tree').jstree(true).destroy();
   }
   
-  $('#grade-tree').jstree({
+  // 显示加载状态
+  $('#grade-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+  
+  // 配置 jstree
+  const treeConfig = {
     'core': {
       'data': function(node) {
         console.log('Getting data for node:', node);
@@ -154,8 +165,7 @@ function initTree() {
           'data': function(node) {
             return {
               'action': 'get_directory_tree',
-              'file_path': node.id === '#' ? '' : node.id,
-              'csrfmiddlewaretoken': getCSRFToken()
+              'file_path': node.id === '#' ? '' : node.id
             };
           },
           'type': 'POST',
@@ -166,9 +176,14 @@ function initTree() {
               return data.data;
             } else {
               console.error('Failed to load directory tree:', data.message);
-              showError(data.message || '加载目录失败');
+              $('#grade-tree').html(`<div class="alert alert-danger">${data.message || '加载目录失败'}</div>`);
               return [];
             }
+          },
+          'error': function(xhr, status, error) {
+            console.error('Error fetching directory tree:', error);
+            $('#grade-tree').html(`<div class="alert alert-danger">加载目录失败：${error}</div>`);
+            return [];
           }
         };
       },
@@ -186,43 +201,35 @@ function initTree() {
       },
       'folder': {
         'icon': 'jstree-folder'
-      },
-      'file': {
-        'icon': 'jstree-file'
       }
     },
-    'plugins': ['types', 'wholerow', 'state'],
-    'state': { 'key': 'grading_tree_state' }
-  }).on('ready.jstree', function() {
+    'plugins': ['types']
+  };
+  
+  // 初始化 jstree
+  $('#grade-tree').jstree(treeConfig).on('ready.jstree', function(e, data) {
     console.log('Tree is ready');
-    const tree = $('#grade-tree').jstree(true);
-    const rootNode = tree.get_node('#');
-    if (rootNode) {
-      console.log('Opening root node');
-      tree.open_node(rootNode);
-    }
+    // 展开根节点
+    data.instance.open_node('#');
   }).on('select_node.jstree', function(e, data) {
-    console.log('Node selected:', data.node);
+    console.log('Selected node:', data.node);
     if (data.node.type !== 'folder') {
-      console.log('Loading file:', data.node.id);
       loadFile(data.node.id);
     }
+  }).on('error.jstree', function(e, data) {
+    console.error('Tree error:', data);
+    $('#grade-tree').html(`<div class="alert alert-danger">加载目录树失败：${data.error || '未知错误'}</div>`);
   });
 }
 
-// 初始化评分按钮
-function initGradeButtons() {
-  // 设置默认评分按钮状态
-  setGradeButtonState(selectedGrade);
-
+// 页面加载完成后初始化树
+$(document).ready(function() {
+  console.log('Document ready, initializing tree...');
+  initTree();
+  
+  // 绑定评分按钮点击事件
   $('.grade-button').click(function() {
     const grade = $(this).data('grade');
     saveGrade(grade);
   });
-}
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', function() {
-  initTree();
-  initGradeButtons();
 }); 

@@ -120,11 +120,41 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
-STATIC_URL = "static/"
+STATIC_URL = "/static/"
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, "static"),
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+# 添加静态文件的CORS设置
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# 允许静态文件的跨域访问
+CORS_URLS_REGEX = r'^/static/.*$'
 
 # Media files (User uploaded files)
 MEDIA_URL = '/media/'
@@ -206,3 +236,20 @@ JAZZMIN_UI_TWEAKS = {
     "sidebar": "sidebar-dark-success",
     "theme": "cosmo"
 }
+
+# 添加登录相关的设置
+LOGIN_URL = '/admin/login/'
+LOGIN_REDIRECT_URL = '/grading/'
+LOGOUT_REDIRECT_URL = '/admin/login/'
+
+# 会话设置
+SESSION_COOKIE_AGE = 86400  # 24小时
+SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+
+# CSRF设置
+CSRF_COOKIE_SECURE = False
+CSRF_COOKIE_HTTPONLY = False
+CSRF_TRUSTED_ORIGINS = [
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
+]

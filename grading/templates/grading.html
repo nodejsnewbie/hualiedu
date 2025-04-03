@@ -2,8 +2,12 @@
 {% load static %}
 
 {% block extra_css %}
+<!-- Bootstrap CSS -->
+<link rel="stylesheet" href="{% static 'grading/css/bootstrap.min.css' %}">
 <!-- jstree CSS -->
-<link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/jstree/3.3.12/themes/default/style.min.css" crossorigin="anonymous">
+<link rel="stylesheet" href="{% static 'grading/css/jstree.min.css' %}">
+<!-- Custom CSS -->
+<link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -14,6 +18,9 @@
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件列表</h5>
+                    {% if config %}
+                        <small class="text-muted">仓库路径: {{ config.repo_base_dir }}</small>
+                    {% endif %}
                 </div>
                 <div class="card-body">
                     <div id="grade-tree"></div>
@@ -64,8 +71,13 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- jQuery -->
+<script src="{% static 'grading/js/jquery.min.js' %}"></script>
+<!-- Bootstrap Bundle with Popper -->
+<script src="{% static 'grading/js/bootstrap.bundle.min.js' %}"></script>
 <!-- jstree JavaScript -->
-<script src="https://cdn.bootcdn.net/ajax/libs/jstree/3.3.12/jstree.min.js" crossorigin="anonymous"></script>
+<script src="{% static 'grading/js/jstree.min.js' %}"></script>
+<!-- 自定义脚本 -->
 <script src="{% static 'grading/js/grading.js' %}"></script>
 
 <!-- 初始化数据 -->
@@ -73,5 +85,14 @@
     // 将初始数据传递给 JavaScript
     window.initialTreeData = JSON.parse('{{ initial_tree_data|escapejs }}');
     console.log('Initial tree data in template:', window.initialTreeData);
+    
+    // 设置 CSRF token
+    $.ajaxSetup({
+        beforeSend: function(xhr, settings) {
+            if (!this.crossDomain) {
+                xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
+            }
+        }
+    });
 </script>
 {% endblock %} 

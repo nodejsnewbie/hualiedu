@@ -52,6 +52,12 @@ function loadFile(path) {
   showLoading();
   currentFile = path;
 
+  // 添加超时处理
+  const timeout = setTimeout(() => {
+    hideLoading();
+    showError('加载文件超时，请重试');
+  }, 30000); // 30秒超时
+
   $.ajax({
     url: '/grading/',
     method: 'POST',
@@ -61,19 +67,22 @@ function loadFile(path) {
       csrfmiddlewaretoken: getCSRFToken()
     },
     success: function(response) {
+      clearTimeout(timeout);
       if (response.status === 'success') {
         $('#file-content').html(response.content);
         // 设置默认评分按钮状态
         setGradeButtonState(selectedGrade);
       } else {
-        showError(response.message);
+        showError(response.message || '加载文件失败');
       }
     },
     error: function(xhr, status, error) {
+      clearTimeout(timeout);
       console.error('Error loading file:', error);
-      showError('加载文件失败：' + error);
+      showError('加载文件失败：' + (error || '未知错误'));
     },
     complete: function() {
+      clearTimeout(timeout);
       hideLoading();
     }
   });
@@ -125,16 +134,33 @@ function saveGrade(grade) {
 // 初始化文件树
 function initTree() {
   console.log('Initializing tree...');
+  console.log('Initial tree data:', window.initialTreeData);
+  
+  // 确保 initialTreeData 是数组
+  const initialData = Array.isArray(window.initialTreeData) ? window.initialTreeData : [];
+  console.log('Processed initial data:', initialData);
+  
+  // 销毁现有的树（如果存在）
+  if ($('#grade-tree').jstree(true)) {
+    $('#grade-tree').jstree(true).destroy();
+  }
+  
+  // 显示加载状态
+  $('#grade-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+  
   $('#grade-tree').jstree({
     'core': {
       'data': function(node) {
+        console.log('Getting data for node:', node);
+        
         // 如果是根节点且有初始数据，直接使用初始数据
-        if (node.id === '#' && window.initialTreeData) {
-          console.log('Using initial tree data');
-          return window.initialTreeData;
+        if (node.id === '#' && initialData.length > 0) {
+          console.log('Using initial tree data:', initialData);
+          return initialData;
         }
         
         // 否则从服务器获取数据
+        console.log('Fetching data from server for path:', node.id === '#' ? '' : node.id);
         return {
           'url': '/grading/',
           'data': function(node) {
@@ -147,8 +173,8 @@ function initTree() {
           'type': 'POST',
           'dataType': 'json',
           'processData': function(data) {
-            console.log('Received data:', data);
-            if (data.status === 'success' && Array.isArray(data.data)) {
+            console.log('Received data from server:', data);
+            if (data.status === 'success') {
               return data.data;
             } else {
               console.error('Failed to load directory tree:', data.message);
@@ -158,13 +184,14 @@ function initTree() {
           }
         };
       },
-      'check_callback': true,
-      'themes': {
-        'responsive': true,
-        'dots': true,
-        'icons': true,
-        'stripes': true
-      }
+      'check_callback': true
+    },
+    'plugins': ['types', 'wholerow'],
+    'themes': {
+      'responsive': true,
+      'dots': true,
+      'icons': true,
+      'stripes': true
     },
     'types': {
       'default': {
@@ -172,25 +199,13 @@ function initTree() {
       },
       'folder': {
         'icon': 'jstree-folder'
-      },
-      'file': {
-        'icon': 'jstree-file'
       }
-    },
-    'plugins': ['types', 'wholerow', 'state'],
-    'state': { 'key': 'grading_tree_state' }
+    }
   }).on('ready.jstree', function() {
     console.log('Tree is ready');
-    const tree = $('#grade-tree').jstree(true);
-    const rootNode = tree.get_node('#');
-    if (rootNode) {
-      console.log('Opening root node');
-      tree.open_node(rootNode);
-    }
   }).on('select_node.jstree', function(e, data) {
-    console.log('Node selected:', data.node);
-    if (data.node.type !== 'folder') {
-      console.log('Loading file:', data.node.id);
+    console.log('Selected node:', data);
+    if (data.node.type === 'file') {
       loadFile(data.node.id);
     }
   });
