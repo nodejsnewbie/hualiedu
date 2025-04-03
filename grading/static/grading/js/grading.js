@@ -149,77 +149,66 @@ function initTree() {
   // 配置 jstree
   const treeConfig = {
     'core': {
-      'data': function(node) {
-        console.log('Getting data for node:', node);
-        
-        // 如果是根节点且有初始数据，直接使用初始数据
-        if (node.id === '#' && initialData.length > 0) {
-          console.log('Using initial tree data:', initialData);
-          return initialData;
-        }
-        
-        // 否则从服务器获取数据
-        console.log('Fetching data from server for path:', node.id === '#' ? '' : node.id);
-        return {
-          'url': '/grading/',
-          'data': function(node) {
-            return {
-              'action': 'get_directory_tree',
-              'file_path': node.id === '#' ? '' : node.id
-            };
-          },
-          'type': 'POST',
-          'dataType': 'json',
-          'processData': function(data) {
-            console.log('Received data from server:', data);
-            if (data.status === 'success') {
-              return data.data;
-            } else {
-              console.error('Failed to load directory tree:', data.message);
-              $('#grade-tree').html(`<div class="alert alert-danger">${data.message || '加载目录失败'}</div>`);
-              return [];
-            }
-          },
-          'error': function(xhr, status, error) {
-            console.error('Error fetching directory tree:', error);
-            $('#grade-tree').html(`<div class="alert alert-danger">加载目录失败：${error}</div>`);
-            return [];
-          }
-        };
-      },
+      'data': initialData,
       'check_callback': true,
+      'multiple': false,
       'themes': {
         'responsive': true,
         'dots': true,
         'icons': true,
-        'stripes': true
+        'stripes': true,
+        'variant': 'large'
       }
     },
     'types': {
       'default': {
         'icon': 'jstree-file'
       },
+      'file': {
+        'icon': 'jstree-file'
+      },
       'folder': {
         'icon': 'jstree-folder'
       }
     },
-    'plugins': ['types']
+    'plugins': ['types', 'wholerow', 'state'],
+    'state': {
+      'key': 'grading-tree',
+      'filter': function(state) {
+        // 只保存打开/关闭状态
+        return {
+          'core': {
+            'open': state.core.open,
+            'selected': state.core.selected
+          }
+        };
+      }
+    }
   };
   
   // 初始化 jstree
-  $('#grade-tree').jstree(treeConfig).on('ready.jstree', function(e, data) {
-    console.log('Tree is ready');
-    // 展开根节点
-    data.instance.open_node('#');
-  }).on('select_node.jstree', function(e, data) {
-    console.log('Selected node:', data.node);
-    if (data.node.type !== 'folder') {
-      loadFile(data.node.id);
-    }
-  }).on('error.jstree', function(e, data) {
-    console.error('Tree error:', data);
-    $('#grade-tree').html(`<div class="alert alert-danger">加载目录树失败：${data.error || '未知错误'}</div>`);
-  });
+  $('#grade-tree')
+    .on('ready.jstree', function(e, data) {
+      console.log('Tree is ready');
+      // 展开根节点
+      data.instance.open_node('#');
+      hideLoading();
+    })
+    .on('select_node.jstree', function(e, data) {
+      console.log('Selected node:', data.node);
+      if (data.node.type === 'file') {
+        loadFile(data.node.id);
+      }
+    })
+    .on('open_node.jstree', function(e, data) {
+      console.log('Opened node:', data.node);
+    })
+    .on('error.jstree', function(e, data) {
+      console.error('Tree error:', data);
+      $('#grade-tree').html(`<div class="alert alert-danger">加载目录树失败：${data.error || '未知错误'}</div>`);
+      hideLoading();
+    })
+    .jstree(treeConfig);
 }
 
 // 页面加载完成后初始化树

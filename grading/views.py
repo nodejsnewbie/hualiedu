@@ -1,6 +1,6 @@
 import logging
 from django.shortcuts import render
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 import os
 from docx import Document
 from django.conf import settings
@@ -33,174 +33,68 @@ def index(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def grading_page(request):
-    """评分页面"""
-    if request.method == 'POST':
-        action = request.POST.get('action')
-        if action == 'get_directory_tree':
-            file_path = request.POST.get('file_path', '')
-            try:
-                # 检查用户权限
-                if not request.user.is_authenticated:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '请先登录'
-                    }, status=403)
-                
-                items = get_directory_tree(file_path)
-                logger.info(f"Successfully retrieved directory tree for path: {file_path}")
-                return JsonResponse({
-                    'status': 'success',
-                    'data': items
-                })
-            except Exception as e:
-                logger.error(f"Error getting directory tree: {str(e)}")
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'获取目录结构失败：{str(e)}'
-                }, status=500)
-        elif action == 'get_content':
-            path = request.POST.get('path')
-            try:
-                # 检查用户权限
-                if not request.user.is_authenticated:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '请先登录'
-                    }, status=403)
-                
-                config = GlobalConfig.objects.first()
-                if not config:
-                    config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
-                    logger.info("Created new GlobalConfig with default repo_base_dir")
-                
-                base_dir = os.path.expanduser(config.repo_base_dir)
-                if not os.path.exists(base_dir):
-                    os.makedirs(base_dir)
-                    logger.info(f"Created base directory: {base_dir}")
-                
-                full_path = os.path.join(base_dir, path)
-                logger.info(f"Attempting to load file: {full_path}")
-                
-                # 检查文件权限
-                if not os.access(full_path, os.R_OK):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '没有权限访问该文件'
-                    }, status=403)
-                
-                if os.path.exists(full_path):
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    logger.info(f"Successfully loaded file content from: {full_path}")
-                    return JsonResponse({
-                        'status': 'success',
-                        'content': content
-                    })
-                else:
-                    logger.error(f"File not found: {full_path}")
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': f'文件不存在：{path}'
-                    }, status=404)
-            except Exception as e:
-                logger.error(f"Error loading file content: {str(e)}")
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'加载文件失败：{str(e)}'
-                }, status=500)
-        elif action == 'save_grade':
-            path = request.POST.get('path')
-            grade = request.POST.get('grade')
-            try:
-                # 检查用户权限
-                if not request.user.is_authenticated:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '请先登录'
-                    }, status=403)
-                
-                config = GlobalConfig.objects.first()
-                if not config:
-                    config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
-                
-                base_dir = os.path.expanduser(config.repo_base_dir)
-                full_path = os.path.join(base_dir, path)
-                logger.info(f"Attempting to save grade for file: {full_path}")
-                
-                # 检查文件权限
-                if not os.access(full_path, os.R_OK):
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': '没有权限访问该文件'
-                    }, status=403)
-                
-                if os.path.exists(full_path):
-                    success = save_file_grade(path, grade)
-                    if success:
-                        return JsonResponse({
-                            'status': 'success',
-                            'message': '评分已保存'
-                        })
-                    else:
-                        return JsonResponse({
-                            'status': 'error',
-                            'message': '保存评分失败'
-                        }, status=500)
-                else:
-                    return JsonResponse({
-                        'status': 'error',
-                        'message': f'文件不存在：{path}'
-                    }, status=404)
-            except Exception as e:
-                logger.error(f"Error saving grade: {str(e)}")
-                return JsonResponse({
-                    'status': 'error',
-                    'message': f'保存评分失败：{str(e)}'
-                }, status=500)
-    
-    # GET 请求，返回初始页面
+    """评分页面视图"""
     try:
+        logger.info('开始处理评分页面请求')
+        
         # 检查用户权限
         if not request.user.is_authenticated:
-            return redirect('admin:login')
+            logger.error('用户未认证')
+            return HttpResponseForbidden('请先登录')
         
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return HttpResponseForbidden('无权限访问')
+        
+        # 获取全局配置
         config = GlobalConfig.objects.first()
         if not config:
             config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
             logger.info("Created new GlobalConfig with default repo_base_dir")
         
-        # 确保基础目录存在
         base_dir = os.path.expanduser(config.repo_base_dir)
+        logger.info(f"Base directory: {base_dir}")
+        
+        # 检查目录权限
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
             logger.info(f"Created base directory: {base_dir}")
         
-        # 检查目录权限
         if not os.access(base_dir, os.R_OK):
+            logger.error(f"No read permission for directory: {base_dir}")
+            return HttpResponseForbidden('无权限访问目录')
+        
+        # 获取目录树
+        try:
+            initial_tree_data = get_directory_tree()
+            logger.info(f"Successfully retrieved initial directory tree")
+            logger.info(f"Initial tree data: {json.dumps(initial_tree_data, ensure_ascii=False)}")
+        except Exception as e:
+            logger.error(f"Error getting directory tree: {str(e)}\n{traceback.format_exc()}")
             return render(request, 'grading.html', {
-                'error': '没有权限访问目录',
-                'initial_tree_data': '[]',
-                'config': config
+                'files': [],
+                'error': f'获取目录树失败: {str(e)}',
+                'config': config,
+                'base_dir': base_dir,
+                'initial_tree_data': '[]'
             })
         
-        # 获取初始目录树数据
-        items = get_directory_tree()
-        logger.info("Successfully retrieved initial directory tree")
-        
-        # 将目录树数据转换为 JSON 字符串，确保正确处理中文字符
-        initial_tree_data = json.dumps(items, ensure_ascii=False)
-        logger.info(f"Initial tree data: {initial_tree_data}")
-        
         return render(request, 'grading.html', {
-            'initial_tree_data': initial_tree_data,
-            'config': config
+            'files': [],
+            'error': None,
+            'config': config,
+            'base_dir': base_dir,
+            'initial_tree_data': json.dumps(initial_tree_data, ensure_ascii=False)
         })
+        
     except Exception as e:
-        logger.error(f"Error in grading_page: {str(e)}")
+        logger.error(f'处理评分页面请求失败: {str(e)}\n{traceback.format_exc()}')
         return render(request, 'grading.html', {
-            'error': f'初始化页面失败：{str(e)}',
-            'initial_tree_data': '[]',
-            'config': config if 'config' in locals() else None
+            'files': [],
+            'error': f'处理请求失败: {str(e)}',
+            'config': config if 'config' in locals() else None,
+            'base_dir': base_dir if 'base_dir' in locals() else None,
+            'initial_tree_data': '[]'
         })
 
 
@@ -552,7 +446,7 @@ def get_directory_tree(file_path=''):
         items = []
         try:
             # 获取目录内容并过滤掉隐藏文件和目录
-            for item in os.listdir(full_path):
+            for item in sorted(os.listdir(full_path)):
                 # 跳过隐藏文件和目录
                 if item.startswith('.'):
                     continue
@@ -567,26 +461,42 @@ def get_directory_tree(file_path=''):
                 
                 # 获取项目状态
                 is_dir = os.path.isdir(item_path)
-                is_file = os.path.isfile(item_path)
                 
                 # 构建节点数据
                 node = {
                     'id': relative_path,
                     'text': item,
                     'type': 'folder' if is_dir else 'file',
+                    'icon': 'jstree-folder' if is_dir else 'jstree-file',
                     'state': {
                         'opened': False,
-                        'disabled': False
+                        'disabled': False,
+                        'selected': False
                     }
                 }
                 
-                # 如果是目录，添加 children 属性
+                # 如果是目录，递归获取子目录
                 if is_dir:
-                    node['children'] = True
+                    children = get_directory_tree(relative_path)
+                    if children:
+                        node['children'] = children
+                    else:
+                        node['children'] = []
+                        node['state']['disabled'] = True
+                # 如果是文件，添加文件特定的属性
+                else:
+                    # 获取文件扩展名
+                    _, ext = os.path.splitext(item)
+                    node['a_attr'] = {
+                        'href': '#',
+                        'data-type': 'file',
+                        'data-ext': ext.lower()
+                    }
                 
                 items.append(node)
+                logger.info(f"Added {'directory' if is_dir else 'file'}: {item}")
             
-            # 按类型和名称排序
+            # 按类型和名称排序：目录在前，文件在后
             items.sort(key=lambda x: (x['type'] == 'file', x['text'].lower()))
             
             logger.info(f"Successfully generated directory tree for path: {full_path}")
@@ -610,3 +520,74 @@ def get_file_content(file_path):
 def save_file_grade(file_path, grade):
     # Implementation of save_file_grade function
     pass
+
+@login_required
+@require_http_methods(["GET"])
+def get_template_list(request):
+    """获取模板列表"""
+    try:
+        logger.info('开始处理获取模板列表请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'code': 403,
+                'msg': 'permission error',
+                'error': 'exceptions.UserAuthError'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'code': 403,
+                'msg': 'permission error',
+                'error': 'exceptions.UserAuthError'
+            }, status=403)
+        
+        # 获取全局配置
+        config = GlobalConfig.objects.first()
+        if not config:
+            logger.error('未找到全局配置')
+            return JsonResponse({
+                'code': 500,
+                'msg': 'configuration error',
+                'error': 'exceptions.ConfigError'
+            }, status=500)
+        
+        # 获取模板目录路径
+        template_dir = os.path.join(settings.BASE_DIR, 'templates', 'writing')
+        logger.info(f'模板目录路径: {template_dir}')
+        
+        # 检查目录是否存在
+        if not os.path.exists(template_dir):
+            logger.info(f'创建模板目录: {template_dir}')
+            os.makedirs(template_dir, exist_ok=True)
+        
+        # 获取模板列表
+        templates = []
+        if os.path.exists(template_dir):
+            for item in os.listdir(template_dir):
+                if item.endswith('.docx'):
+                    template_path = os.path.join(template_dir, item)
+                    templates.append({
+                        'name': item,
+                        'path': template_path,
+                        'size': os.path.getsize(template_path),
+                        'modified': os.path.getmtime(template_path)
+                    })
+        
+        logger.info(f'找到 {len(templates)} 个模板')
+        return JsonResponse({
+            'code': 200,
+            'msg': 'success',
+            'data': templates
+        })
+        
+    except Exception as e:
+        logger.error(f'获取模板列表失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({
+            'code': 500,
+            'msg': str(e),
+            'error': 'exceptions.ServerError'
+        }, status=500)

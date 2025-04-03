@@ -63,8 +63,7 @@ function loadFile(path) {
     method: 'POST',
     data: {
       action: 'get_content',
-      path: path,
-      csrfmiddlewaretoken: getCSRFToken()
+      path: path
     },
     success: function(response) {
       clearTimeout(timeout);
@@ -105,8 +104,7 @@ function saveGrade(grade) {
     data: {
       action: 'save_grade',
       path: currentFile,
-      grade: grade,
-      csrfmiddlewaretoken: getCSRFToken()
+      grade: grade
     },
     success: function(response) {
       if (response.status === 'success') {
@@ -148,50 +146,17 @@ function initTree() {
   // 显示加载状态
   $('#grade-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
   
-  $('#grade-tree').jstree({
+  // 配置 jstree
+  const treeConfig = {
     'core': {
-      'data': function(node) {
-        console.log('Getting data for node:', node);
-        
-        // 如果是根节点且有初始数据，直接使用初始数据
-        if (node.id === '#' && initialData.length > 0) {
-          console.log('Using initial tree data:', initialData);
-          return initialData;
-        }
-        
-        // 否则从服务器获取数据
-        console.log('Fetching data from server for path:', node.id === '#' ? '' : node.id);
-        return {
-          'url': '/grading/',
-          'data': function(node) {
-            return {
-              'action': 'get_directory_tree',
-              'file_path': node.id === '#' ? '' : node.id,
-              'csrfmiddlewaretoken': getCSRFToken()
-            };
-          },
-          'type': 'POST',
-          'dataType': 'json',
-          'processData': function(data) {
-            console.log('Received data from server:', data);
-            if (data.status === 'success') {
-              return data.data;
-            } else {
-              console.error('Failed to load directory tree:', data.message);
-              showError(data.message || '加载目录失败');
-              return [];
-            }
-          }
-        };
-      },
-      'check_callback': true
-    },
-    'plugins': ['types', 'wholerow'],
-    'themes': {
-      'responsive': true,
-      'dots': true,
-      'icons': true,
-      'stripes': true
+      'data': initialData,  // 直接使用初始数据
+      'check_callback': true,
+      'themes': {
+        'responsive': true,
+        'dots': true,
+        'icons': true,
+        'stripes': true
+      }
     },
     'types': {
       'default': {
@@ -200,30 +165,34 @@ function initTree() {
       'folder': {
         'icon': 'jstree-folder'
       }
-    }
-  }).on('ready.jstree', function() {
+    },
+    'plugins': ['types']
+  };
+  
+  // 初始化 jstree
+  $('#grade-tree').jstree(treeConfig).on('ready.jstree', function(e, data) {
     console.log('Tree is ready');
+    // 展开根节点
+    data.instance.open_node('#');
   }).on('select_node.jstree', function(e, data) {
-    console.log('Selected node:', data);
-    if (data.node.type === 'file') {
+    console.log('Selected node:', data.node);
+    if (data.node.type !== 'folder') {
       loadFile(data.node.id);
     }
+  }).on('error.jstree', function(e, data) {
+    console.error('Tree error:', data);
+    $('#grade-tree').html(`<div class="alert alert-danger">加载目录树失败：${data.error || '未知错误'}</div>`);
   });
 }
 
-// 初始化评分按钮
-function initGradeButtons() {
-  // 设置默认评分按钮状态
-  setGradeButtonState(selectedGrade);
-
+// 页面加载完成后初始化树
+$(document).ready(function() {
+  console.log('Document ready, initializing tree...');
+  initTree();
+  
+  // 绑定评分按钮点击事件
   $('.grade-button').click(function() {
     const grade = $(this).data('grade');
     saveGrade(grade);
   });
-}
-
-// 页面加载完成后初始化
-document.addEventListener('DOMContentLoaded', function() {
-  initTree();
-  initGradeButtons();
 }); 

@@ -8,4 +8,5 @@ urlpatterns = [
     path('', views.grading_page, name='grading'),
     path('file/<path:file_path>', views.serve_file, name='serve_file'),
     path('admin/', admin_site.urls),
+    path('writing/get_template_list', views.get_template_list, name='get_template_list'),
 ]

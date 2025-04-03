@@ -2,10 +2,10 @@
 {% load static %}
 
 {% block extra_css %}
-<!-- Bootstrap CSS -->
-<link rel="stylesheet" href="{% static 'grading/css/bootstrap.min.css' %}">
+<!-- Favicon -->
+<link rel="icon" type="image/x-icon" href="{% static 'grading/images/favicon.ico' %}">
 <!-- jstree CSS -->
-<link rel="stylesheet" href="{% static 'grading/css/jstree.min.css' %}">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css">
 <!-- Custom CSS -->
 <link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
 {% endblock %}
@@ -71,12 +71,8 @@
 {% endblock %}
 
 {% block extra_js %}
-<!-- jQuery -->
-<script src="{% static 'grading/js/jquery.min.js' %}"></script>
-<!-- Bootstrap Bundle with Popper -->
-<script src="{% static 'grading/js/bootstrap.bundle.min.js' %}"></script>
 <!-- jstree JavaScript -->
-<script src="{% static 'grading/js/jstree.min.js' %}"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
 <!-- 自定义脚本 -->
 <script src="{% static 'grading/js/grading.js' %}"></script>
 
