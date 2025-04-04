@@ -179,11 +179,62 @@ function saveGrade(grade) {
   setGradeButtonState(grade);
   pendingGrade = grade;
   
-  // 更新确定按钮状态
-  $('#add-grade-to-file').prop('disabled', false);
+  // 自动点击确定按钮
+  $('#add-grade-to-file').click();
 }
 
-// 添加评分到文件
+// 获取所有文件节点
+function getAllFileNodes() {
+    const allNodes = $('#directory-tree').jstree('get_json', '#', { flat: true });
+    return allNodes.filter(node => node.type === 'file');
+}
+
+// 获取当前文件在文件列表中的索引
+function getCurrentFileIndex() {
+    const fileNodes = getAllFileNodes();
+    const currentFile = $('#directory-tree').jstree('get_selected', true)[0];
+    return fileNodes.findIndex(node => node.id === currentFile.id);
+}
+
+// 导航到上一个文件
+$('#prev-file').on('click', function() {
+    const fileNodes = getAllFileNodes();
+    const currentIndex = getCurrentFileIndex();
+    
+    if (currentIndex > 0) {
+        const prevNode = fileNodes[currentIndex - 1];
+        $('#directory-tree').jstree('select_node', prevNode.id);
+    }
+});
+
+// 导航到下一个文件
+$('#next-file').on('click', function() {
+    const fileNodes = getAllFileNodes();
+    const currentIndex = getCurrentFileIndex();
+    
+    if (currentIndex < fileNodes.length - 1) {
+        const nextNode = fileNodes[currentIndex + 1];
+        $('#directory-tree').jstree('select_node', nextNode.id);
+    }
+});
+
+// 更新导航按钮状态
+function updateNavigationButtons() {
+    const fileNodes = getAllFileNodes();
+    const currentIndex = getCurrentFileIndex();
+    
+    $('#prev-file').prop('disabled', currentIndex <= 0);
+    $('#next-file').prop('disabled', currentIndex >= fileNodes.length - 1);
+}
+
+// 在文件选择时更新导航按钮状态
+$('#directory-tree').on('select_node.jstree', function(e, data) {
+    if (data.node.type === 'file') {
+        updateNavigationButtons();
+    }
+});
+
+// 修改addGradeToFile函数，在评分后自动导航到下一个文件
 function addGradeToFile(grade) {
   if (!currentFilePath) {
     showError('请先选择要评分的文件');
@@ -223,6 +274,9 @@ function addGradeToFile(grade) {
         pendingGrade = null;
         // 禁用确定按钮
         $('#add-grade-to-file').prop('disabled', true);
+
+        // 自动导航到下一个文件
+        navigateToNextFile();
       } else {
         showError(response.message);
       }
@@ -288,69 +342,81 @@ function cancelGrade() {
 
 // 初始化文件树
 function initTree() {
-  console.log('Initializing tree...');
-  console.log('Initial tree data:', window.initialTreeData);
-  
-  // 确保 initialTreeData 是数组
-  const initialData = Array.isArray(window.initialTreeData) ? window.initialTreeData : [];
-  console.log('Processed initial data:', initialData);
-  
-  // 销毁现有的树（如果存在）
-  if ($('#directory-tree').jstree(true)) {
-    $('#directory-tree').jstree(true).destroy();
-  }
-  
-  // 显示加载状态
-  $('#directory-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
-  
-  // 配置 jstree
-  const treeConfig = {
-    'core': {
-      'data': initialData,
-      'check_callback': true,
-      'multiple': false,
-      'themes': {
-        'responsive': true,
-        'dots': true,
-        'icons': true,
-        'stripes': true,
-        'variant': 'large'
-      }
-    },
-    'types': {
-      'default': {
-        'icon': 'jstree-file'
-      },
-      'file': {
-        'icon': 'jstree-file'
-      },
-      'folder': {
-        'icon': 'jstree-folder'
-      }
-    },
-    'plugins': ['types', 'wholerow', 'state'],
-    'state': {
-      'key': 'grading-tree',
-      'filter': function(state) {
-        // 只保存打开/关闭状态
-        return {
-          'core': {
-            'open': state.core.open,
-            'selected': state.core.selected
-          }
-        };
-      }
+    console.log('Initializing tree...');
+    console.log('Initial tree data:', window.initialTreeData);
+    
+    // 确保 initialTreeData 是数组
+    const initialData = Array.isArray(window.initialTreeData) ? window.initialTreeData : [];
+    console.log('Processed initial data:', initialData);
+    
+    // 销毁现有的树（如果存在）
+    if ($('#directory-tree').jstree(true)) {
+        $('#directory-tree').jstree(true).destroy();
     }
-  };
-  
-  // 初始化 jstree
-  $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
-    console.log('Tree initialized');
-  }).on('select_node.jstree', function(e, data) {
-    if (data.node.type === 'file') {
-      loadFile(data.node.id);
-    }
-  });
+    
+    // 显示加载状态
+    $('#directory-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+    
+    // 配置 jstree
+    const treeConfig = {
+        'core': {
+            'data': initialData,
+            'check_callback': true,
+            'multiple': false,  // 确保只能选择一个节点
+            'themes': {
+                'responsive': true,
+                'dots': true,
+                'icons': true,
+                'stripes': true,
+                'variant': 'large'
+            }
+        },
+        'types': {
+            'default': {
+                'icon': 'jstree-file'
+            },
+            'file': {
+                'icon': 'jstree-file'
+            },
+            'folder': {
+                'icon': 'jstree-folder'
+            }
+        },
+        'plugins': ['types', 'wholerow', 'state'],
+        'state': {
+            'key': 'grading-tree',
+            'filter': function(state) {
+                // 只保存打开/关闭状态
+                return {
+                    'core': {
+                        'open': state.core.open,
+                        'selected': state.core.selected
+                    }
+                };
+            }
+        }
+    };
+    
+    // 初始化 jstree
+    $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
+        console.log('Tree initialized');
+    }).on('select_node.jstree', function(e, data) {
+        // 确保只处理文件节点
+        if (data.node.type === 'file') {
+            // 取消其他节点的选中状态
+            const selectedNodes = $('#directory-tree').jstree('get_selected');
+            selectedNodes.forEach(nodeId => {
+                if (nodeId !== data.node.id) {
+                    $('#directory-tree').jstree('deselect_node', nodeId);
+                }
+            });
+            
+            // 加载文件内容
+            loadFile(data.node.id);
+            // 更新导航按钮状态
+            updateNavigationButtons();
+        }
+    });
 }
 
 // 页面加载完成后初始化树
@@ -383,5 +449,14 @@ $(document).ready(function() {
     // 绑定撤销按钮点击事件
     $('#cancel-grade').click(function() {
         cancelGrade();
+    });
+    
+    // 绑定导航按钮事件
+    $('#prev-file').click(function() {
+      navigateToPrevFile();
+    });
+    
+    $('#next-file').click(function() {
+      navigateToNextFile();
     });
 }); 
