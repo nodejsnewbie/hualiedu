@@ -189,3 +189,6 @@ temp/
 uploads/
 coverage/
 .nyc_output/
+
+~/jobs/*
+.history/*
