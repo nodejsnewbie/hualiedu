@@ -152,6 +152,8 @@ function loadFile(path) {
         
         // 设置默认评分按钮状态
         setGradeButtonState(selectedGrade);
+        // 启用确定按钮
+        $('#add-grade-to-file').prop('disabled', false);
       } else {
         showError(response.message || '加载文件失败');
       }
@@ -170,17 +172,16 @@ function loadFile(path) {
 
 // 保存评分
 function saveGrade(grade) {
-  if (!currentFilePath) {
-    showError('请先选择要评分的文件');
-    return;
-  }
+    if (!currentFilePath) {
+        showError('请先选择要评分的文件');
+        return;
+    }
 
-  // 只更新按钮状态，不立即保存
-  setGradeButtonState(grade);
-  pendingGrade = grade;
-  
-  // 自动点击确定按钮
-  $('#add-grade-to-file').click();
+    // 更新按钮状态
+    setGradeButtonState(grade);
+    
+    // 直接添加评分并导航到下一个文件
+    addGradeToFile(grade);
 }
 
 // 获取所有文件节点
@@ -236,59 +237,64 @@ $('#directory-tree').on('select_node.jstree', function(e, data) {
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
 function addGradeToFile(grade) {
-  if (!currentFilePath) {
-    showError('请先选择要评分的文件');
-    return;
-  }
-
-  if (!grade) {
-    showError('请先选择一个评分');
-    return;
-  }
-
-  showLoading();
-  $.ajax({
-    url: '/grading/add_grade_to_file/',
-    method: 'POST',
-    headers: {
-      'X-CSRFToken': getCSRFToken()
-    },
-    data: {
-      path: currentFilePath,
-      grade: grade
-    },
-    success: function(response) {
-      if (response.status === 'success') {
-        const alertHtml = `
-          <div class="alert alert-success alert-dismissible fade show" role="alert">
-            评分已添加到文件末尾
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-          </div>
-        `;
-        $('#file-content').prepend(alertHtml);
-        
-        // 重新加载文件内容以显示新添加的评分
-        loadFile(currentFilePath);
-        
-        // 重置待确认的评分
-        pendingGrade = null;
-        // 禁用确定按钮
-        $('#add-grade-to-file').prop('disabled', true);
-
-        // 自动导航到下一个文件
-        navigateToNextFile();
-      } else {
-        showError(response.message);
-      }
-    },
-    error: function(xhr, status, error) {
-      console.error('Error adding grade to file:', error);
-      showError('添加评分到文件失败：' + error);
-    },
-    complete: function() {
-      hideLoading();
+    if (!currentFilePath) {
+        showError('请先选择要评分的文件');
+        return;
     }
-  });
+
+    if (!grade) {
+        showError('请先选择一个评分');
+        return;
+    }
+
+    showLoading();
+    $.ajax({
+        url: '/grading/add_grade_to_file/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            path: currentFilePath,
+            grade: grade
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                const alertHtml = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        评分已添加到文件末尾
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                `;
+                $('#file-content').prepend(alertHtml);
+                
+                // 重新加载文件内容以显示新添加的评分
+                loadFile(currentFilePath);
+                
+                // 重置待确认的评分
+                pendingGrade = null;
+                // 禁用确定按钮
+                $('#add-grade-to-file').prop('disabled', true);
+
+                // 自动导航到下一个文件
+                const fileNodes = getAllFileNodes();
+                const currentIndex = getCurrentFileIndex();
+                if (currentIndex < fileNodes.length - 1) {
+                    const nextNode = fileNodes[currentIndex + 1];
+                    $('#directory-tree').jstree('select_node', nextNode.id);
+                }
+            } else {
+                showError(response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Error adding grade to file:', error);
+            showError('添加评分到文件失败：' + error);
+        },
+        complete: function() {
+            hideLoading();
+        }
+    });
 }
 
 // 撤销评分
@@ -437,13 +443,6 @@ $(document).ready(function() {
     $('.grade-button').click(function() {
         const grade = $(this).data('grade');
         saveGrade(grade);
-    });
-    
-    // 绑定添加评分到文件按钮点击事件
-    $('#add-grade-to-file').click(function() {
-        if (pendingGrade) {
-            addGradeToFile(pendingGrade);
-        }
     });
     
     // 绑定撤销按钮点击事件
