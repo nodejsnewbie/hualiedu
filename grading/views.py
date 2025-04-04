@@ -1068,30 +1068,33 @@ def remove_grade(request):
             try:
                 doc = Document(full_path)
                 
-                # 检查最后一段是否包含评分
+                # 检查最后一段是否是评分
                 if doc.paragraphs and doc.paragraphs[-1].text.startswith('老师评分：'):
-                    # 删除最后一段
+                    # 如果是评分，则删除它
                     doc._body._body.remove(doc.paragraphs[-1]._p)
+                    # 如果前一段是空行，也删除它
+                    if doc.paragraphs and not doc.paragraphs[-1].text.strip():
+                        doc._body._body.remove(doc.paragraphs[-1]._p)
                     # 保存文档
                     doc.save(full_path)
-                    logger.info(f'成功从 Word 文档删除评分: {full_path}')
+                    logger.info(f'成功删除 Word 文档中的评分: {full_path}')
                     return JsonResponse({
                         'status': 'success',
                         'message': '评分已删除',
                         'file_type': 'docx'
                     })
                 else:
-                    logger.info(f'Word 文档中未找到评分: {full_path}')
+                    logger.info(f'Word 文档中没有找到评分: {full_path}')
                     return JsonResponse({
                         'status': 'success',
-                        'message': '文件中未找到评分',
+                        'message': '文件中没有找到评分',
                         'file_type': 'docx'
                     })
             except Exception as e:
-                logger.error(f'从 Word 文档删除评分失败: {str(e)}')
+                logger.error(f'删除 Word 文档中的评分失败: {str(e)}')
                 return JsonResponse({
                     'status': 'error',
-                    'message': f'从 Word 文档删除评分失败: {str(e)}'
+                    'message': f'删除 Word 文档中的评分失败: {str(e)}'
                 })
         else:
             # 对于其他文件，尝试以文本方式删除
@@ -1099,38 +1102,38 @@ def remove_grade(request):
                 with open(full_path, 'r+', encoding='utf-8') as f:
                     lines = f.readlines()
                     
-                    # 检查最后一行是否包含评分
+                    # 检查最后一行是否是评分
                     if lines and lines[-1].strip().startswith('老师评分：'):
-                        # 删除最后一行
+                        # 如果是评分，则删除它
                         lines = lines[:-1]
-                        # 如果删除评分后最后一行是空行，也删除空行
+                        # 如果前一行是空行，也删除它
                         if lines and not lines[-1].strip():
                             lines = lines[:-1]
                         
-                        # 移动到文件开头
+                        # 移动到文件开头并截断
                         f.seek(0)
                         f.truncate()
                         # 写入剩余内容
                         f.writelines(lines)
                         
-                        logger.info(f'成功从文件删除评分: {full_path}')
+                        logger.info(f'成功删除文件中的评分: {full_path}')
                         return JsonResponse({
                             'status': 'success',
                             'message': '评分已删除',
                             'file_type': 'text'
                         })
                     else:
-                        logger.info(f'文件中未找到评分: {full_path}')
+                        logger.info(f'文件中没有找到评分: {full_path}')
                         return JsonResponse({
                             'status': 'success',
-                            'message': '文件中未找到评分',
+                            'message': '文件中没有找到评分',
                             'file_type': 'text'
                         })
             except Exception as e:
-                logger.error(f'从文件删除评分失败: {str(e)}')
+                logger.error(f'删除文件中的评分失败: {str(e)}')
                 return JsonResponse({
                     'status': 'error',
-                    'message': f'从文件删除评分失败: {str(e)}'
+                    'message': f'删除文件中的评分失败: {str(e)}'
                 })
             
     except Exception as e:

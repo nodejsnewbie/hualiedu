@@ -58,9 +58,9 @@ class SSHKeyFileInput(forms.ClearableFileInput):
     
     class Media:
         css = {
-            'all': ('admin/css/ssh_key_input.css',)
+            'all': ('grading/admin/css/grading_ssh_key_input.css',)
         }
-        js = ('admin/js/ssh_key_input.js',)
+        js = ('grading/admin/js/grading_ssh_key_input.js',)
 
     def __init__(self, attrs=None):
         default_attrs = {
@@ -154,9 +154,9 @@ class GlobalConfigForm(forms.ModelForm):
 
     class Media:
         css = {
-            'all': ('admin/css/ssh_key_input.css',)
+            'all': ('grading/admin/css/grading_ssh_key_input.css',)
         }
-        js = ('admin/js/ssh_key_input.js', 'admin/js/repo_dir_browser.js',)
+        js = ('grading/admin/js/grading_ssh_key_input.js', 'grading/admin/js/grading_repo_dir_browser.js',)
 
 @admin.register(GlobalConfig)
 class GlobalConfigAdmin(admin.ModelAdmin):

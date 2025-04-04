@@ -1,6 +1,8 @@
 // 全局变量
 let currentFile = '';
 let selectedGrade = 'B';  // 设置默认评分为 B
+var currentFilePath = null;
+let pendingGrade = null;  // 待确认的评分
 
 // 获取 CSRF Token
 function getCSRFToken() {
@@ -44,13 +46,14 @@ function hideLoading() {
 function setGradeButtonState(grade) {
   $('.grade-button').removeClass('active');
   $(`.grade-button[data-grade="${grade}"]`).addClass('active');
+  selectedGrade = grade;
 }
 
 // 加载文件内容
 function loadFile(path) {
   console.log('Loading file:', path);
   showLoading();
-  currentFile = path;
+  currentFilePath = path;
 
   // 添加超时处理
   const timeout = setTimeout(() => {
@@ -59,16 +62,94 @@ function loadFile(path) {
   }, 30000); // 30秒超时
 
   $.ajax({
-    url: '/grading/',
+    url: '/grading/get_file_content/',
     method: 'POST',
+    headers: {
+      'X-CSRFToken': getCSRFToken()
+    },
     data: {
-      action: 'get_content',
       path: path
     },
     success: function(response) {
       clearTimeout(timeout);
       if (response.status === 'success') {
-        $('#file-content').html(response.content);
+        // 根据文件类型显示内容
+        switch (response.type) {
+          case 'docx':
+            // Word 文档已经转换为 HTML
+            $('#file-content').html(response.content);
+            break;
+            
+          case 'pdf':
+            // 使用 PDF.js 显示 PDF 文件
+            $('#file-content').html(`
+              <div class="pdf-container">
+                <iframe src="/static/pdfjs/web/viewer.html?file=${encodeURIComponent(response.content)}" 
+                        width="100%" height="800px" frameborder="0"></iframe>
+              </div>
+            `);
+            break;
+            
+          case 'image':
+            // 使用 viewer.js 显示图片
+            $('#file-content').html(`
+              <div class="image-container">
+                <img src="${response.content}" class="img-fluid" alt="图片预览">
+              </div>
+            `);
+            // 初始化 viewer.js
+            $('.image-container img').viewer({
+              navbar: false,
+              title: false,
+              toolbar: {
+                zoomIn: 1,
+                zoomOut: 1,
+                oneToOne: 1,
+                reset: 1,
+                prev: 0,
+                play: 0,
+                next: 0,
+                rotateLeft: 1,
+                rotateRight: 1,
+                flipHorizontal: 1,
+                flipVertical: 1,
+              }
+            });
+            break;
+            
+          case 'text':
+            // 使用 CodeMirror 显示文本文件
+            $('#file-content').html(`
+              <div class="text-container">
+                <textarea id="code-editor">${response.content}</textarea>
+              </div>
+            `);
+            // 初始化 CodeMirror
+            const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+              mode: 'text/plain',
+              lineNumbers: true,
+              readOnly: true,
+              theme: 'default',
+              lineWrapping: true
+            });
+            break;
+            
+          case 'binary':
+            // 显示二进制文件提示
+            $('#file-content').html(`
+              <div class="alert alert-info">
+                这是一个二进制文件，无法直接显示。请下载后查看。
+                <a href="${response.content}" class="btn btn-primary btn-sm ms-2" download>
+                  下载文件
+                </a>
+              </div>
+            `);
+            break;
+            
+          default:
+            showError('不支持的文件类型');
+        }
+        
         // 设置默认评分按钮状态
         setGradeButtonState(selectedGrade);
       } else {
@@ -89,44 +170,120 @@ function loadFile(path) {
 
 // 保存评分
 function saveGrade(grade) {
-  if (!currentFile) {
+  if (!currentFilePath) {
     showError('请先选择要评分的文件');
     return;
   }
 
-  selectedGrade = grade;  // 更新当前选中的评分
-  setGradeButtonState(grade);  // 更新按钮状态
+  // 只更新按钮状态，不立即保存
+  setGradeButtonState(grade);
+  pendingGrade = grade;
+  
+  // 更新确定按钮状态
+  $('#add-grade-to-file').prop('disabled', false);
+}
+
+// 添加评分到文件
+function addGradeToFile(grade) {
+  if (!currentFilePath) {
+    showError('请先选择要评分的文件');
+    return;
+  }
+
+  if (!grade) {
+    showError('请先选择一个评分');
+    return;
+  }
 
   showLoading();
   $.ajax({
-    url: '/grading/',
+    url: '/grading/add_grade_to_file/',
     method: 'POST',
+    headers: {
+      'X-CSRFToken': getCSRFToken()
+    },
     data: {
-      action: 'save_grade',
-      path: currentFile,
+      path: currentFilePath,
       grade: grade
     },
     success: function(response) {
       if (response.status === 'success') {
         const alertHtml = `
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        评分已保存
-                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                    </div>
-                `;
+          <div class="alert alert-success alert-dismissible fade show" role="alert">
+            评分已添加到文件末尾
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        `;
         $('#file-content').prepend(alertHtml);
+        
+        // 重新加载文件内容以显示新添加的评分
+        loadFile(currentFilePath);
+        
+        // 重置待确认的评分
+        pendingGrade = null;
+        // 禁用确定按钮
+        $('#add-grade-to-file').prop('disabled', true);
       } else {
         showError(response.message);
       }
     },
     error: function(xhr, status, error) {
-      console.error('Error saving grade:', error);
-      showError('保存评分失败：' + error);
+      console.error('Error adding grade to file:', error);
+      showError('添加评分到文件失败：' + error);
     },
     complete: function() {
       hideLoading();
     }
   });
+}
+
+// 撤销评分
+function cancelGrade() {
+    if (!currentFilePath) {
+        showError('请先选择要评分的文件');
+        return;
+    }
+
+    showLoading();
+    $.ajax({
+        url: '/grading/remove_grade/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            path: currentFilePath
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                // 恢复之前的评分状态
+                setGradeButtonState(selectedGrade);
+                pendingGrade = null;
+                // 禁用确定按钮
+                $('#add-grade-to-file').prop('disabled', true);
+                
+                // 重新加载文件内容
+                loadFile(currentFilePath);
+                
+                const alertHtml = `
+                    <div class="alert alert-success alert-dismissible fade show" role="alert">
+                        评分已撤销
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                `;
+                $('#file-content').prepend(alertHtml);
+            } else {
+                showError(response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('Error removing grade:', error);
+            showError('撤销评分失败：' + error);
+        },
+        complete: function() {
+            hideLoading();
+        }
+    });
 }
 
 // 初始化文件树
@@ -139,60 +296,92 @@ function initTree() {
   console.log('Processed initial data:', initialData);
   
   // 销毁现有的树（如果存在）
-  if ($('#grade-tree').jstree(true)) {
-    $('#grade-tree').jstree(true).destroy();
+  if ($('#directory-tree').jstree(true)) {
+    $('#directory-tree').jstree(true).destroy();
   }
   
   // 显示加载状态
-  $('#grade-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+  $('#directory-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
   
   // 配置 jstree
   const treeConfig = {
     'core': {
-      'data': initialData,  // 直接使用初始数据
+      'data': initialData,
       'check_callback': true,
+      'multiple': false,
       'themes': {
         'responsive': true,
         'dots': true,
         'icons': true,
-        'stripes': true
+        'stripes': true,
+        'variant': 'large'
       }
     },
     'types': {
       'default': {
         'icon': 'jstree-file'
       },
+      'file': {
+        'icon': 'jstree-file'
+      },
       'folder': {
         'icon': 'jstree-folder'
       }
     },
-    'plugins': ['types']
+    'plugins': ['types', 'wholerow', 'state'],
+    'state': {
+      'key': 'grading-tree',
+      'filter': function(state) {
+        // 只保存打开/关闭状态
+        return {
+          'core': {
+            'open': state.core.open,
+            'selected': state.core.selected
+          }
+        };
+      }
+    }
   };
   
   // 初始化 jstree
-  $('#grade-tree').jstree(treeConfig).on('ready.jstree', function(e, data) {
-    console.log('Tree is ready');
-    // 展开根节点
-    data.instance.open_node('#');
+  $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
+    console.log('Tree initialized');
   }).on('select_node.jstree', function(e, data) {
-    console.log('Selected node:', data.node);
-    if (data.node.type !== 'folder') {
+    if (data.node.type === 'file') {
       loadFile(data.node.id);
     }
-  }).on('error.jstree', function(e, data) {
-    console.error('Tree error:', data);
-    $('#grade-tree').html(`<div class="alert alert-danger">加载目录树失败：${data.error || '未知错误'}</div>`);
   });
 }
 
 // 页面加载完成后初始化树
 $(document).ready(function() {
-  console.log('Document ready, initializing tree...');
-  initTree();
-  
-  // 绑定评分按钮点击事件
-  $('.grade-button').click(function() {
-    const grade = $(this).data('grade');
-    saveGrade(grade);
-  });
+    console.log('Document ready, initializing tree...');
+    // 设置初始树数据
+    if (window.initialTreeData) {
+        console.log('Initial tree data:', window.initialTreeData);
+        initTree();
+    } else {
+        console.error('No initial tree data available');
+    }
+    
+    // 设置默认评分按钮状态
+    setGradeButtonState('B');
+    
+    // 绑定评分按钮点击事件
+    $('.grade-button').click(function() {
+        const grade = $(this).data('grade');
+        saveGrade(grade);
+    });
+    
+    // 绑定添加评分到文件按钮点击事件
+    $('#add-grade-to-file').click(function() {
+        if (pendingGrade) {
+            addGradeToFile(pendingGrade);
+        }
+    });
+    
+    // 绑定撤销按钮点击事件
+    $('#cancel-grade').click(function() {
+        cancelGrade();
+    });
 }); 

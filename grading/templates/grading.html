@@ -5,13 +5,15 @@
 <!-- Favicon -->
 <link rel="icon" type="image/x-icon" href="{% static 'grading/images/favicon.ico' %}">
 <!-- jstree CSS -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/themes/default/style.min.css">
+<link rel="stylesheet" href="{% static 'grading/vendor/jstree/jstree.min.css' %}">
+<!-- Bootstrap CSS -->
+<link rel="stylesheet" href="{% static 'grading/vendor/bootstrap/bootstrap.min.css' %}">
 <!-- Custom CSS -->
 <link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
 <!-- CodeMirror -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.css">
+<link rel="stylesheet" href="{% static 'grading/vendor/codemirror/codemirror.min.css' %}">
 <!-- Viewer.js -->
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.3/viewer.min.css">
+<link rel="stylesheet" href="{% static 'grading/vendor/viewerjs/viewer.min.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -88,8 +90,12 @@
 {% endblock %}
 
 {% block extra_js %}
+<!-- jQuery -->
+<script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
+<!-- Bootstrap Bundle with Popper -->
+<script src="{% static 'grading/vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
 <!-- jstree JavaScript -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jstree/3.3.12/jstree.min.js"></script>
+<script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
 <!-- 自定义脚本 -->
 <script src="{% static 'grading/js/grading.js' %}"></script>
 
@@ -110,14 +116,14 @@
 </script>
 
 <!-- CodeMirror -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.2/codemirror.min.js"></script>
+<script src="{% static 'grading/vendor/codemirror/codemirror.min.js' %}"></script>
 <!-- Viewer.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/viewerjs/1.11.3/viewer.min.js"></script>
+<script src="{% static 'grading/vendor/viewerjs/viewer.min.js' %}"></script>
 <!-- PDF.js -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+<script src="{% static 'grading/vendor/pdfjs/pdf.min.js' %}"></script>
 
 <script>
     // 设置 PDF.js worker 路径
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "{% static 'grading/vendor/pdfjs/pdf.worker.min.js' %}";
 </script>
 {% endblock %} 

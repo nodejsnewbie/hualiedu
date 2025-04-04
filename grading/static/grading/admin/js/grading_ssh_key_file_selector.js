@@ -33,7 +33,7 @@ document.addEventListener('DOMContentLoaded', function () {
               startIn: defaultPath,
               types: [
                 {
-                  description: '认证文件',
+                  description: 'SSH 私钥文件',
                   accept: {
                     'application/x-pem-file': ['.pem', '.key'],
                     'text/plain': ['.*']
@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', function () {
         };
       }
     } catch (e) {
-      console.warn('高级文件选择器API不可用');
+      console.warn('高级文件选择器API不可用，将使用标准文件选择器');
     }
   }
-});
+}); 
