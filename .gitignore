@@ -192,3 +192,4 @@ coverage/
 
 ~/jobs/*
 .history/*
+debug.log
