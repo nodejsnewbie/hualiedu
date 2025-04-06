@@ -96,12 +96,28 @@ body {
 .btn-group .grade-button {
     min-width: 60px;
     font-weight: 500;
+    background-color: #fff;
+    color: #0d6efd;
+    border-color: #dee2e6;
 }
 
 .btn-group .grade-button.active {
     background-color: #0d6efd;
     color: white;
     border-color: #0d6efd;
+}
+
+/* 防止悬停时出现多个蓝色按钮 */
+.btn-group .grade-button:not(.active):hover {
+    background-color: #e9ecef;
+    color: #0d6efd;
+    border-color: #dee2e6;
+}
+
+.btn-group .grade-button.active:hover {
+    background-color: #0b5ed7;
+    color: white;
+    border-color: #0a58ca;
 }
 
 /* 文件内容区域样式 */
@@ -111,6 +127,42 @@ body {
     background-color: #fff;
     border: 1px solid #e9ecef;
     border-radius: 4px;
+    overflow: auto;
+    resize: both;
+    max-width: 100%;
+    max-height: calc(100vh - 300px);
+}
+
+/* 图片内容样式 */
+#file-content img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+/* PDF 内容样式 */
+#file-content .pdf-container {
+    width: 100%;
+    height: calc(100vh - 300px);
+    overflow: auto;
+}
+
+/* 代码内容样式 */
+#file-content .CodeMirror {
+    height: auto;
+    min-height: 300px;
+    max-height: calc(100vh - 300px);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* 文本内容样式 */
+#file-content pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-width: 100%;
+    overflow-x: auto;
 }
 
 /* 文件树容器样式 */
