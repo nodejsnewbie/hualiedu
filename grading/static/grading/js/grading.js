@@ -425,8 +425,8 @@ function initTree() {
     });
 }
 
-// 页面加载完成后初始化树
-$(document).ready(function() {
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
     console.log('Document ready, initializing tree...');
     // 设置初始树数据
     if (window.initialTreeData) {
@@ -442,7 +442,31 @@ $(document).ready(function() {
     // 绑定评分按钮点击事件
     $('.grade-button').click(function() {
         const grade = $(this).data('grade');
-        saveGrade(grade);
+        // 更新按钮状态
+        $('.grade-button').removeClass('active');
+        $(this).addClass('active');
+        selectedGrade = grade;
+        // 立即保存评分并转到下一个文件
+        addGradeToFile(grade);
+    });
+    
+    // 绑定确定按钮点击事件
+    $('#add-grade-to-file').click(function() {
+        if (!currentFilePath) {
+            showError('请先选择要评分的文件');
+            return;
+        }
+        
+        // 获取当前选中的评分
+        const activeButton = $('.grade-button.active');
+        if (activeButton.length === 0) {
+            showError('请先选择评分');
+            return;
+        }
+        
+        const grade = activeButton.data('grade');
+        // 保存评分并转到下一个文件
+        addGradeToFile(grade);
     });
     
     // 绑定撤销按钮点击事件
