@@ -14,4 +14,5 @@ urlpatterns = [
     path('save_grade/', views.save_grade, name='save_grade'),
     path('add_grade_to_file/', views.add_grade_to_file, name='add_grade_to_file'),
     path('remove_grade/', views.remove_grade, name='remove_grade'),
+    path('get_dir_file_count/', views.get_dir_file_count, name='get_dir_file_count'),
 ]

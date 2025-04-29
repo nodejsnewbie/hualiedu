@@ -30,6 +30,26 @@ def index(request):
     return render(request, 'index.html')
 
 
+def get_dir_file_count(request):
+    """获取目录中文件数量的视图函数"""
+    try:
+        data = json.loads(request.body)
+        dir_path = data.get('dir_path')
+        
+        if not dir_path:
+            return JsonResponse({'error': '缺少dir_path参数'}, status=400)
+            
+        if not os.path.isdir(dir_path):
+            return JsonResponse({'error': '目录不存在'}, status=400)
+            
+        file_count = len([f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))])
+        return JsonResponse({'file_count': file_count})
+        
+    except Exception as e:
+        logger.error(f'获取目录文件数量出错: {str(e)}')
+        return JsonResponse({'error': str(e)}, status=500)
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def grading_page(request):

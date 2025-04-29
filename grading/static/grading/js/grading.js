@@ -54,6 +54,27 @@ function loadFile(path) {
   console.log('Loading file:', path);
   showLoading();
   currentFilePath = path;
+  
+  // 获取并显示目录文件数
+  const dirPath = path.substring(0, path.lastIndexOf('/'));
+  $.ajax({
+    url: '/grading/get_dir_file_count/',
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': getCSRFToken()
+    },
+    data: {
+      path: dirPath
+    },
+    success: function(response) {
+      if(response.status === 'success') {
+        $('.file-count-display').text(`目录文件数: ${response.count}`);
+      }
+    },
+    error: function() {
+      $('.file-count-display').text('');
+    }
+  });
 
   // 添加超时处理
   const timeout = setTimeout(() => {
@@ -236,6 +257,29 @@ $('#directory-tree').on('select_node.jstree', function(e, data) {
 });
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
+function getDirectoryFileCount(path) {
+    return new Promise((resolve, reject) => {
+        $.ajax({
+            url: '/grading/get_directory_file_count/',
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            },
+            data: { path: path },
+            success: function(response) {
+                if (response.status === 'success') {
+                    resolve(response.count);
+                } else {
+                    reject(response.message);
+                }
+            },
+            error: function(xhr, status, error) {
+                reject('获取目录文件数失败：' + error);
+            }
+        });
+    });
+}
+
 function addGradeToFile(grade) {
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
@@ -458,4 +502,4 @@ $(document).ready(function() {
     $('#next-file').click(function() {
       navigateToNextFile();
     });
-}); 
+});

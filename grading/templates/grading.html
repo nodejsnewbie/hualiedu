@@ -36,6 +36,9 @@
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件内容</h5>
+                    <div class="file-count-display text-muted small">
+                        <span id="directory-file-count">0</span> 个文件
+                    </div>
                 </div>
                 <div class="card-body">
                     <!-- 加载指示器 -->
@@ -135,4 +138,4 @@
     // 设置 PDF.js worker 路径
     pdfjsLib.GlobalWorkerOptions.workerSrc = "{% static 'grading/vendor/pdfjs/pdf.worker.min.js' %}";
 </script>
-{% endblock %} 
+{% endblock %}
