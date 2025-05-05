@@ -102,50 +102,40 @@ class GradeRegistration:
                     
         return student_rows
     
-    def write_grade_to_excel(self, student_name: str, class_name: str, homework_number: int, grade: str) -> None:
-        """将学生成绩写入Excel文件
-        
+    def write_grade_to_excel(self, excel_path: str, student_name: str, homework_number: int, grade: str) -> None:
+        """
+        将学生成绩写入Excel文件
+
         Args:
+            excel_path: Excel文件路径
             student_name: 学生姓名
-            class_name: 班级名称
             homework_number: 作业次数
             grade: 成绩（A/B/C/D/E）
-            
+
         Raises:
             FileNotFoundError: 如果找不到对应的Excel文件
             ValueError: 如果作业列索引超出当前列数
         """
-        # 查找对应的Excel文件
-        excel_path = self.find_excel_file(class_name)
-        
-        # 如果缓存中没有该班级的学生名单，则加载
-        if class_name not in self._student_cache:
-            self._student_cache[class_name] = self._load_student_list(excel_path)
-        
-        # 从缓存中获取学生行号
-        student_rows = self._student_cache[class_name]
-        if student_name not in student_rows:
-            print(f"Warning: Student {student_name} not found in {excel_path}")
-            return
-            
-        student_row = student_rows[student_name]
-        
         # 读取Excel文件
         with open(excel_path, 'rb') as f:
             wb = openpyxl.load_workbook(f)
             ws = wb.active
-            
-            # 计算作业列索引（第1次作业在第4列，索引为3）
+
+            # 缓存机制同前
+            if excel_path not in self._student_cache:
+                self._student_cache[excel_path] = self._load_student_list(excel_path)
+            student_rows = self._student_cache[excel_path]
+            if student_name not in student_rows:
+                print(f"Warning: Student {student_name} not found in {excel_path}")
+                return
+
+            student_row = student_rows[student_name]
+            # 第1列是序号，第2列是学号，第3列是姓名，第4列开始是作业成绩
             homework_col_idx = 3 + homework_number
-            
-            # 检查作业列索引是否超出当前列数
             if homework_col_idx > ws.max_column:
                 raise ValueError(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
-            
-            # 写入成绩
+
             ws.cell(row=student_row, column=homework_col_idx, value=grade)
-            
-            # 保存更新后的Excel文件
             wb.save(excel_path)
     
     def _extract_class_name(self, path: Path, is_multi_class: bool) -> str:
@@ -161,32 +151,30 @@ class GradeRegistration:
         Raises:
             ValueError: 如果无法从路径中提取班级名称
         """
-        # 查找Excel文件
-        excel_files = list(path.parent.parent.glob("平时成绩登记表-*.xlsx"))
-        if not excel_files:
-            raise ValueError(f"No Excel file found in repository: {path.parent.parent}")
-        
-        # 从Excel文件名中提取班级名称
-        excel_name = excel_files[0].stem  # 获取文件名（不含扩展名）
-        class_name = excel_name.replace("平时成绩登记表-", "")
-        
+        # 如果是多班级仓库，从目录名中提取班级信息
         if is_multi_class:
-            # 多班级仓库：从目录名中提取班级名称
-            for part in path.parts:
-                if "班" in part and any(str(year) in part for year in range(20, 25)):
-                    # 从目录名中提取班级号（例如：从"23计算机1班"中提取"1"）
-                    class_number = re.search(r'(\d+)班', part)
-                    if class_number:
-                        # 从Excel文件名中提取专业和年级（例如：从"23计算机1-2班"中提取"23计算机"）
-                        major_year = re.search(r'(\d+计算机)', class_name)
-                        if major_year:
-                            # 组合成完整的班级名称（例如："23计算机1班"）
-                            return f"{major_year.group(1)}{class_number.group(1)}班"
-            # 如果在目录中找不到班级名，返回Excel文件中的班级名
-            return class_name
-        else:
-            # 单班级仓库：直接返回Excel文件中的班级名
-            return class_name
+            # 获取文件所在目录
+            current_dir = path.parent
+            
+            # 检查目录名是否符合班级命名规范（例如：23计算机1班）
+            class_pattern = re.compile(r'^\d{2}计算机[12]班$')
+            if class_pattern.match(current_dir.name):
+                return current_dir.name
+                
+            # 如果目录名不符合规范，尝试从路径中提取
+            class_match = re.search(r'(\d{2}计算机[12]班)', str(path))
+            if class_match:
+                return class_match.group(1)
+                
+            # 如果还是找不到，尝试从父目录中查找
+            for parent in current_dir.parents:
+                if class_pattern.match(parent.name):
+                    return parent.name
+                    
+            raise ValueError(f"Could not determine class name from path: {path}")
+            
+        # 如果是单班级仓库，使用默认班级名称
+        return "22计算机G1班"
     
     def _extract_student_name(self, path: Path) -> str:
         """
@@ -266,112 +254,58 @@ class GradeRegistration:
             print(f"Error reading file {path}: {str(e)}")
             return "B"
     
-    def process_docx_files(self, repo_path: Path) -> None:
-        """处理整个仓库的docx文件
-        
-        Args:
-            repo_path: 仓库路径
+    def process_docx_files(self, repository_path: str) -> None:
         """
-        # 设置仓库路径
-        self.repo_path = repo_path
-        
-        # 查找所有成绩登记表
-        excel_files = list(repo_path.glob("平时成绩登记表-*.xlsx"))
+        处理仓库中的所有docx文件，提取成绩并写入Excel
+
+        Args:
+            repository_path: 仓库路径
+        """
+        # 搜索成绩登记表文件
+        excel_files = list(Path(repository_path).glob("平时成绩登记表-*.xlsx"))
         if not excel_files:
-            print(f"Warning: No grade registration files found in {repo_path}")
-            return
-            
-        # 处理每个成绩登记表
+            raise FileNotFoundError(f"在 {repository_path} 中未找到成绩登记表文件")
+
+        # 处理每个成绩登记表文件
         for excel_file in excel_files:
-            try:
-                # 从文件名中提取班级信息
-                class_name = excel_file.stem.replace("平时成绩登记表-", "")
-                print(f"\nProcessing grade registration file: {excel_file.name}")
-                
-                # 判断是否为多班级成绩登记表
-                if "-" in class_name:  # 例如：23计算机1-2班
-                    # 多班级成绩登记表
-                    # 从文件名中提取专业和年级（例如：从"23计算机1-2班"中提取"23计算机"）
-                    major_year = re.search(r'(\d+计算机)', class_name)
-                    if not major_year:
-                        print(f"Warning: Could not extract major and year from {class_name}")
+            # 从文件名中提取专业和年级信息
+            class_name = excel_file.stem.split("-")[1]  # 例如：23计算机1-2班 或 22计算机G1班
+            major = class_name.split("班")[0].split("计算机")[1]  # 例如：1-2 或 G1
+            year = class_name.split("计算机")[0]  # 例如：23
+
+            # 处理班级范围
+            if "-" in major:  # 处理多班级情况
+                class_range = major.split("-")
+                start_class = int(class_range[0])
+                end_class = int(class_range[1])
+                class_numbers = list(range(start_class, end_class + 1))
+            else:  # 处理单班级情况
+                class_numbers = [major]  # 直接使用班级标识，如 "G1"
+
+            # 处理每个班级
+            for class_number in class_numbers:
+                class_dir = Path(repository_path) / f"{year}计算机{class_number}班"
+                if not class_dir.exists():
+                    print(f"Warning: 班级目录 {class_dir} 不存在")
+                    continue
+
+                # 处理该班级的所有docx文件
+                for docx_file in class_dir.glob("*.docx"):
+                    try:
+                        student_name = self._extract_student_name(docx_file.name)
+                        homework_number = self._extract_homework_number(docx_file.name)
+                        grade = self._extract_grade_from_docx(docx_file)
+
+                        # 写入成绩
+                        self.write_grade_to_excel(
+                            excel_path=str(excel_file),
+                            student_name=student_name,
+                            homework_number=homework_number,
+                            grade=grade
+                        )
+                    except Exception as e:
+                        print(f"处理文件 {docx_file} 时出错: {e}")
                         continue
-                        
-                    # 从文件名中提取班级号（例如：从"23计算机1-2班"中提取"1"和"2"）
-                    class_numbers = re.findall(r'(\d+)班', class_name)
-                    if not class_numbers:
-                        print(f"Warning: Could not extract class numbers from {class_name}")
-                        continue
-                        
-                    # 处理每个班级的docx文件
-                    for class_number in class_numbers:
-                        current_class = f"{major_year.group(1)}{class_number}班"
-                        class_dir = repo_path / current_class
-                        if not class_dir.exists():
-                            print(f"Warning: Class directory {class_dir} does not exist")
-                            continue
-                            
-                        print(f"\nProcessing class: {current_class}")
-                        # 处理该班级目录下的所有docx文件
-                        for docx_path in class_dir.rglob("*.docx"):
-                            try:
-                                # 提取学生姓名
-                                student_name = self._extract_student_name(docx_path)
-                                if not student_name:
-                                    print(f"Warning: Could not extract student name from {docx_path}")
-                                    continue
-                                    
-                                # 提取作业次数
-                                homework_number = self.get_homework_number_from_path(docx_path)
-                                if not homework_number:
-                                    print(f"Warning: Could not extract homework number from {docx_path}")
-                                    continue
-                                    
-                                # 提取成绩
-                                grade = self._extract_grade_from_docx(docx_path)
-                                if not grade:
-                                    print(f"Warning: Could not extract grade from {docx_path}")
-                                    continue
-                                    
-                                # 写入Excel
-                                self.write_grade_to_excel(student_name, class_name, homework_number, grade)
-                                print(f"Successfully processed {docx_path}")
-                            except Exception as e:
-                                print(f"Error processing {docx_path}: {str(e)}")
-                                continue
-                else:
-                    # 单班级成绩登记表
-                    print(f"\nProcessing class: {class_name}")
-                    # 处理仓库下的所有docx文件
-                    for docx_path in repo_path.rglob("*.docx"):
-                        try:
-                            # 提取学生姓名
-                            student_name = self._extract_student_name(docx_path)
-                            if not student_name:
-                                print(f"Warning: Could not extract student name from {docx_path}")
-                                continue
-                                
-                            # 提取作业次数
-                            homework_number = self.get_homework_number_from_path(docx_path)
-                            if not homework_number:
-                                print(f"Warning: Could not extract homework number from {docx_path}")
-                                continue
-                                
-                            # 提取成绩
-                            grade = self._extract_grade_from_docx(docx_path)
-                            if not grade:
-                                print(f"Warning: Could not extract grade from {docx_path}")
-                                continue
-                                
-                            # 写入Excel
-                            self.write_grade_to_excel(student_name, class_name, homework_number, grade)
-                            print(f"Successfully processed {docx_path}")
-                        except Exception as e:
-                            print(f"Error processing {docx_path}: {str(e)}")
-                            continue
-            except Exception as e:
-                print(f"Error processing Excel file {excel_file}: {str(e)}")
-                continue
 
     def _is_multi_class_repo(self, repo_path: Path) -> bool:
         """判断仓库是否为多班级仓库

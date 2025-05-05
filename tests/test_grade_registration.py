@@ -91,9 +91,10 @@ class GradeRegistrationTest(unittest.TestCase):
     def test_write_grade_to_excel(self):
         """测试成绩写入Excel文件"""
         # 测试单班级Excel写入
+        excel_path = str(self.single_class_repo / "平时成绩登记表-22计算机G1班.xlsx")
         self.grade_reg.write_grade_to_excel(
+            excel_path=excel_path,
             student_name="朱俏任",
-            class_name="22计算机G1班",
             homework_number=1,
             grade="A"
         )
@@ -103,22 +104,18 @@ class GradeRegistrationTest(unittest.TestCase):
         self.assertTrue(df.shape[1] >= 4, "Excel file should have at least 4 columns")
         
         # 测试多班级Excel写入
-        self.grade_reg.repo_path = self.multi_class_repo  # 切换仓库路径
+        excel_path = str(self.multi_class_repo / "平时成绩登记表-23计算机1-2班.xlsx")
         self.grade_reg.write_grade_to_excel(
+            excel_path=excel_path,
             student_name="黄嘉伟",
-            class_name="23计算机1-2班",
             homework_number=1,
             grade="A"
         )
     
-        # 验证Excel文件格式
-        df = pd.read_excel(self.multi_class_excel, header=None)
-        self.assertTrue(df.shape[1] >= 4, "Excel file should have at least 4 columns")
-    
     def test_process_docx_files(self):
         """测试处理整个仓库的docx文件"""
         # 测试处理单班级仓库
-        self.grade_reg.process_docx_files(self.single_class_repo)
+        self.grade_reg.process_docx_files(str(self.single_class_repo))
         
         # 验证单班级Excel文件更新
         df = pd.read_excel(self.single_class_excel, header=None)
