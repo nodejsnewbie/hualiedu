@@ -163,6 +163,17 @@ function loadFile(path) {
             `);
             break;
             
+          case 'excel':
+            // Excel 文件
+            try {
+              // 直接显示后端返回的 HTML 表格
+              $('#file-content').html(response.content);
+            } catch (error) {
+              console.error('Error displaying Excel content:', error);
+              $('#file-content').html('<div class="alert alert-danger">无法显示 Excel 内容</div>');
+            }
+            break;
+            
           case 'image':
             // 使用 viewer.js 显示图片
             $('#file-content').html(`

@@ -20,6 +20,8 @@ from .models import GlobalConfig, Repository
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
+import pandas as pd
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -690,149 +692,119 @@ def get_template_list(request):
             'error': 'exceptions.ServerError'
         }, status=500)
 
-@login_required
-@require_http_methods(['POST'])
+@csrf_exempt
 def get_file_content(request):
-    """获取文件内容"""
-    try:
-        logger.info('开始处理获取文件内容请求')
-        
-        # 检查用户权限
-        if not request.user.is_authenticated:
-            logger.error('用户未认证')
-            return JsonResponse({
-                'status': 'error',
-                'message': '请先登录'
-            }, status=403)
-        
-        if not request.user.is_staff:
-            logger.error('用户无权限')
-            return JsonResponse({
-                'status': 'error',
-                'message': '无权限访问'
-            }, status=403)
-        
-        # 获取文件路径
-        path = request.POST.get('path')
-        if not path:
-            logger.error('未提供文件路径')
-            return JsonResponse({
-                'status': 'error',
-                'message': '未提供文件路径'
-            })
-        
-        logger.info(f'请求获取文件内容，路径: {path}')
-        
-        # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
-            logger.error('未配置仓库基础目录')
-            return JsonResponse({
-                'status': 'error',
-                'message': '未配置仓库基础目录'
-            })
-        
-        # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
-        full_path = os.path.join(base_dir, path)
-        
-        logger.info(f'尝试读取文件: {full_path}')
-        
-        # 检查文件是否存在
-        if not os.path.exists(full_path):
-            logger.error(f'文件不存在: {full_path}')
-            return JsonResponse({
-                'status': 'error',
-                'message': '文件不存在'
-            })
-        
-        # 检查文件权限
-        if not os.access(full_path, os.R_OK):
-            logger.error(f'无权限读取文件: {full_path}')
-            return JsonResponse({
-                'status': 'error',
-                'message': '无权限读取文件'
-            })
-        
-        # 获取文件扩展名
-        _, ext = os.path.splitext(full_path)
-        ext = ext.lower()
-        
-        # 根据文件类型处理内容
-        if ext == '.docx':
-            # 使用 mammoth 将 Word 文档转换为 HTML
-            with open(full_path, 'rb') as f:
-                result = mammoth.convert_to_html(f)
-                html = result.value
-                messages = result.messages
-                
-                # 添加样式
-                html = f'''
-                <div class="word-document">
-                    <style>
-                        .word-document {{
-                            font-family: Arial, sans-serif;
-                            line-height: 1.6;
-                            padding: 20px;
-                        }}
-                        .word-document p {{
-                            margin: 0 0 1em 0;
-                        }}
-                        .word-document h1, .word-document h2, .word-document h3 {{
-                            margin: 1em 0 0.5em 0;
-                        }}
-                    </style>
-                    {html}
-                </div>
-                '''
-                return JsonResponse({
-                    'status': 'success',
-                    'content': html,
-                    'type': 'docx'
-                })
-                
-        elif ext == '.pdf':
-            # 返回 PDF 文件的 URL
-            pdf_url = reverse('grading:serve_file', args=[path])
+    if request.method == 'POST':
+        try:
+            path = request.POST.get('path')
+            if not path:
+                logger.error('未提供文件路径')
+                return JsonResponse({'status': 'error', 'message': '未提供文件路径'})
+
+            # 从全局配置获取仓库基础目录
+            config = GlobalConfig.objects.first()
+            if not config or not config.repo_base_dir:
+                logger.error('未配置仓库基础目录')
+                return JsonResponse({'status': 'error', 'message': '未配置仓库基础目录'})
+
+            # 展开路径中的用户目录符号（~）
+            base_dir = os.path.expanduser(config.repo_base_dir)
+            full_path = os.path.join(base_dir, path)
+            
+            logger.info(f'尝试读取文件: {full_path}')
+            
+            # 检查文件是否存在
+            if not os.path.exists(full_path):
+                logger.error(f'文件不存在: {full_path}')
+                return JsonResponse({'status': 'error', 'message': '文件不存在'})
+
+            # 获取文件类型
+            mime_type, _ = mimetypes.guess_type(full_path)
+            logger.info(f'文件类型: {mime_type}')
+            
+            # 根据文件类型处理
+            if mime_type:
+                if mime_type.startswith('image/'):
+                    # 图片文件
+                    with open(full_path, 'rb') as f:
+                        content = base64.b64encode(f.read()).decode('utf-8')
+                        return JsonResponse({
+                            'status': 'success',
+                            'type': 'image',
+                            'content': f'data:{mime_type};base64,{content}'
+                        })
+                elif mime_type == 'application/pdf':
+                    # PDF 文件
+                    return JsonResponse({
+                        'status': 'success',
+                        'type': 'pdf',
+                        'content': f'/media/{path}'
+                    })
+                elif mime_type in ['application/vnd.ms-excel', 
+                                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                                 'application/vnd.ms-excel.sheet.macroEnabled.12']:
+                    # Excel 文件
+                    try:
+                        logger.info(f'开始读取 Excel 文件: {full_path}')
+                        # 读取 Excel 文件
+                        df = pd.read_excel(full_path, engine='openpyxl')
+                        logger.info(f'Excel 文件读取成功，数据形状: {df.shape}')
+                        
+                        # 转换为 HTML
+                        html_content = df.to_html(index=False, classes='table table-bordered table-striped')
+                        logger.info('Excel 内容已转换为 HTML')
+                        
+                        return JsonResponse({
+                            'status': 'success',
+                            'type': 'excel',
+                            'content': html_content
+                        })
+                    except Exception as e:
+                        logger.error(f'Excel 文件处理失败: {str(e)}\n{traceback.format_exc()}')
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'Excel 文件处理失败: {str(e)}'
+                        })
+                elif mime_type == 'text/plain':
+                    # 文本文件
+                    with open(full_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        return JsonResponse({
+                            'status': 'success',
+                            'type': 'text',
+                            'content': content
+                        })
+                elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+                    # Word 文档
+                    try:
+                        import docx2txt
+                        content = docx2txt.process(full_path)
+                        return JsonResponse({
+                            'status': 'success',
+                            'type': 'docx',
+                            'content': content
+                        })
+                    except Exception as e:
+                        return JsonResponse({
+                            'status': 'error',
+                            'message': f'Word 文档处理失败: {str(e)}'
+                        })
+
+            # 如果是二进制文件，提供下载链接
             return JsonResponse({
                 'status': 'success',
-                'content': pdf_url,
-                'type': 'pdf'
+                'type': 'binary',
+                'content': f'/media/{path}'
             })
-            
-        elif ext in ['.jpg', '.jpeg', '.png', '.gif']:
-            # 返回图片文件的 URL
-            image_url = reverse('grading:serve_file', args=[path])
+
+        except Exception as e:
+            logger.error(f'获取文件内容失败: {str(e)}\n{traceback.format_exc()}')
             return JsonResponse({
-                'status': 'success',
-                'content': image_url,
-                'type': 'image'
+                'status': 'error',
+                'message': f'获取文件内容失败: {str(e)}'
             })
-            
-        else:
-            # 对于其他文本文件，尝试以文本方式读取
-            try:
-                with open(full_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
-                return JsonResponse({
-                    'status': 'success',
-                    'content': content,
-                    'type': 'text'
-                })
-            except UnicodeDecodeError:
-                # 如果无法以文本方式读取，返回二进制文件提示
-                return JsonResponse({
-                    'status': 'success',
-                    'content': '二进制文件内容无法直接显示',
-                    'type': 'binary'
-                })
-            
-    except Exception as e:
-        logger.error(f'读取文件失败: {str(e)}\n{traceback.format_exc()}')
-        return JsonResponse({
-            'status': 'error',
-            'message': str(e)
-        })
+    
+    return JsonResponse({'status': 'error', 'message': '不支持的请求方法'})
 
 @login_required
 @require_http_methods(['POST'])
