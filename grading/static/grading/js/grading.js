@@ -245,6 +245,7 @@ function loadFile(path) {
 
 // 保存评分
 function saveGrade(grade) {
+    console.log('Saving grade:', grade);
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
         return;
@@ -252,15 +253,16 @@ function saveGrade(grade) {
 
     // 更新按钮状态
     setGradeButtonState(grade);
-    // 启用确定按钮
-    $('#add-grade-to-file').prop('disabled', false);
-    // 保存待确认的评分
-    pendingGrade = grade;
+    // 保存当前选中的评分
+    selectedGrade = grade;
+    // 直接调用 addGradeToFile 进行评分并切换下一个文件
+    addGradeToFile(grade);
 }
 
 // 获取所有文件节点
 function getAllFileNodes() {
-    const allNodes = $('#directory-tree').jstree('get_json', '#', { flat: true });
+    const tree = $('#directory-tree').jstree(true);
+    const allNodes = tree.get_json('#', { flat: true });
     return allNodes.filter(node => node.type === 'file');
 }
 
@@ -268,6 +270,7 @@ function getAllFileNodes() {
 function getCurrentFileIndex() {
     const fileNodes = getAllFileNodes();
     const currentFile = $('#directory-tree').jstree('get_selected', true)[0];
+    if (!currentFile) return -1;
     return fileNodes.findIndex(node => node.id === currentFile.id);
 }
 
@@ -310,30 +313,10 @@ $('#directory-tree').on('select_node.jstree', function(e, data) {
 });
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
-function getDirectoryFileCount(path) {
-    return new Promise((resolve, reject) => {
-        $.ajax({
-            url: '/grading/get_directory_file_count/',
-            method: 'POST',
-            headers: {
-                'X-CSRFToken': getCSRFToken()
-            },
-            data: { path: path },
-            success: function(response) {
-                if (response.status === 'success') {
-                    resolve(response.count);
-                } else {
-                    reject(response.message);
-                }
-            },
-            error: function(xhr, status, error) {
-                reject('获取目录文件数失败：' + error);
-            }
-        });
-    });
-}
-
 function addGradeToFile(grade) {
+    console.log('Adding grade to file:', grade);
+    console.log('Current file path:', currentFilePath);
+    
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
         return;
@@ -356,6 +339,7 @@ function addGradeToFile(grade) {
             grade: grade
         },
         success: function(response) {
+            console.log('Grade added successfully:', response);
             if (response.status === 'success') {
                 const alertHtml = `
                     <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -365,20 +349,24 @@ function addGradeToFile(grade) {
                 `;
                 $('#file-content').prepend(alertHtml);
                 
-                // 重新加载文件内容以显示新添加的评分
-                loadFile(currentFilePath);
-                
-                // 重置待确认的评分
-                pendingGrade = null;
-                // 禁用确定按钮
-                $('#add-grade-to-file').prop('disabled', true);
-
-                // 自动导航到下一个文件
+                // 获取所有文件节点
                 const fileNodes = getAllFileNodes();
                 const currentIndex = getCurrentFileIndex();
+                console.log('Current file index:', currentIndex);
+                console.log('Total files:', fileNodes.length);
+                
+                // 自动导航到下一个文件
                 if (currentIndex < fileNodes.length - 1) {
                     const nextNode = fileNodes[currentIndex + 1];
+                    console.log('Navigating to next file:', nextNode.id);
+                    // 使用 jstree 的 select_node 方法选中下一个文件
                     $('#directory-tree').jstree('select_node', nextNode.id);
+                    // 加载下一个文件的内容
+                    loadFile(nextNode.id);
+                } else {
+                    console.log('Last file reached, reloading current file');
+                    // 如果是最后一个文件，重新加载当前文件以显示新添加的评分
+                    loadFile(currentFilePath);
                 }
             } else {
                 showError(response.message);
@@ -549,14 +537,15 @@ $(document).ready(function() {
     // 绑定评分按钮点击事件
     $('.grade-button').click(function() {
         const grade = $(this).data('grade');
+        console.log('Grade button clicked:', grade);
         saveGrade(grade);
     });
     
     // 绑定确定按钮点击事件
     $('#add-grade-to-file').click(function() {
-        if (pendingGrade) {
-            addGradeToFile(pendingGrade);
-        }
+        console.log('Confirm button clicked, using selected grade:', selectedGrade);
+        // 使用当前选中的评分
+        addGradeToFile(selectedGrade);
     });
     
     // 绑定撤销按钮点击事件
