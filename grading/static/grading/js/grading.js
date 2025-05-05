@@ -55,26 +55,78 @@ function loadFile(path) {
   showLoading();
   currentFilePath = path;
   
-  // 获取并显示目录文件数
+  // 获取当前文件所在目录
   const dirPath = path.substring(0, path.lastIndexOf('/'));
-  $.ajax({
-    url: '/grading/get_dir_file_count/',
-    method: 'POST',
-    headers: {
-      'X-CSRFToken': getCSRFToken()
-    },
-    data: {
+  if (!dirPath) {
+    console.error('Invalid directory path');
+    $('#directory-file-count').text('0');
+    return;
+  }
+
+  console.log('Current directory path:', dirPath);
+  console.log('Current file path:', currentFilePath);
+
+  // 尝试从目录树中获取缓存的文件数量
+  const tree = $('#directory-tree').jstree(true);
+  const node = tree.get_node(dirPath);
+  console.log('Directory node:', node);
+
+  if (node && node.data && node.data.file_count !== undefined) {
+    console.log('Using cached file count:', node.data.file_count);
+    $('#directory-file-count').text(node.data.file_count);
+  } else {
+    // 如果没有缓存，则从服务器获取
+    console.log('No cached file count, fetching from server');
+    
+    // 准备请求数据
+    const requestData = {
       path: dirPath
-    },
-    success: function(response) {
-      if(response.status === 'success') {
-        $('.file-count-display').text(`目录文件数: ${response.count}`);
+    };
+    console.log('Request data:', requestData);
+
+    // 获取CSRF Token
+    const csrfToken = getCSRFToken();
+    console.log('CSRF Token:', csrfToken);
+
+    $.ajax({
+      url: '/grading/get_dir_file_count/',
+      method: 'POST',
+      headers: {
+        'X-CSRFToken': csrfToken,
+        'Content-Type': 'application/json; charset=utf-8'
+      },
+      data: JSON.stringify(requestData),
+      processData: false,
+      contentType: 'application/json; charset=utf-8',
+      success: function(response) {
+        console.log('Response:', response);
+        console.log('Response type:', typeof response);
+        console.log('Response text:', response);
+        
+        // 直接使用响应文本作为文件数量
+        const fileCount = response;
+        console.log('Setting file count to:', fileCount);
+        $('#directory-file-count').text(fileCount);
+        console.log(`Found ${fileCount} files in directory: ${dirPath}`);
+        
+        // 更新目录树中的缓存
+        if (node) {
+          node.data = node.data || {};
+          node.data.file_count = fileCount;
+          tree.redraw_node(node);
+        }
+      },
+      error: function(xhr, status, error) {
+        console.error('Error getting file count:', error);
+        console.error('XHR status:', xhr.status);
+        console.error('XHR response:', xhr.responseText);
+        console.error('XHR status text:', xhr.statusText);
+        console.error('XHR ready state:', xhr.readyState);
+        $('#directory-file-count').text('0');
+        showError('获取文件数量失败');
       }
-    },
-    error: function() {
-      $('.file-count-display').text('');
-    }
-  });
+    });
+  }
 
   // 添加超时处理
   const timeout = setTimeout(() => {
@@ -200,9 +252,10 @@ function saveGrade(grade) {
 
     // 更新按钮状态
     setGradeButtonState(grade);
-    
-    // 直接添加评分并导航到下一个文件
-    addGradeToFile(grade);
+    // 启用确定按钮
+    $('#add-grade-to-file').prop('disabled', false);
+    // 保存待确认的评分
+    pendingGrade = grade;
 }
 
 // 获取所有文件节点
@@ -418,7 +471,9 @@ function initTree() {
                 'dots': true,
                 'icons': true,
                 'stripes': true,
-                'variant': 'large'
+                'variant': 'large',
+                'url': '/static/grading/vendor/jstree/themes/default/style.min.css',
+                'dir': '/static/grading/vendor/jstree/themes/default/'
             }
         },
         'types': {
@@ -450,6 +505,14 @@ function initTree() {
     // 初始化 jstree
     $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
         console.log('Tree initialized');
+        // 树初始化完成后，如果有初始选中的节点，加载其内容
+        const selectedNodes = $('#directory-tree').jstree('get_selected');
+        if (selectedNodes.length > 0) {
+            const node = $('#directory-tree').jstree('get_node', selectedNodes[0]);
+            if (node && node.type === 'file') {
+                loadFile(node.id);
+            }
+        }
     }).on('select_node.jstree', function(e, data) {
         // 确保只处理文件节点
         if (data.node.type === 'file') {
@@ -489,6 +552,13 @@ $(document).ready(function() {
         saveGrade(grade);
     });
     
+    // 绑定确定按钮点击事件
+    $('#add-grade-to-file').click(function() {
+        if (pendingGrade) {
+            addGradeToFile(pendingGrade);
+        }
+    });
+    
     // 绑定撤销按钮点击事件
     $('#cancel-grade').click(function() {
         cancelGrade();
@@ -496,10 +566,10 @@ $(document).ready(function() {
     
     // 绑定导航按钮事件
     $('#prev-file').click(function() {
-      navigateToPrevFile();
+        navigateToPrevFile();
     });
     
     $('#next-file').click(function() {
-      navigateToNextFile();
+        navigateToNextFile();
     });
 });

@@ -25,29 +25,101 @@ logger = logging.getLogger(__name__)
 
 # Create your views here.
 
+# 在文件开头添加缓存字典
+directory_file_count_cache = {}
+
+def get_directory_file_count_cached(dir_path):
+    """获取目录文件数量（带缓存）"""
+    logger.info(f'开始统计目录文件数量: {dir_path}')
+    
+    if dir_path in directory_file_count_cache:
+        logger.info(f'使用缓存的文件数量: {directory_file_count_cache[dir_path]}')
+        return directory_file_count_cache[dir_path]
+    
+    try:
+        # 获取全局配置
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return 0
+            
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, dir_path)
+        
+        logger.info(f'基础目录: {base_dir}')
+        logger.info(f'完整路径: {full_path}')
+        
+        # 确保路径在基础目录内
+        if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
+            logger.error(f'路径不在基础目录内: {full_path}')
+            return 0
+            
+        if not os.path.exists(full_path):
+            logger.error(f'目录不存在: {full_path}')
+            return 0
+            
+        if not os.path.isdir(full_path):
+            logger.error(f'不是目录: {full_path}')
+            return 0
+            
+        # 统计.docx文件
+        file_count = 0
+        for item in os.listdir(full_path):
+            item_path = os.path.join(full_path, item)
+            if os.path.isfile(item_path) and item.lower().endswith('.docx'):
+                file_count += 1
+                logger.info(f'找到文件: {item}')
+        
+        logger.info(f'目录 {dir_path} 中共有 {file_count} 个 .docx 文件')
+        
+        # 缓存结果
+        directory_file_count_cache[dir_path] = file_count
+        return file_count
+        
+    except Exception as e:
+        logger.error(f'统计目录文件数量失败: {str(e)}\n{traceback.format_exc()}')
+        return 0
+
+def clear_directory_file_count_cache():
+    """清除目录文件数量缓存"""
+    directory_file_count_cache.clear()
 
 def index(request):
     return render(request, 'index.html')
 
 
+@login_required
+@require_http_methods(["POST"])
 def get_dir_file_count(request):
     """获取目录中文件数量的视图函数"""
     try:
-        data = json.loads(request.body)
-        dir_path = data.get('dir_path')
+        # 解析请求数据
+        try:
+            if request.content_type == 'application/json':
+                data = json.loads(request.body)
+            elif request.content_type == 'application/x-www-form-urlencoded':
+                data = request.POST
+            else:
+                return HttpResponse('不支持的Content-Type', status=400)
+        except json.JSONDecodeError:
+            return HttpResponse('无效的JSON数据', status=400)
         
+        # 获取目录路径
+        dir_path = data.get('path')
+        logger.info(f'统计目录: {str(dir_path)}')
         if not dir_path:
-            return JsonResponse({'error': '缺少dir_path参数'}, status=400)
-            
-        if not os.path.isdir(dir_path):
-            return JsonResponse({'error': '目录不存在'}, status=400)
-            
-        file_count = len([f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))])
-        return JsonResponse({'file_count': file_count})
+            return HttpResponse('缺少path参数', status=400)
+        
+        # 使用缓存获取文件数量
+        file_count = get_directory_file_count_cached(dir_path)
+        
+        # 直接返回文件数量字符串
+        return HttpResponse(str(file_count))
         
     except Exception as e:
-        logger.error(f'获取目录文件数量出错: {str(e)}')
-        return JsonResponse({'error': str(e)}, status=500)
+        logger.error(f'获取目录文件数量出错: {str(e)}\n{traceback.format_exc()}')
+        return HttpResponse('服务器错误', status=500)
 
 
 @login_required
@@ -495,7 +567,7 @@ def get_directory_tree(file_path=''):
                     }
                 }
                 
-                # 如果是目录，递归获取子目录
+                # 如果是目录，递归获取子目录并统计文件数量
                 if is_dir:
                     children = get_directory_tree(relative_path)
                     if children:
@@ -503,6 +575,12 @@ def get_directory_tree(file_path=''):
                     else:
                         node['children'] = []
                         node['state']['disabled'] = True
+                    
+                    # 统计并缓存目录文件数量
+                    file_count = get_directory_file_count_cached(relative_path)
+                    node['data'] = {
+                        'file_count': file_count
+                    }
                 # 如果是文件，添加文件特定的属性
                 else:
                     # 获取文件扩展名
