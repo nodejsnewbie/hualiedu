@@ -32,10 +32,7 @@ directory_file_count_cache = {}
 
 def get_directory_file_count_cached(dir_path):
     """获取目录文件数量（带缓存）"""
-    logger.info(f'开始统计目录文件数量: {dir_path}')
-    
     if dir_path in directory_file_count_cache:
-        logger.info(f'使用缓存的文件数量: {directory_file_count_cache[dir_path]}')
         return directory_file_count_cache[dir_path]
     
     try:
@@ -48,9 +45,6 @@ def get_directory_file_count_cached(dir_path):
         # 展开路径中的用户目录符号（~）
         base_dir = os.path.expanduser(config.repo_base_dir)
         full_path = os.path.join(base_dir, dir_path)
-        
-        logger.info(f'基础目录: {base_dir}')
-        logger.info(f'完整路径: {full_path}')
         
         # 确保路径在基础目录内
         if not os.path.abspath(full_path).startswith(os.path.abspath(base_dir)):
@@ -71,16 +65,13 @@ def get_directory_file_count_cached(dir_path):
             item_path = os.path.join(full_path, item)
             if os.path.isfile(item_path) and item.lower().endswith('.docx'):
                 file_count += 1
-                logger.info(f'找到文件: {item}')
-        
-        logger.info(f'目录 {dir_path} 中共有 {file_count} 个 .docx 文件')
         
         # 缓存结果
         directory_file_count_cache[dir_path] = file_count
         return file_count
         
     except Exception as e:
-        logger.error(f'统计目录文件数量失败: {str(e)}\n{traceback.format_exc()}')
+        logger.error(f'统计目录文件数量失败: {str(e)}')
         return 0
 
 def clear_directory_file_count_cache():
@@ -109,7 +100,6 @@ def get_dir_file_count(request):
         
         # 获取目录路径
         dir_path = data.get('path')
-        logger.info(f'统计目录: {str(dir_path)}')
         if not dir_path:
             return HttpResponse('缺少path参数', status=400)
         
@@ -120,7 +110,7 @@ def get_dir_file_count(request):
         return HttpResponse(str(file_count))
         
     except Exception as e:
-        logger.error(f'获取目录文件数量出错: {str(e)}\n{traceback.format_exc()}')
+        logger.error(f'获取目录文件数量出错: {str(e)}')
         return HttpResponse('服务器错误', status=500)
 
 
@@ -129,8 +119,6 @@ def get_dir_file_count(request):
 def grading_page(request):
     """评分页面视图"""
     try:
-        logger.info('开始处理评分页面请求')
-        
         # 检查用户权限
         if not request.user.is_authenticated:
             logger.error('用户未认证')
@@ -144,27 +132,22 @@ def grading_page(request):
         config = GlobalConfig.objects.first()
         if not config:
             config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
-            logger.info("Created new GlobalConfig with default repo_base_dir")
         
         base_dir = os.path.expanduser(config.repo_base_dir)
-        logger.info(f"Base directory: {base_dir}")
         
         # 检查目录权限
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
-            logger.info(f"Created base directory: {base_dir}")
         
         if not os.access(base_dir, os.R_OK):
-            logger.error(f"No read permission for directory: {base_dir}")
+            logger.error(f'无权限访问目录: {base_dir}')
             return HttpResponseForbidden('无权限访问目录')
         
         # 获取目录树
         try:
             initial_tree_data = get_directory_tree()
-            logger.info(f"Successfully retrieved initial directory tree")
-            logger.info(f"Initial tree data: {json.dumps(initial_tree_data, ensure_ascii=False)}")
         except Exception as e:
-            logger.error(f"Error getting directory tree: {str(e)}\n{traceback.format_exc()}")
+            logger.error(f'获取目录树失败: {str(e)}')
             return render(request, 'grading.html', {
                 'files': [],
                 'error': f'获取目录树失败: {str(e)}',
@@ -182,7 +165,7 @@ def grading_page(request):
         })
         
     except Exception as e:
-        logger.error(f'处理评分页面请求失败: {str(e)}\n{traceback.format_exc()}')
+        logger.error(f'处理评分页面请求失败: {str(e)}')
         return render(request, 'grading.html', {
             'files': [],
             'error': f'处理请求失败: {str(e)}',
@@ -711,10 +694,6 @@ def get_file_content(request):
             base_dir = os.path.expanduser(config.repo_base_dir)
             full_path = os.path.join(base_dir, path)
             
-            logger.info(f'尝试读取文件: {full_path}')
-            logger.info(f'文件是否存在: {os.path.exists(full_path)}')
-            logger.info(f'文件权限: {oct(os.stat(full_path).st_mode)[-3:]}')
-            
             # 检查文件是否存在
             if not os.path.exists(full_path):
                 logger.error(f'文件不存在: {full_path}')
@@ -722,7 +701,6 @@ def get_file_content(request):
 
             # 获取文件类型
             mime_type, _ = mimetypes.guess_type(full_path)
-            logger.info(f'文件类型: {mime_type}')
             
             # 根据文件类型处理
             if mime_type:
@@ -747,14 +725,11 @@ def get_file_content(request):
                                  'application/vnd.ms-excel.sheet.macroEnabled.12']:
                     # Excel 文件
                     try:
-                        logger.info(f'开始读取 Excel 文件: {full_path}')
                         # 读取 Excel 文件
                         df = pd.read_excel(full_path, engine='openpyxl')
-                        logger.info(f'Excel 文件读取成功，数据形状: {df.shape}')
                         
                         # 转换为 HTML
                         html_content = df.to_html(index=False, classes='table table-bordered table-striped')
-                        logger.info('Excel 内容已转换为 HTML')
                         
                         return JsonResponse({
                             'status': 'success',
@@ -762,7 +737,7 @@ def get_file_content(request):
                             'content': html_content
                         })
                     except Exception as e:
-                        logger.error(f'Excel 文件处理失败: {str(e)}\n{traceback.format_exc()}')
+                        logger.error(f'Excel 文件处理失败: {str(e)}')
                         return JsonResponse({
                             'status': 'error',
                             'message': f'Excel 文件处理失败: {str(e)}'
@@ -779,8 +754,6 @@ def get_file_content(request):
                 elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                     # Word 文档
                     try:
-                        logger.info(f'开始读取 Word 文档: {full_path}')
-                        
                         # 尝试使用 mammoth 读取
                         try:
                             import mammoth
@@ -849,9 +822,6 @@ def get_file_content(request):
                             '''
                             
                             final_content = css + f'<div class="docx-content">{html_content}</div>'
-                            logger.info(f'使用 mammoth 生成的 HTML 内容长度: {len(final_content)}')
-                            logger.info(f'HTML 内容预览: {final_content[:200]}...')
-                            
                             return JsonResponse({
                                 'status': 'success',
                                 'type': 'docx',
@@ -864,18 +834,11 @@ def get_file_content(request):
                             from docx import Document
                             doc = Document(full_path)
                             
-                            # 记录文档信息
-                            logger.info(f'文档段落数量: {len(doc.paragraphs)}')
-                            logger.info(f'文档表格数量: {len(doc.tables)}')
-                            
                             # 构建 HTML 内容
                             html_content = ['<div class="docx-content">']
                             
                             # 处理段落
-                            for i, paragraph in enumerate(doc.paragraphs):
-                                # 记录段落信息
-                                logger.info(f'段落 {i} 样式: {paragraph.style.name}, 内容: {paragraph.text}')
-                                
+                            for paragraph in doc.paragraphs:
                                 # 检查段落样式和内容
                                 style = paragraph.style.name
                                 text = paragraph.text.strip()
@@ -905,8 +868,7 @@ def get_file_content(request):
                                         html_content.append(f'<p>{text}</p>')
                             
                             # 处理表格
-                            for i, table in enumerate(doc.tables):
-                                logger.info(f'处理表格 {i}, 行数: {len(table.rows)}')
+                            for table in doc.tables:
                                 html_content.append('<table class="table table-bordered">')
                                 for row in table.rows:
                                     html_content.append('<tr>')
@@ -988,9 +950,6 @@ def get_file_content(request):
                             '''
                             
                             final_content = css + '\n'.join(html_content)
-                            logger.info(f'使用 python-docx 生成的 HTML 内容长度: {len(final_content)}')
-                            logger.info(f'HTML 内容预览: {final_content[:200]}...')
-                            
                             return JsonResponse({
                                 'status': 'success',
                                 'type': 'docx',
@@ -998,7 +957,7 @@ def get_file_content(request):
                             })
                             
                     except Exception as e:
-                        logger.error(f'Word 文档处理失败: {str(e)}\n{traceback.format_exc()}')
+                        logger.error(f'Word 文档处理失败: {str(e)}')
                         return JsonResponse({
                             'status': 'error',
                             'message': f'Word 文档处理失败: {str(e)}'
@@ -1012,7 +971,7 @@ def get_file_content(request):
             })
 
         except Exception as e:
-            logger.error(f'获取文件内容失败: {str(e)}\n{traceback.format_exc()}')
+            logger.error(f'获取文件内容失败: {str(e)}')
             return JsonResponse({
                 'status': 'error',
                 'message': f'获取文件内容失败: {str(e)}'
