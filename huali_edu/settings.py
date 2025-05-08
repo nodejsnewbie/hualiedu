@@ -46,6 +46,11 @@ LOGGING = {
             'handlers': ['console', 'file'],
             'level': 'INFO',
             'propagate': True
+        },
+        'huali_edu': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+            'propagate': True
         }
     }
 } 

@@ -5,6 +5,11 @@ import re
 from docx import Document
 from datetime import datetime
 import openpyxl
+import logging
+import glob
+import zipfile
+
+logger = logging.getLogger(__name__)
 
 class GradeRegistration:
     def __init__(self):
@@ -39,46 +44,36 @@ class GradeRegistration:
         
         return excel_path
     
-    def get_homework_number_from_path(self, path: Path) -> int | None:
+    def get_homework_number_from_path(self, file_path: str) -> int:
         """从文件路径中提取作业次数
         
         Args:
-            path: 文件路径
+            file_path: 文件路径
             
         Returns:
-            int | None: 作业次数（1-16），如果找不到则返回None
+            int: 作业次数，如果无法提取则返回0
         """
-        # 中文数字到阿拉伯数字的映射
-        chinese_nums = {
-            '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
-        }
+        logger.info(f"尝试从路径提取作业次数: {file_path}")
         
-        path_str = str(path)
+        # 获取文件所在目录名
+        dir_name = os.path.basename(os.path.dirname(file_path))
         
-        # 处理中文数字的情况
-        for parent in [path, path.parent]:
-            parent_str = str(parent)
-            # 处理"十"开头的数字 (10-16)
-            match = re.search(r'第十([一二三四五六])?次作业', parent_str)
-            if match:
-                if not match.group(1):  # 只有"十"
-                    return 10
-                return 10 + chinese_nums[match.group(1)]
-                
-            # 处理单个中文数字 (1-9)
-            match = re.search(r'第([一二三四五六七八九])次作业', parent_str)
-            if match:
-                return chinese_nums[match.group(1)]
+        # 从目录名中提取作业次数
+        match = re.search(r'第([一二三四五六七八九十]+)次作业|作业([一二三四五六七八九十]+)|作业(\d+)', dir_name)
+        if not match:
+            logger.warning(f"无法从目录名中提取作业次数: {dir_name}")
+            return 0
         
-        # 处理阿拉伯数字的情况
-        match = self.homework_pattern.search(path_str)
-        if match:
-            homework_num = int(match.group(1))
-            if 1 <= homework_num <= 16:
-                return homework_num
+        # 获取匹配的数字（可能是中文数字或阿拉伯数字）
+        number = match.group(1) or match.group(2) or match.group(3)
         
-        return None
+        # 如果是中文数字，转换为阿拉伯数字
+        if re.match(r'[一二三四五六七八九十]+', number):
+            chinese_numbers = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                             '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+            return chinese_numbers.get(number, 0)
+        else:
+            return int(number)
     
     def _load_student_list(self, excel_path: Path) -> dict:
         """加载Excel文件中的学生名单
@@ -116,27 +111,79 @@ class GradeRegistration:
             FileNotFoundError: 如果找不到对应的Excel文件
             ValueError: 如果作业列索引超出当前列数
         """
-        # 读取Excel文件
-        with open(excel_path, 'rb') as f:
-            wb = openpyxl.load_workbook(f)
-            ws = wb.active
+        logger.info("="*50)
+        logger.info(f"开始写入成绩到Excel文件")
+        logger.info(f"Excel文件路径: {excel_path}")
+        logger.info(f"学生姓名: {student_name}")
+        logger.info(f"作业次数: {homework_number}")
+        logger.info(f"成绩: {grade}")
+        logger.info("-"*30)
+        
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(excel_path):
+                logger.error(f"Excel文件不存在: {excel_path}")
+                raise FileNotFoundError(f"找不到Excel文件: {excel_path}")
+            
+            # 检查文件权限
+            if not os.access(excel_path, os.W_OK):
+                logger.error(f"无权限写入Excel文件: {excel_path}")
+                raise PermissionError(f"无权限写入Excel文件: {excel_path}")
+            
+            # 读取Excel文件
+            with open(excel_path, 'rb') as f:
+                wb = openpyxl.load_workbook(f)
+                ws = wb.active
+                
+                logger.info(f"成功打开Excel文件")
+                logger.info(f"当前工作表: {ws.title}")
+                logger.info(f"工作表维度: 行数={ws.max_row}, 列数={ws.max_column}")
 
-            # 缓存机制同前
-            if excel_path not in self._student_cache:
-                self._student_cache[excel_path] = self._load_student_list(excel_path)
-            student_rows = self._student_cache[excel_path]
-            if student_name not in student_rows:
-                print(f"Warning: Student {student_name} not found in {excel_path}")
-                return
+                # 缓存机制同前
+                if excel_path not in self._student_cache:
+                    logger.info("加载学生名单到缓存")
+                    self._student_cache[excel_path] = self._load_student_list(excel_path)
+                student_rows = self._student_cache[excel_path]
+                
+                if student_name not in student_rows:
+                    logger.warning(f"学生 {student_name} 在 {excel_path} 中未找到")
+                    logger.info("当前学生名单:")
+                    for name in student_rows.keys():
+                        logger.info(f"- {name}")
+                    return
 
-            student_row = student_rows[student_name]
-            # 第1列是序号，第2列是学号，第3列是姓名，第4列开始是作业成绩
-            homework_col_idx = 3 + homework_number
-            if homework_col_idx > ws.max_column:
-                raise ValueError(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
+                student_row = student_rows[student_name]
+                logger.info(f"找到学生 {student_name} 在第 {student_row} 行")
+                
+                # 第1列是序号，第2列是学号，第3列是姓名，第4列开始是作业成绩
+                homework_col_idx = 3 + homework_number
+                logger.info(f"作业列索引: {homework_col_idx} (第{homework_number}次作业)")
+                
+                if homework_col_idx > ws.max_column:
+                    logger.error(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
+                    raise ValueError(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
 
-            ws.cell(row=student_row, column=homework_col_idx, value=grade)
-            wb.save(excel_path)
+                # 获取当前单元格的值
+                current_value = ws.cell(row=student_row, column=homework_col_idx).value
+                logger.info(f"当前单元格值: {current_value}")
+                
+                # 写入新值
+                ws.cell(row=student_row, column=homework_col_idx, value=grade)
+                logger.info(f"已写入新值: {grade}")
+                
+                # 保存文件
+                try:
+                    wb.save(excel_path)
+                    logger.info(f"成功保存Excel文件: {excel_path}")
+                except Exception as e:
+                    logger.error(f"保存Excel文件失败: {str(e)}")
+                    raise
+                
+        except Exception as e:
+            logger.error(f"写入成绩到Excel文件失败: {str(e)}")
+            raise
+        finally:
+            logger.info("="*50)
     
     def _extract_class_name(self, path: Path, is_multi_class: bool) -> str:
         """从文件路径中提取班级名称
@@ -176,48 +223,13 @@ class GradeRegistration:
         # 如果是单班级仓库，使用默认班级名称
         return "22计算机G1班"
     
-    def _extract_student_name(self, path: Path) -> str:
-        """
-        Extract student name from docx filename.
+    def _extract_student_name(self, file_path: str) -> str:
+        """从文件路径中提取学生姓名"""
+        file_name = os.path.basename(file_path)
+        # 移除文件扩展名
+        name = os.path.splitext(file_name)[0]
         
-        Args:
-            path: Path to the docx file
-            
-        Returns:
-            Student name as string
-            
-        Raises:
-            ValueError: If no valid student name is found in the filename
-        """
-        # Get the filename without extension
-        filename = path.stem
-        
-        # Check if the filename contains Chinese characters
-        if not any('\u4e00' <= char <= '\u9fff' for char in filename):
-            raise ValueError(f"No Chinese characters found in filename: {filename}")
-        
-        # Extract the student name (2-4 Chinese characters)
-        # First try to find a sequence of 2-4 Chinese characters
-        matches = re.findall(r'[\u4e00-\u9fff]{2,4}', filename)
-        if matches:
-            # If multiple matches, prefer the one that's not part of a class name
-            for match in matches:
-                if not any(class_name in match for class_name in ['计算机', '软件', '网络']):
-                    return match
-            # If all matches are part of class names, return the first one
-            return matches[0]
-        
-        # If no match found, try to find any sequence of Chinese characters
-        matches = re.findall(r'[\u4e00-\u9fff]+', filename)
-        if matches:
-            # Return the first sequence that's not a class name
-            for match in matches:
-                if not any(class_name in match for class_name in ['计算机', '软件', '网络']):
-                    return match
-            # If all matches are part of class names, return the first one
-            return matches[0]
-        
-        raise ValueError(f"Could not extract valid student name from filename: {filename}")
+        return name
     
     def _extract_grade_from_docx(self, path: Path) -> str:
         """
@@ -261,53 +273,74 @@ class GradeRegistration:
         Args:
             repository_path: 仓库路径
         """
+        logger.info("="*50)
+        logger.info(f"开始处理仓库: {repository_path}")
+        logger.info("-"*30)
+        
+        repo_path = Path(repository_path)
+        
         # 搜索成绩登记表文件
-        excel_files = list(Path(repository_path).glob("平时成绩登记表-*.xlsx"))
+        excel_files = list(repo_path.glob("平时成绩登记表-*.xlsx"))
         if not excel_files:
+            logger.error(f"在 {repository_path} 中未找到成绩登记表文件")
             raise FileNotFoundError(f"在 {repository_path} 中未找到成绩登记表文件")
 
+        logger.info(f"找到 {len(excel_files)} 个成绩登记表文件:")
+        for excel_file in excel_files:
+            logger.info(f"- {excel_file}")
+        
         # 处理每个成绩登记表文件
         for excel_file in excel_files:
+            logger.info("-"*30)
+            logger.info(f"开始处理成绩登记表: {excel_file}")
+
             # 从文件名中提取专业和年级信息
-            class_name = excel_file.stem.split("-")[1]  # 例如：23计算机1-2班 或 22计算机G1班
-            major = class_name.split("班")[0].split("计算机")[1]  # 例如：1-2 或 G1
+            index = excel_file.stem.find("-")
+            class_name = excel_file.stem[index + 1:]# 例如：23计算机1-2班 或 22计算机G1班
+            # class_name = excel_file.stem.split("-")[-1]  
+            logger.info(f"class_name: {class_name}")
+            classes = class_name.split("班")[0].split("计算机")[1]  # 例如：1-2 或 G1
             year = class_name.split("计算机")[0]  # 例如：23
+            
+            logger.info(f"班级信息:")
+            logger.info(f"- 年级: {year}")
+            logger.info(f"- 班级: {classes}")
 
-            # 处理班级范围
-            if "-" in major:  # 处理多班级情况
-                class_range = major.split("-")
-                start_class = int(class_range[0])
-                end_class = int(class_range[1])
-                class_numbers = list(range(start_class, end_class + 1))
-            else:  # 处理单班级情况
-                class_numbers = [major]  # 直接使用班级标识，如 "G1"
+            # 根据成绩登记表文件名判断是单班级还是多班级
+            is_multi_class = "-" in classes
+            logger.info(f"根据成绩登记表判断: {'多班级' if is_multi_class else '单班级'}")
 
-            # 处理每个班级
-            for class_number in class_numbers:
-                class_dir = Path(repository_path) / f"{year}计算机{class_number}班"
-                if not class_dir.exists():
-                    print(f"Warning: 班级目录 {class_dir} 不存在")
-                    continue
+            if is_multi_class:
+                self._process_multi_class(repo_path)
+            else:
+                self._process_single_class(repo_path, excel_file, year, classes)
+            
+        logger.info("="*50)
 
-                # 处理该班级的所有docx文件
-                for docx_file in class_dir.glob("*.docx"):
-                    try:
-                        student_name = self._extract_student_name(docx_file.name)
-                        homework_number = self._extract_homework_number(docx_file.name)
-                        grade = self._extract_grade_from_docx(docx_file)
+    def _process_single_class(self, repo_path: str, excel_file: str, year: str, major: str) -> None:
+        """处理单班级仓库"""
+        logger.info("处理单班级仓库")
+        logger.info("=" * 50)
+        
+        # 查找所有作业目录
+        homework_dirs = []
+        for item in os.listdir(repo_path):
+            item_path = os.path.join(repo_path, item)
+            if os.path.isdir(item_path) and re.match(r'第[一二三四五六七八九十]+次作业|作业[一二三四五六七八九十]+|作业\d+', item):
+                homework_dirs.append(item_path)
+        
+        if not homework_dirs:
+            logger.warning(f"在仓库中未找到作业目录: {repo_path}")
+            return
+        
+        logger.info(f"找到 {len(homework_dirs)} 个作业目录")
+        
+        # 处理每个作业目录
+        for homework_dir in homework_dirs:
+            logger.info(f"处理作业目录: {homework_dir}")
+            self._process_docx_files_batch(homework_dir, excel_file)
 
-                        # 写入成绩
-                        self.write_grade_to_excel(
-                            excel_path=str(excel_file),
-                            student_name=student_name,
-                            homework_number=homework_number,
-                            grade=grade
-                        )
-                    except Exception as e:
-                        print(f"处理文件 {docx_file} 时出错: {e}")
-                        continue
-
-    def _is_multi_class_repo(self, repo_path: Path) -> bool:
+    def _is_multi_class_repo(self, repo_path: str) -> bool:
         """判断仓库是否为多班级仓库
         
         Args:
@@ -316,8 +349,126 @@ class GradeRegistration:
         Returns:
             bool: 如果是多班级仓库返回True，否则返回False
         """
-        # 检查仓库根目录下是否有包含"班"字的目录
-        for item in repo_path.iterdir():
-            if item.is_dir() and "班" in item.name:
+        # 查找成绩登记表
+        excel_files = glob.glob(os.path.join(repo_path, "平时成绩登记表-*.xlsx"))
+        if not excel_files:
+            return False
+        
+        # 检查文件名是否包含多班级信息（如：23计算机1-2班）
+        for excel_file in excel_files:
+            file_name = os.path.basename(excel_file)
+            if re.search(r'计算机\d+-\d+班', file_name):
                 return True
-        return False 
+            
+        return False
+
+    def _process_multi_class(self, repo_path: str) -> None:
+        """处理多班级仓库"""
+        logger.info("处理多班级仓库")
+        logger.info("=" * 50)
+        
+        # 查找所有成绩登记表
+        excel_files = glob.glob(os.path.join(repo_path, "平时成绩登记表-*.xlsx"))
+        if not excel_files:
+            raise ValueError(f"在仓库 {repo_path} 中未找到成绩登记表")
+        
+        logger.info(f"找到 {len(excel_files)} 个成绩登记表文件:")
+        for excel_file in excel_files:
+            logger.info(f"- {excel_file}")
+        
+        # 处理每个成绩登记表
+        for excel_file in excel_files:
+            logger.info("-" * 30)
+            logger.info(f"开始处理成绩登记表: {excel_file}")
+            
+            # 从文件名中提取班级信息
+            file_name = os.path.basename(excel_file)
+            match = re.match(r'平时成绩登记表-(\d{2})计算机(\d+)-(\d+)班\.xlsx', file_name)
+            if not match:
+                logger.warning(f"无法从文件名中提取班级信息: {file_name}")
+                continue
+            
+            year, start_class, end_class = match.groups()
+            logger.info("班级信息:")
+            logger.info(f"- 年级: {year}")
+            logger.info(f"- 班级范围: {start_class}-{end_class}")
+            
+            # 查找对应的班级目录
+            class_dirs = []
+            for class_num in range(int(start_class), int(end_class) + 1):
+                class_dir = os.path.join(repo_path, f"{year}计算机{class_num}班")
+                if os.path.exists(class_dir):
+                    class_dirs.append(class_dir)
+            
+            if not class_dirs:
+                logger.warning(f"未找到对应的班级目录")
+                continue
+            
+            # 处理每个班级目录下的作业
+            for class_dir in class_dirs:
+                self._process_single_class(class_dir, excel_file, year, None)
+                # logger.info(f"处理班级目录: {class_dir}")
+                # self._process_docx_files_batch(class_dir, excel_file)
+
+    def _process_docx_files_batch(self, dir_path: str, excel_file: str) -> None:
+        """处理指定目录下的所有docx文件"""
+        # 查找所有docx文件
+        docx_files = glob.glob(os.path.join(dir_path, "*.docx"))
+        if not docx_files:
+            logger.warning(f"在 {dir_path} 中未找到docx文件")
+            return
+        
+        logger.info(f"在 {dir_path} 中找到 {len(docx_files)} 个docx文件")
+        
+        # 处理每个docx文件
+        for docx_file in docx_files:
+            try:
+                # 验证文件格式
+                if not self._is_valid_docx(docx_file):
+                    logger.warning(f"文件格式无效: {docx_file}")
+                    continue
+                
+                logger.info(f"处理文件: {docx_file}")
+                logger.info("=" * 50)
+                
+                # 提取作业次数
+                homework_number = self.get_homework_number_from_path(docx_file)
+                if not homework_number:
+                    logger.warning(f"无法从路径中提取作业次数: {docx_file}")
+                    continue
+                
+                # 提取学生姓名
+                try:
+                    student_name = self._extract_student_name(docx_file)
+                except ValueError as e:
+                    logger.warning(str(e))
+                    continue
+                
+                # 提取成绩
+                try:
+                    grade = self._extract_grade_from_docx(docx_file)
+                except Exception as e:
+                    logger.warning(f"提取成绩失败: {str(e)}")
+                    continue
+                
+                logger.info("提取信息:")
+                logger.info(f"- 学生: {student_name}")
+                logger.info(f"- 作业: {homework_number}")
+                logger.info(f"- 成绩: {grade}")
+                
+                # 写入成绩
+                self.write_grade_to_excel(excel_file, student_name, homework_number, grade)
+                
+            except Exception as e:
+                logger.error(f"处理文件 {docx_file} 时发生错误: {str(e)}")
+                continue
+
+    def _is_valid_docx(self, file_path: str) -> bool:
+        """验证文件是否为有效的docx文件"""
+        try:
+            with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                # 检查是否包含必要的docx文件结构
+                required_files = ['word/document.xml', '[Content_Types].xml']
+                return all(file in zip_ref.namelist() for file in required_files)
+        except:
+            return False 

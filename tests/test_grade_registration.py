@@ -6,12 +6,18 @@ import pandas as pd
 import shutil
 import tempfile
 import docx
+import logging
 
 # Add the project root directory to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from huali_edu.grade_registration import GradeRegistration
+from huali_edu.logging_config import setup_logging
+
+# 设置日志配置
+setup_logging()
+logger = logging.getLogger(__name__)
 
 class GradeRegistrationTest(unittest.TestCase):
     def setUp(self):
@@ -25,7 +31,7 @@ class GradeRegistrationTest(unittest.TestCase):
         # 创建临时目录用于测试
         self.temp_dir = tempfile.mkdtemp()
         
-        # 备份原始Excel文件
+        # 原始Excel文件
         self.single_class_excel = self.single_class_repo / "平时成绩登记表-22计算机G1班.xlsx"
         self.multi_class_excel = self.multi_class_repo / "平时成绩登记表-23计算机1-2班.xlsx"
         
@@ -41,6 +47,12 @@ class GradeRegistrationTest(unittest.TestCase):
             
         # 设置仓库路径
         self.grade_reg.repo_path = self.single_class_repo
+        
+        logger.info("="*50)
+        logger.info("开始测试")
+        logger.info(f"单班级仓库路径: {self.single_class_repo}")
+        logger.info(f"多班级仓库路径: {self.multi_class_repo}")
+        logger.info("="*50)
     
     def tearDown(self):
         """Clean up test data"""
@@ -53,6 +65,10 @@ class GradeRegistrationTest(unittest.TestCase):
         
         # 删除临时目录
         shutil.rmtree(self.temp_dir)
+        
+        logger.info("="*50)
+        logger.info("测试结束")
+        logger.info("="*50)
     
     def test_repository_type_detection(self):
         """测试仓库类型判断（单班级/多班级）"""
@@ -114,7 +130,11 @@ class GradeRegistrationTest(unittest.TestCase):
     
     def test_process_docx_files(self):
         """测试处理整个仓库的docx文件"""
+        logger.info("开始测试 process_docx_files")
+        
         # 测试处理单班级仓库
+        logger.info("-"*30)
+        logger.info("处理单班级仓库")
         self.grade_reg.process_docx_files(str(self.single_class_repo))
         
         # 验证单班级Excel文件更新
@@ -122,13 +142,48 @@ class GradeRegistrationTest(unittest.TestCase):
         # 检查Excel文件是否存在且格式正确
         self.assertTrue(df.shape[1] >= 4, "Excel file should have at least 4 columns")
         
+        # 验证成绩是否被写入
+        # 找到"朱俏任"的行
+        student_rows = df[df[2] == "朱俏任"]
+        if not student_rows.empty:
+            student_row = student_rows.index[0]
+            # 检查第1次作业的成绩（第4列）
+            grade = df.iloc[student_row, 3]
+            self.assertIsNotNone(grade, "Grade should not be None")
+            self.assertIn(grade, ["A", "B", "C", "D", "E"], "Grade should be one of A, B, C, D, E")
+            logger.info(f"找到学生'朱俏任'的成绩: {grade}")
+        else:
+            logger.warning("学生'朱俏任'在Excel文件中未找到")
+        
         # 测试处理多班级仓库
-        self.grade_reg.process_docx_files(self.multi_class_repo)
+        logger.info("-"*30)
+        logger.info("处理多班级仓库")
+        self.grade_reg.process_docx_files(str(self.multi_class_repo))
         
         # 验证多班级Excel文件更新
         df = pd.read_excel(self.multi_class_excel, header=None)
         # 检查Excel文件是否存在且格式正确
         self.assertTrue(df.shape[1] >= 4, "Excel file should have at least 4 columns")
+        
+        # 验证成绩是否被写入
+        # 找到"黄嘉伟"的行
+        student_rows = df[df[2] == "黄嘉伟"]
+        if not student_rows.empty:
+            student_row = student_rows.index[0]
+            # 检查第1次作业的成绩（第4列）
+            grade = df.iloc[student_row, 3]
+            self.assertIsNotNone(grade, "Grade should not be None")
+            self.assertIn(grade, ["A", "B", "C", "D", "E"], "Grade should be one of A, B, C, D, E")
+            logger.info(f"找到学生'黄嘉伟'的成绩: {grade}")
+        else:
+            logger.warning("学生'黄嘉伟'在Excel文件中未找到")
+            
+        # 打印Excel文件中的所有学生名单，用于调试
+        logger.info("Excel文件中的学生名单:")
+        for student in df[2].dropna():
+            logger.info(f"- {student}")
+        
+        logger.info("测试 process_docx_files 完成")
 
 if __name__ == '__main__':
     unittest.main() 
