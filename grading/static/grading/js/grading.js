@@ -49,209 +49,173 @@ function setGradeButtonState(grade) {
   selectedGrade = grade;
 }
 
+// 处理文件内容显示
+function handleFileContent(response) {
+    if (response.status === 'success') {
+        const fileContent = $('#file-content');
+        fileContent.empty();
+
+        switch (response.type) {
+            case 'text':
+                // 文本文件
+                fileContent.html(`<pre class="border p-3 bg-light">${response.content}</pre>`);
+                break;
+            case 'image':
+                // 图片文件
+                fileContent.html(`<img src="${response.content}" class="img-fluid" alt="图片">`);
+                break;
+            case 'pdf':
+                // PDF 文件
+                fileContent.html(`<iframe src="${response.content}" class="w-100" style="height: 800px;"></iframe>`);
+                break;
+            case 'excel':
+                // Excel 文件
+                try {
+                    // 直接显示后端返回的 HTML 表格
+                    fileContent.html(response.content);
+                } catch (error) {
+                    console.error('Error displaying Excel content:', error);
+                    fileContent.html('<div class="alert alert-danger">无法显示 Excel 内容</div>');
+                }
+                break;
+            case 'docx':
+                // Word 文档
+                try {
+                    console.log('Displaying Word document content:', response.content);
+                    fileContent.html(response.content);
+                } catch (error) {
+                    console.error('Error displaying Word content:', error);
+                    fileContent.html('<div class="alert alert-danger">无法显示 Word 文档内容</div>');
+                }
+                break;
+            case 'binary':
+                // 二进制文件，提供下载链接
+                fileContent.html(`
+                    <div class="alert alert-info">
+                        <i class="bi bi-download"></i> 
+                        <a href="${response.content}" class="alert-link" download>点击下载文件</a>
+                    </div>
+                `);
+                break;
+            default:
+                fileContent.html('<div class="alert alert-warning">不支持的文件类型</div>');
+        }
+    } else {
+        $('#file-content').html(`<div class="alert alert-danger">${response.message}</div>`);
+    }
+}
+
 // 加载文件内容
 function loadFile(path) {
-  console.log('Loading file:', path);
-  showLoading();
-  currentFilePath = path;
-  
-  // 获取当前文件所在目录
-  const dirPath = path.substring(0, path.lastIndexOf('/'));
-  if (!dirPath) {
-    console.error('Invalid directory path');
-    $('#directory-file-count').text('0');
-    return;
-  }
-
-  console.log('Current directory path:', dirPath);
-  console.log('Current file path:', currentFilePath);
-
-  // 尝试从目录树中获取缓存的文件数量
-  const tree = $('#directory-tree').jstree(true);
-  const node = tree.get_node(dirPath);
-  console.log('Directory node:', node);
-
-  if (node && node.data && node.data.file_count !== undefined) {
-    console.log('Using cached file count:', node.data.file_count);
-    $('#directory-file-count').text(node.data.file_count);
-  } else {
-    // 如果没有缓存，则从服务器获取
-    console.log('No cached file count, fetching from server');
+    console.log('Loading file:', path);
+    showLoading();
+    currentFilePath = path;
     
-    // 准备请求数据
-    const requestData = {
-      path: dirPath
-    };
-    console.log('Request data:', requestData);
+    // 获取当前文件所在目录
+    const dirPath = path.substring(0, path.lastIndexOf('/'));
+    if (!dirPath) {
+        console.error('Invalid directory path');
+        $('#directory-file-count').text('0');
+        return;
+    }
 
-    // 获取CSRF Token
-    const csrfToken = getCSRFToken();
-    console.log('CSRF Token:', csrfToken);
+    console.log('Current directory path:', dirPath);
+    console.log('Current file path:', currentFilePath);
+
+    // 尝试从目录树中获取缓存的文件数量
+    const tree = $('#directory-tree').jstree(true);
+    const node = tree.get_node(dirPath);
+    console.log('Directory node:', node);
+
+    if (node && node.data && node.data.file_count !== undefined) {
+        console.log('Using cached file count:', node.data.file_count);
+        $('#directory-file-count').text(node.data.file_count);
+    } else {
+        // 如果没有缓存，则从服务器获取
+        console.log('No cached file count, fetching from server');
+        
+        // 准备请求数据
+        const requestData = {
+            path: dirPath
+        };
+        console.log('Request data:', requestData);
+
+        // 获取CSRF Token
+        const csrfToken = getCSRFToken();
+        console.log('CSRF Token:', csrfToken);
+
+        $.ajax({
+            url: '/grading/get_dir_file_count/',
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrfToken,
+                'Content-Type': 'application/json; charset=utf-8'
+            },
+            data: JSON.stringify(requestData),
+            processData: false,
+            contentType: 'application/json; charset=utf-8',
+            success: function(response) {
+                console.log('Response:', response);
+                console.log('Response type:', typeof response);
+                console.log('Response text:', response);
+                
+                // 直接使用响应文本作为文件数量
+                const fileCount = response;
+                console.log('Setting file count to:', fileCount);
+                $('#directory-file-count').text(fileCount);
+                console.log(`Found ${fileCount} files in directory: ${dirPath}`);
+                
+                // 更新目录树中的缓存
+                if (node) {
+                    node.data = node.data || {};
+                    node.data.file_count = fileCount;
+                    tree.redraw_node(node);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('Error getting file count:', error);
+                console.error('XHR status:', xhr.status);
+                console.error('XHR response:', xhr.responseText);
+                console.error('XHR status text:', xhr.statusText);
+                console.error('XHR ready state:', xhr.readyState);
+                $('#directory-file-count').text('0');
+                showError('获取文件数量失败');
+            }
+        });
+    }
+
+    // 添加超时处理
+    const timeout = setTimeout(() => {
+        hideLoading();
+        showError('加载文件超时，请重试');
+    }, 30000); // 30秒超时
 
     $.ajax({
-      url: '/grading/get_dir_file_count/',
-      method: 'POST',
-      headers: {
-        'X-CSRFToken': csrfToken,
-        'Content-Type': 'application/json; charset=utf-8'
-      },
-      data: JSON.stringify(requestData),
-      processData: false,
-      contentType: 'application/json; charset=utf-8',
-      success: function(response) {
-        console.log('Response:', response);
-        console.log('Response type:', typeof response);
-        console.log('Response text:', response);
-        
-        // 直接使用响应文本作为文件数量
-        const fileCount = response;
-        console.log('Setting file count to:', fileCount);
-        $('#directory-file-count').text(fileCount);
-        console.log(`Found ${fileCount} files in directory: ${dirPath}`);
-        
-        // 更新目录树中的缓存
-        if (node) {
-          node.data = node.data || {};
-          node.data.file_count = fileCount;
-          tree.redraw_node(node);
+        url: '/grading/get_file_content/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            path: path
+        },
+        success: function(response) {
+            clearTimeout(timeout);
+            console.log('File content response:', response);
+            handleFileContent(response);
+        },
+        error: function(xhr, status, error) {
+            clearTimeout(timeout);
+            console.error('Error loading file:', error);
+            console.error('XHR status:', xhr.status);
+            console.error('XHR response:', xhr.responseText);
+            showError('加载文件失败：' + (error || '未知错误'));
+        },
+        complete: function() {
+            clearTimeout(timeout);
+            hideLoading();
         }
-      },
-      error: function(xhr, status, error) {
-        console.error('Error getting file count:', error);
-        console.error('XHR status:', xhr.status);
-        console.error('XHR response:', xhr.responseText);
-        console.error('XHR status text:', xhr.statusText);
-        console.error('XHR ready state:', xhr.readyState);
-        $('#directory-file-count').text('0');
-        showError('获取文件数量失败');
-      }
     });
-  }
-
-  // 添加超时处理
-  const timeout = setTimeout(() => {
-    hideLoading();
-    showError('加载文件超时，请重试');
-  }, 30000); // 30秒超时
-
-  $.ajax({
-    url: '/grading/get_file_content/',
-    method: 'POST',
-    headers: {
-      'X-CSRFToken': getCSRFToken()
-    },
-    data: {
-      path: path
-    },
-    success: function(response) {
-      clearTimeout(timeout);
-      if (response.status === 'success') {
-        // 根据文件类型显示内容
-        switch (response.type) {
-          case 'docx':
-            // Word 文档已经转换为 HTML
-            $('#file-content').html(response.content);
-            break;
-            
-          case 'pdf':
-            // 使用 PDF.js 显示 PDF 文件
-            $('#file-content').html(`
-              <div class="pdf-container">
-                <iframe src="/static/pdfjs/web/viewer.html?file=${encodeURIComponent(response.content)}" 
-                        width="100%" height="800px" frameborder="0"></iframe>
-              </div>
-            `);
-            break;
-            
-          case 'excel':
-            // Excel 文件
-            try {
-              // 直接显示后端返回的 HTML 表格
-              $('#file-content').html(response.content);
-            } catch (error) {
-              console.error('Error displaying Excel content:', error);
-              $('#file-content').html('<div class="alert alert-danger">无法显示 Excel 内容</div>');
-            }
-            break;
-            
-          case 'image':
-            // 使用 viewer.js 显示图片
-            $('#file-content').html(`
-              <div class="image-container">
-                <img src="${response.content}" class="img-fluid" alt="图片预览">
-              </div>
-            `);
-            // 初始化 viewer.js
-            $('.image-container img').viewer({
-              navbar: false,
-              title: false,
-              toolbar: {
-                zoomIn: 1,
-                zoomOut: 1,
-                oneToOne: 1,
-                reset: 1,
-                prev: 0,
-                play: 0,
-                next: 0,
-                rotateLeft: 1,
-                rotateRight: 1,
-                flipHorizontal: 1,
-                flipVertical: 1,
-              }
-            });
-            break;
-            
-          case 'text':
-            // 使用 CodeMirror 显示文本文件
-            $('#file-content').html(`
-              <div class="text-container">
-                <textarea id="code-editor">${response.content}</textarea>
-              </div>
-            `);
-            // 初始化 CodeMirror
-            const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
-              mode: 'text/plain',
-              lineNumbers: true,
-              readOnly: true,
-              theme: 'default',
-              lineWrapping: true
-            });
-            break;
-            
-          case 'binary':
-            // 显示二进制文件提示
-            $('#file-content').html(`
-              <div class="alert alert-info">
-                这是一个二进制文件，无法直接显示。请下载后查看。
-                <a href="${response.content}" class="btn btn-primary btn-sm ms-2" download>
-                  下载文件
-                </a>
-              </div>
-            `);
-            break;
-            
-          default:
-            showError('不支持的文件类型');
-        }
-        
-        // 设置默认评分按钮状态
-        setGradeButtonState(selectedGrade);
-        // 启用确定按钮
-        $('#add-grade-to-file').prop('disabled', false);
-      } else {
-        showError(response.message || '加载文件失败');
-      }
-    },
-    error: function(xhr, status, error) {
-      clearTimeout(timeout);
-      console.error('Error loading file:', error);
-      showError('加载文件失败：' + (error || '未知错误'));
-    },
-    complete: function() {
-      clearTimeout(timeout);
-      hideLoading();
-    }
-  });
 }
 
 // 保存评分

@@ -712,6 +712,8 @@ def get_file_content(request):
             full_path = os.path.join(base_dir, path)
             
             logger.info(f'尝试读取文件: {full_path}')
+            logger.info(f'文件是否存在: {os.path.exists(full_path)}')
+            logger.info(f'文件权限: {oct(os.stat(full_path).st_mode)[-3:]}')
             
             # 检查文件是否存在
             if not os.path.exists(full_path):
@@ -777,14 +779,226 @@ def get_file_content(request):
                 elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                     # Word 文档
                     try:
-                        import docx2txt
-                        content = docx2txt.process(full_path)
-                        return JsonResponse({
-                            'status': 'success',
-                            'type': 'docx',
-                            'content': content
-                        })
+                        logger.info(f'开始读取 Word 文档: {full_path}')
+                        
+                        # 尝试使用 mammoth 读取
+                        try:
+                            import mammoth
+                            with open(full_path, "rb") as docx_file:
+                                result = mammoth.convert_to_html(docx_file)
+                                html_content = result.value
+                                
+                            # 添加样式
+                            css = '''
+                            <style>
+                                .docx-content {
+                                    font-family: Arial, sans-serif;
+                                    line-height: 1.6;
+                                    padding: 20px;
+                                    max-width: 100%;
+                                    overflow-x: auto;
+                                    box-sizing: border-box;
+                                }
+                                .docx-content img {
+                                    max-width: 100%;
+                                    height: auto;
+                                }
+                                .docx-content table {
+                                    margin: 15px 0;
+                                    border-collapse: collapse;
+                                    width: 100%;
+                                    max-width: 100%;
+                                    overflow-x: auto;
+                                    display: block;
+                                }
+                                .docx-content td, .docx-content th {
+                                    padding: 8px;
+                                    border: 1px solid #ddd;
+                                    min-width: 100px;
+                                    word-break: break-word;
+                                }
+                                .docx-content tr:nth-child(even) {
+                                    background-color: #f9f9f9;
+                                }
+                                .docx-content h1 { 
+                                    font-size: clamp(20px, 5vw, 24px);
+                                    margin: 20px 0;
+                                }
+                                .docx-content h2 { 
+                                    font-size: clamp(18px, 4vw, 20px);
+                                    margin: 18px 0;
+                                }
+                                .docx-content h3 { 
+                                    font-size: clamp(16px, 3vw, 18px);
+                                    margin: 16px 0;
+                                }
+                                .docx-content p {
+                                    margin: 10px 0;
+                                    font-size: clamp(14px, 2vw, 16px);
+                                }
+                                @media screen and (max-width: 768px) {
+                                    .docx-content {
+                                        padding: 10px;
+                                    }
+                                    .docx-content td, .docx-content th {
+                                        padding: 4px;
+                                        font-size: 14px;
+                                    }
+                                }
+                            </style>
+                            '''
+                            
+                            final_content = css + f'<div class="docx-content">{html_content}</div>'
+                            logger.info(f'使用 mammoth 生成的 HTML 内容长度: {len(final_content)}')
+                            logger.info(f'HTML 内容预览: {final_content[:200]}...')
+                            
+                            return JsonResponse({
+                                'status': 'success',
+                                'type': 'docx',
+                                'content': final_content
+                            })
+                            
+                        except Exception as mammoth_error:
+                            logger.error(f'Mammoth 处理失败，尝试使用 python-docx: {str(mammoth_error)}')
+                            # 如果 mammoth 失败，回退到 python-docx
+                            from docx import Document
+                            doc = Document(full_path)
+                            
+                            # 记录文档信息
+                            logger.info(f'文档段落数量: {len(doc.paragraphs)}')
+                            logger.info(f'文档表格数量: {len(doc.tables)}')
+                            
+                            # 构建 HTML 内容
+                            html_content = ['<div class="docx-content">']
+                            
+                            # 处理段落
+                            for i, paragraph in enumerate(doc.paragraphs):
+                                # 记录段落信息
+                                logger.info(f'段落 {i} 样式: {paragraph.style.name}, 内容: {paragraph.text}')
+                                
+                                # 检查段落样式和内容
+                                style = paragraph.style.name
+                                text = paragraph.text.strip()
+                                
+                                # 跳过完全空的段落
+                                if not text and not paragraph.runs:
+                                    continue
+                                    
+                                # 处理段落样式
+                                if style.startswith('Heading'):
+                                    level = style[-1] if style[-1].isdigit() else 1
+                                    html_content.append(f'<h{level}>{text}</h{level}>')
+                                else:
+                                    # 处理段落中的格式
+                                    formatted_text = ''
+                                    for run in paragraph.runs:
+                                        if run.bold:
+                                            formatted_text += f'<strong>{run.text}</strong>'
+                                        elif run.italic:
+                                            formatted_text += f'<em>{run.text}</em>'
+                                        else:
+                                            formatted_text += run.text
+                                    
+                                    if formatted_text:
+                                        html_content.append(f'<p>{formatted_text}</p>')
+                                    else:
+                                        html_content.append(f'<p>{text}</p>')
+                            
+                            # 处理表格
+                            for i, table in enumerate(doc.tables):
+                                logger.info(f'处理表格 {i}, 行数: {len(table.rows)}')
+                                html_content.append('<table class="table table-bordered">')
+                                for row in table.rows:
+                                    html_content.append('<tr>')
+                                    for cell in row.cells:
+                                        # 处理单元格中的格式
+                                        cell_text = ''
+                                        for paragraph in cell.paragraphs:
+                                            for run in paragraph.runs:
+                                                if run.bold:
+                                                    cell_text += f'<strong>{run.text}</strong>'
+                                                elif run.italic:
+                                                    cell_text += f'<em>{run.text}</em>'
+                                                else:
+                                                    cell_text += run.text
+                                        html_content.append(f'<td>{cell_text}</td>')
+                                    html_content.append('</tr>')
+                                html_content.append('</table>')
+                            
+                            html_content.append('</div>')
+                            
+                            # 添加样式
+                            css = '''
+                            <style>
+                                .docx-content {
+                                    font-family: Arial, sans-serif;
+                                    line-height: 1.6;
+                                    padding: 20px;
+                                    max-width: 100%;
+                                    overflow-x: auto;
+                                    box-sizing: border-box;
+                                }
+                                .docx-content img {
+                                    max-width: 100%;
+                                    height: auto;
+                                }
+                                .docx-content table {
+                                    margin: 15px 0;
+                                    border-collapse: collapse;
+                                    width: 100%;
+                                    max-width: 100%;
+                                    overflow-x: auto;
+                                    display: block;
+                                }
+                                .docx-content td, .docx-content th {
+                                    padding: 8px;
+                                    border: 1px solid #ddd;
+                                    min-width: 100px;
+                                    word-break: break-word;
+                                }
+                                .docx-content tr:nth-child(even) {
+                                    background-color: #f9f9f9;
+                                }
+                                .docx-content h1 { 
+                                    font-size: clamp(20px, 5vw, 24px);
+                                    margin: 20px 0;
+                                }
+                                .docx-content h2 { 
+                                    font-size: clamp(18px, 4vw, 20px);
+                                    margin: 18px 0;
+                                }
+                                .docx-content h3 { 
+                                    font-size: clamp(16px, 3vw, 18px);
+                                    margin: 16px 0;
+                                }
+                                .docx-content p {
+                                    margin: 10px 0;
+                                    font-size: clamp(14px, 2vw, 16px);
+                                }
+                                @media screen and (max-width: 768px) {
+                                    .docx-content {
+                                        padding: 10px;
+                                    }
+                                    .docx-content td, .docx-content th {
+                                        padding: 4px;
+                                        font-size: 14px;
+                                    }
+                                }
+                            </style>
+                            '''
+                            
+                            final_content = css + '\n'.join(html_content)
+                            logger.info(f'使用 python-docx 生成的 HTML 内容长度: {len(final_content)}')
+                            logger.info(f'HTML 内容预览: {final_content[:200]}...')
+                            
+                            return JsonResponse({
+                                'status': 'success',
+                                'type': 'docx',
+                                'content': final_content
+                            })
+                            
                     except Exception as e:
+                        logger.error(f'Word 文档处理失败: {str(e)}\n{traceback.format_exc()}')
                         return JsonResponse({
                             'status': 'error',
                             'message': f'Word 文档处理失败: {str(e)}'
