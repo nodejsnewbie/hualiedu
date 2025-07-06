@@ -3,6 +3,9 @@ from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse, HttpResponseForbidden
 import os
 from docx import Document
+from docx.shared import Inches
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.style import WD_STYLE_TYPE
 from django.conf import settings
 import shutil
 import json
@@ -12,11 +15,12 @@ import mimetypes
 import mammoth
 import base64
 from pathlib import Path
+from datetime import datetime
 from django.views.decorators.csrf import csrf_exempt
 from .utils import FileHandler, DirectoryHandler, GradeHandler, GitHandler
 from .config import WORD_STYLE_MAP, DIRECTORY_STRUCTURE
 from django.views.decorators.http import require_http_methods
-from .models import GlobalConfig, Repository
+from .models import GlobalConfig, Repository, Student, Assignment, Submission
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.urls import reverse
@@ -80,6 +84,76 @@ def clear_directory_file_count_cache():
 
 def index(request):
     return render(request, 'index.html')
+
+def test_js(request):
+    return render(request, 'test_js.html')
+
+def test_grade_switch(request):
+    return render(request, 'test_grade_switch.html')
+
+def debug_grading(request):
+    return render(request, 'debug_grading.html')
+
+def simple_test(request):
+    return render(request, 'simple_test.html')
+
+def grading_simple(request):
+    """简化版评分页面视图"""
+    try:
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return HttpResponseForbidden('请先登录')
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return HttpResponseForbidden('无权限访问')
+        
+        # 获取全局配置
+        config = GlobalConfig.objects.first()
+        if not config:
+            config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
+        
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        
+        # 检查目录权限
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+        
+        if not os.access(base_dir, os.R_OK):
+            logger.error(f'无权限访问目录: {base_dir}')
+            return HttpResponseForbidden('无权限访问目录')
+        
+        # 获取目录树
+        try:
+            initial_tree_data = get_directory_tree()
+        except Exception as e:
+            logger.error(f'获取目录树失败: {str(e)}')
+            return render(request, 'grading_simple.html', {
+                'files': [],
+                'error': f'获取目录树失败: {str(e)}',
+                'config': config,
+                'base_dir': base_dir,
+                'initial_tree_data': '[]'
+            })
+        
+        return render(request, 'grading_simple.html', {
+            'files': [],
+            'error': None,
+            'config': config,
+            'base_dir': base_dir,
+            'initial_tree_data': json.dumps(initial_tree_data, ensure_ascii=False)
+        })
+        
+    except Exception as e:
+        logger.error(f'处理简化评分页面请求失败: {str(e)}')
+        return render(request, 'grading_simple.html', {
+            'files': [],
+            'error': f'处理请求失败: {str(e)}',
+            'config': config if 'config' in locals() else None,
+            'base_dir': base_dir if 'base_dir' in locals() else None,
+            'initial_tree_data': '[]'
+        })
 
 
 @login_required
@@ -600,6 +674,101 @@ def get_file_content(file_path):
     # Implementation of get_file_content function
     pass
 
+def get_file_grade_info(full_path):
+    """获取文件中的评分信息"""
+    try:
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        grade_info = {
+            'has_grade': False,
+            'grade': None,
+            'grade_type': None,  # 'letter' 或 'text'
+            'in_table': False
+        }
+        
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 检查评分
+            try:
+                doc = Document(full_path)
+                
+                # 首先检查表格中是否有评分
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            if '评定分数' in cell.text:
+                                # 检查下一个单元格是否有评分
+                                cell_index = None
+                                for j, table_cell in enumerate(row.cells):
+                                    if table_cell == cell:
+                                        cell_index = j
+                                        break
+                                
+                                if cell_index is not None and cell_index + 1 < len(row.cells):
+                                    next_cell = row.cells[cell_index + 1]
+                                    if next_cell.text.strip():
+                                        grade_info['has_grade'] = True
+                                        grade_info['grade'] = next_cell.text.strip()
+                                        grade_info['in_table'] = True
+                                        # 判断评分类型
+                                        if grade_info['grade'] in ['A', 'B', 'C', 'D', 'E']:
+                                            grade_info['grade_type'] = 'letter'
+                                        elif grade_info['grade'] in ['优秀', '良好', '中等', '及格', '不及格']:
+                                            grade_info['grade_type'] = 'text'
+                                        break
+                        if grade_info['has_grade']:
+                            break
+                    if grade_info['has_grade']:
+                        break
+                
+                # 如果表格中没有找到，检查段落中是否有评分
+                if not grade_info['has_grade']:
+                    for paragraph in doc.paragraphs:
+                        if paragraph.text.startswith('老师评分：'):
+                            grade_text = paragraph.text.replace('老师评分：', '').strip()
+                            if grade_text:
+                                grade_info['has_grade'] = True
+                                grade_info['grade'] = grade_text
+                                # 判断评分类型
+                                if grade_text in ['A', 'B', 'C', 'D', 'E']:
+                                    grade_info['grade_type'] = 'letter'
+                                elif grade_text in ['优秀', '良好', '中等', '及格', '不及格']:
+                                    grade_info['grade_type'] = 'text'
+                                break
+                                
+            except Exception as e:
+                logger.error(f'检查 Word 文档评分失败: {str(e)}')
+        else:
+            # 对于其他文件，尝试以文本方式检查
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # 查找评分行
+                    for line in lines:
+                        if line.strip().startswith('老师评分：'):
+                            grade_text = line.strip().replace('老师评分：', '').strip()
+                            if grade_text:
+                                grade_info['has_grade'] = True
+                                grade_info['grade'] = grade_text
+                                # 判断评分类型
+                                if grade_text in ['A', 'B', 'C', 'D', 'E']:
+                                    grade_info['grade_type'] = 'letter'
+                                elif grade_text in ['优秀', '良好', '中等', '及格', '不及格']:
+                                    grade_info['grade_type'] = 'text'
+                                break
+                                
+            except Exception as e:
+                logger.error(f'检查文件评分失败: {str(e)}')
+        
+        logger.info(f'文件评分信息: {grade_info}')
+        return grade_info
+        
+    except Exception as e:
+        logger.error(f'获取文件评分信息失败: {str(e)}')
+        return {'has_grade': False, 'grade': None, 'grade_type': None, 'in_table': False}
+
 def save_file_grade(file_path, grade):
     # Implementation of save_file_grade function
     pass
@@ -731,10 +900,14 @@ def get_file_content(request):
                         # 转换为 HTML
                         html_content = df.to_html(index=False, classes='table table-bordered table-striped')
                         
+                        # 获取文件评分信息
+                        grade_info = get_file_grade_info(full_path)
+                        
                         return JsonResponse({
                             'status': 'success',
                             'type': 'excel',
-                            'content': html_content
+                            'content': html_content,
+                            'grade_info': grade_info
                         })
                     except Exception as e:
                         logger.error(f'Excel 文件处理失败: {str(e)}')
@@ -746,10 +919,14 @@ def get_file_content(request):
                     # 文本文件
                     with open(full_path, 'r', encoding='utf-8') as f:
                         content = f.read()
+                        # 获取文件评分信息
+                        grade_info = get_file_grade_info(full_path)
+                        
                         return JsonResponse({
                             'status': 'success',
                             'type': 'text',
-                            'content': content
+                            'content': content,
+                            'grade_info': grade_info
                         })
                 elif mime_type == 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
                     # Word 文档
@@ -822,10 +999,15 @@ def get_file_content(request):
                             '''
                             
                             final_content = css + f'<div class="docx-content">{html_content}</div>'
+                            
+                            # 获取文件评分信息
+                            grade_info = get_file_grade_info(full_path)
+                            
                             return JsonResponse({
                                 'status': 'success',
                                 'type': 'docx',
-                                'content': final_content
+                                'content': final_content,
+                                'grade_info': grade_info
                             })
                             
                         except Exception as mammoth_error:
@@ -1055,22 +1237,65 @@ def add_grade_to_file(request):
             try:
                 doc = Document(full_path)
                 
-                # 检查最后一段是否已经是评分
-                if doc.paragraphs and doc.paragraphs[-1].text.startswith('老师评分：'):
-                    # 如果是评分，则删除它
-                    doc._body._body.remove(doc.paragraphs[-1]._p)
+                # 智能检测评定分数位置
+                grade_inserted = False
                 
-                # 添加一个空段落
-                doc.add_paragraph()
-                # 添加评分段落
-                doc.add_paragraph(f'老师评分：{grade}')
+                logger.info(f'开始检查文档中的表格，共 {len(doc.tables)} 个表格')
+                
+                # 首先检查表格中是否有"评定分数"
+                for table_index, table in enumerate(doc.tables):
+                    logger.info(f'检查第 {table_index + 1} 个表格，共 {len(table.rows)} 行')
+                    for row_index, row in enumerate(table.rows):
+                        logger.info(f'检查第 {row_index + 1} 行，共 {len(row.cells)} 个单元格')
+                        for cell_index, cell in enumerate(row.cells):
+                            cell_text = cell.text.strip()
+                            logger.info(f'单元格 {cell_index + 1} 内容: "{cell_text}"')
+                            if '评定分数' in cell_text:
+                                logger.info(f'找到包含"评定分数"的单元格: 表格{table_index + 1}, 行{row_index + 1}, 单元格{cell_index + 1}')
+                                
+                                # 检查是否有下一个单元格
+                                if cell_index + 1 < len(row.cells):
+                                    # 在下一个单元格中插入评分
+                                    next_cell = row.cells[cell_index + 1]
+                                    next_cell.text = grade
+                                    grade_inserted = True
+                                    logger.info(f'在评定分数后的单元格中插入评分: {grade}')
+                                    break
+                                else:
+                                    logger.warning(f'没有下一个单元格可以插入评分')
+                        if grade_inserted:
+                            break
+                    if grade_inserted:
+                        break
+                
+                # 如果表格中没有找到，再检查段落中是否有"评定分数"
+                if not grade_inserted:
+                    for i, paragraph in enumerate(doc.paragraphs):
+                        if '评定分数' in paragraph.text:
+                            logger.info(f'在段落中找到"评定分数"，但无法在表格中插入评分')
+                            break
+                
+                # 如果没有找到"评定分数"或无法在表格中插入，则按原来的逻辑处理
+                if not grade_inserted:
+                    # 检查最后一段是否已经是评分
+                    if doc.paragraphs and doc.paragraphs[-1].text.startswith('老师评分：'):
+                        # 如果是评分，则删除它
+                        doc._body._body.remove(doc.paragraphs[-1]._p)
+                    
+                    # 添加一个空段落
+                    doc.add_paragraph()
+                    # 添加评分段落
+                    doc.add_paragraph(f'老师评分：{grade}')
+                    logger.info(f'在文件末尾添加评分: {grade}')
+                
                 # 保存文档
                 doc.save(full_path)
                 logger.info(f'成功添加评分到 Word 文档: {full_path}')
                 return JsonResponse({
                     'status': 'success',
-                    'message': '评分已添加到文件末尾',
-                    'file_type': 'docx'
+                    'message': '评分已添加',
+                    'file_type': 'docx',
+                    'inserted_in_table': grade_inserted
                 })
             except Exception as e:
                 logger.error(f'添加评分到 Word 文档失败: {str(e)}')
@@ -1385,3 +1610,266 @@ def remove_grade(request):
             'status': 'error',
             'message': str(e)
         })
+
+@login_required
+@require_http_methods(["POST"])
+def save_teacher_comment(request):
+    """保存教师评价到文件末尾"""
+    try:
+        logger.info('开始处理保存教师评价请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({'success': False, 'message': '请先登录'})
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({'success': False, 'message': '无权限访问'})
+        
+        # 获取请求数据
+        file_path = request.POST.get('file_path')
+        comment = request.POST.get('comment')
+        
+        if not file_path or not comment:
+            logger.error('未提供文件路径或评价内容')
+            return JsonResponse({'success': False, 'message': '缺少必要参数'})
+        
+        logger.info(f'请求保存教师评价，路径: {file_path}, 评价: {comment}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({'success': False, 'message': '未配置仓库基础目录'})
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, file_path)
+        
+        logger.info(f'尝试修改文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({'success': False, 'message': '文件不存在'})
+        
+        # 检查文件权限
+        if not os.access(full_path, os.W_OK):
+            logger.error(f'无权限修改文件: {full_path}')
+            return JsonResponse({'success': False, 'message': '无权限修改文件'})
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 添加评价
+            try:
+                doc = Document(full_path)
+                
+                # 删除所有现有的教师评价段落
+                paragraphs_to_remove = []
+                for i, paragraph in enumerate(doc.paragraphs):
+                    if paragraph.text.startswith('教师评价：'):
+                        paragraphs_to_remove.append(i)
+                
+                # 从后往前删除，避免索引变化
+                for i in reversed(paragraphs_to_remove):
+                    doc._body._body.remove(doc.paragraphs[i]._p)
+                
+                # 确保文档末尾有足够的空间
+                # 添加分隔线
+                separator = doc.add_paragraph()
+                separator.text = "=" * 50
+                separator.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # 添加空行
+                doc.add_paragraph()
+                
+                # 添加教师评价标题
+                title = doc.add_paragraph()
+                title.text = "教师评价"
+                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                # 使用默认样式，避免样式不存在的问题
+                try:
+                    title.style = doc.styles['Heading 1']
+                except:
+                    # 如果Heading 1样式不存在，使用默认样式
+                    pass
+                
+                # 添加空行
+                doc.add_paragraph()
+                
+                # 添加教师评价内容
+                comment_para = doc.add_paragraph()
+                comment_para.text = comment
+                comment_para.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+                
+                # 添加空行
+                doc.add_paragraph()
+                
+                # 添加时间戳
+                timestamp = doc.add_paragraph()
+                timestamp.text = f"评价时间：{datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}"
+                timestamp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                # 使用默认样式，避免样式不存在的问题
+                try:
+                    timestamp.style = doc.styles['Caption']
+                except:
+                    # 如果Caption样式不存在，使用默认样式
+                    pass
+                
+                # 保存文档
+                doc.save(full_path)
+                logger.info(f'成功添加教师评价到 Word 文档: {full_path}')
+                return JsonResponse({'success': True, 'message': '教师评价已保存'})
+            except Exception as e:
+                logger.error(f'添加教师评价到 Word 文档失败: {str(e)}')
+                return JsonResponse({'success': False, 'message': f'添加教师评价失败: {str(e)}'})
+        else:
+            # 对于其他文件，尝试以文本方式添加
+            try:
+                with open(full_path, 'r+', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # 检查最后一行是否已经是教师评价
+                    if lines and lines[-1].strip().startswith('教师评价：'):
+                        # 如果是评价，则删除它
+                        lines = lines[:-1]
+                    
+                    # 移动到文件末尾
+                    f.seek(0)
+                    f.truncate()
+                    
+                    # 写入所有行（除了最后一个评价）
+                    f.writelines(lines)
+                    
+                    # 添加新行和评价
+                    f.write(f'\n教师评价：{comment}\n')
+                
+                logger.info(f'成功添加教师评价到文件: {full_path}')
+                return JsonResponse({'success': True, 'message': '教师评价已保存'})
+            except Exception as e:
+                logger.error(f'添加教师评价到文件失败: {str(e)}')
+                return JsonResponse({'success': False, 'message': f'添加教师评价失败: {str(e)}'})
+            
+    except Exception as e:
+        logger.error(f'保存教师评价失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({'success': False, 'message': f'保存失败: {str(e)}'})
+
+@login_required
+@require_http_methods(["GET"])
+def get_teacher_comment(request):
+    """从文件中获取教师评价"""
+    try:
+        logger.info('开始处理获取教师评价请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({'success': False, 'message': '请先登录'})
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({'success': False, 'message': '无权限访问'})
+        
+        # 获取请求数据
+        file_path = request.GET.get('file_path')
+        
+        if not file_path:
+            logger.error('未提供文件路径')
+            return JsonResponse({'success': False, 'message': '缺少文件路径参数'})
+        
+        logger.info(f'请求获取教师评价，路径: {file_path}')
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({'success': False, 'message': '未配置仓库基础目录'})
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        full_path = os.path.join(base_dir, file_path)
+        
+        logger.info(f'尝试读取文件: {full_path}')
+        
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f'文件不存在: {full_path}')
+            return JsonResponse({'success': False, 'message': '文件不存在'})
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        ext = ext.lower()
+        
+        # 根据文件类型处理
+        if ext == '.docx':
+            # 对于 Word 文档，使用 python-docx 读取评价
+            try:
+                doc = Document(full_path)
+                
+                # 查找教师评价内容
+                teacher_comment = None
+                found_title = False
+                
+                for paragraph in doc.paragraphs:
+                    # 查找"教师评价"标题
+                    if paragraph.text.strip() == "教师评价":
+                        found_title = True
+                        continue
+                    
+                    # 如果找到了标题，下一个非空段落就是评价内容
+                    if found_title and paragraph.text.strip():
+                        teacher_comment = paragraph.text.strip()
+                        break
+                
+                if teacher_comment:
+                    logger.info(f'找到教师评价: {teacher_comment}')
+                    return JsonResponse({
+                        'success': True, 
+                        'comment': teacher_comment
+                    })
+                else:
+                    logger.info('文件中没有找到教师评价')
+                    return JsonResponse({'success': True, 'comment': '暂无评价'})
+                    
+            except Exception as e:
+                logger.error(f'读取 Word 文档中的教师评价失败: {str(e)}')
+                return JsonResponse({'success': False, 'message': f'读取教师评价失败: {str(e)}'})
+        else:
+            # 对于其他文件，尝试以文本方式读取
+            try:
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    
+                    # 查找教师评价行
+                    teacher_comment = None
+                    for line in lines:
+                        if line.strip().startswith('教师评价：'):
+                            teacher_comment = line.strip().replace('教师评价：', '').strip()
+                            break
+                    
+                    if teacher_comment:
+                        logger.info(f'找到教师评价: {teacher_comment}')
+                        return JsonResponse({
+                            'success': True, 
+                            'comment': teacher_comment
+                        })
+                    else:
+                        logger.info('文件中没有找到教师评价')
+                        return JsonResponse({'success': True, 'comment': '暂无评价'})
+                        
+            except Exception as e:
+                logger.error(f'读取文件中的教师评价失败: {str(e)}')
+                return JsonResponse({'success': False, 'message': f'读取教师评价失败: {str(e)}'})
+            
+    except Exception as e:
+        logger.error(f'获取教师评价失败: {str(e)}\n{traceback.format_exc()}')
+        return JsonResponse({'success': False, 'message': f'获取失败: {str(e)}'})
+
+def test_grading_no_auth(request):
+    """无需登录权限的评分功能测试页面"""
+    return render(request, 'test_grading_no_auth.html')

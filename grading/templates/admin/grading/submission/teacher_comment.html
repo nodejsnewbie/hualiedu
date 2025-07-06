@@ -1,0 +1,21 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block content %}
+  <h1>教师评价：{{ submission }}</h1>
+  <form method="post" style="margin-top: 20px;">
+    {% csrf_token %}
+    <div style="margin-bottom: 20px;">
+      {{ form.comment.label_tag }}<br>
+      {{ form.comment }}
+    </div>
+    <div style="margin-bottom: 20px;">
+      <strong>当前教师评价：</strong><br>
+      <div style="background: #f8f9fa; border: 1px solid #eee; padding: 10px; border-radius: 4px; min-height: 40px;">
+        {{ submission.teacher_comments|linebreaksbr }}
+      </div>
+    </div>
+    <input type="submit" value="保存评价" class="default" style="background: #79aec8; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer;">
+    <a href="{% url 'admin:grading_submission_changelist' %}" style="margin-left: 20px;">返回</a>
+  </form>
+{% endblock %} 

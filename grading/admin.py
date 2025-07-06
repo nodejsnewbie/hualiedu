@@ -3,6 +3,7 @@ import git
 import shutil
 import tempfile
 import subprocess
+import logging
 from django.contrib import admin
 from django.utils.html import format_html
 from django.urls import reverse, path
@@ -18,6 +19,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 from django.core.exceptions import ValidationError
 
+# 获取日志记录器
+logger = logging.getLogger(__name__)
+
 # 定义所有 Admin 类
 class StudentAdmin(admin.ModelAdmin):
     list_display = ['student_id', 'name', 'class_name']
@@ -31,11 +35,62 @@ class AssignmentAdmin(admin.ModelAdmin):
     date_hierarchy = 'due_date'
 
 class SubmissionAdmin(admin.ModelAdmin):
-    list_display = ['student', 'assignment', 'submitted_at', 'grade', 'status']
+    list_display = ['student', 'assignment', 'submitted_at', 'grade', 'status', 'teacher_comment_action']
     search_fields = ['student__name', 'student__student_id', 'assignment__name']
     list_filter = ['status', 'submitted_at', 'assignment']
     date_hierarchy = 'submitted_at'
     raw_id_fields = ['student', 'assignment']
+
+    def get_urls(self):
+        from django.urls import path
+        urls = super().get_urls()
+        custom_urls = [
+            path('teacher_comment/<int:submission_id>/', self.admin_site.admin_view(self.teacher_comment_view), name='grading_submission_teacher_comment'),
+        ]
+        return custom_urls + urls
+
+    def teacher_comment_action(self, obj):
+        return format_html(
+            '<a class="button" href="{}">教师评价</a>',
+            reverse('admin:grading_submission_teacher_comment', args=[obj.pk])
+        )
+    teacher_comment_action.short_description = '教师评价'
+    teacher_comment_action.allow_tags = True
+
+    def teacher_comment_view(self, request, submission_id):
+        from django.shortcuts import get_object_or_404, redirect
+        from django import forms
+        submission = get_object_or_404(Submission, pk=submission_id)
+
+        class TeacherCommentForm(forms.Form):
+            comment = forms.CharField(
+                label="教师评价",
+                widget=forms.Textarea(attrs={'rows': 5, 'style': 'width: 90%;'}),
+                required=True
+            )
+
+        if request.method == 'POST':
+            form = TeacherCommentForm(request.POST)
+            if form.is_valid():
+                new_comment = form.cleaned_data['comment']
+                # 追加到原有内容末尾
+                if submission.teacher_comments:
+                    submission.teacher_comments += '\n' + new_comment
+                else:
+                    submission.teacher_comments = new_comment
+                submission.save()
+                self.message_user(request, '教师评价已保存！')
+                return redirect('admin:grading_submission_changelist')
+        else:
+            form = TeacherCommentForm(initial={'comment': ''})
+
+        context = dict(
+            self.admin_site.each_context(request),
+            title='教师评价',
+            submission=submission,
+            form=form,
+        )
+        return render(request, 'admin/grading/submission/teacher_comment.html', context)
 
 class CustomAdminSite(admin.AdminSite):
     def get_app_list(self, request):
@@ -594,13 +649,19 @@ class RepositoryAdmin(admin.ModelAdmin):
             config = GlobalConfig.objects.first()
             
             if not config:
-                messages.error(request, '请先配置全局认证信息')
+                error_msg = '请先配置全局认证信息'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                messages.error(request, error_msg)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 获取本地路径
             local_path = repo.get_local_path()
             if not local_path:
-                messages.error(request, '无法获取本地路径')
+                error_msg = '无法获取本地路径'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                messages.error(request, error_msg)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 如果目录已存在，先删除
@@ -638,9 +699,15 @@ class RepositoryAdmin(admin.ModelAdmin):
                 # 更新最后同步时间
                 repo.last_sync_time = timezone.now()
                 repo.save()
-                messages.success(request, f'仓库 {repo.name} 克隆成功')
+                success_msg = f'仓库 {repo.name} 克隆成功'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': True, 'message': success_msg})
+                messages.success(request, success_msg)
             else:
-                messages.error(request, f'克隆失败：{result.stderr}')
+                error_msg = f'克隆失败：{result.stderr}'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                messages.error(request, error_msg)
             
             # 清理临时文件
             if repo.is_ssh_protocol() and config.ssh_key:
@@ -650,11 +717,40 @@ class RepositoryAdmin(admin.ModelAdmin):
                     pass
                 
         except Repository.DoesNotExist:
-            messages.error(request, '仓库不存在')
+            error_msg = '仓库不存在'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': error_msg})
+            messages.error(request, error_msg)
         except Exception as e:
-            messages.error(request, f'克隆失败：{str(e)}')
+            error_msg = f'克隆失败：{str(e)}'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': error_msg})
+            messages.error(request, error_msg)
         
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'message': '未知错误'})
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
+
+    def _handle_uncommitted_changes(self, git_repo, request):
+        """处理未提交的更改"""
+        if git_repo.is_dirty():
+            logger.info("检测到未提交的更改，正在自动提交...")  # 调试信息
+            try:
+                # 添加所有更改
+                git_repo.git.add('--all')
+                # 提交更改
+                commit_message = f'Auto commit before sync at {timezone.now().strftime("%Y-%m-%d %H:%M:%S")}'
+                git_repo.index.commit(commit_message)
+                logger.info(f"自动提交成功: {commit_message}")  # 调试信息
+                return True
+            except Exception as e:
+                logger.error(f"自动提交失败: {str(e)}")  # 调试信息
+                self.message_user(request, 
+                    f'自动提交更改失败：{str(e)}\n'
+                    '请手动处理未提交的更改后再进行同步。', 
+                    level=messages.ERROR)
+                return False
+        return True
 
     def sync_repository(self, request, repo_id):
         """同步仓库"""
@@ -664,57 +760,64 @@ class RepositoryAdmin(admin.ModelAdmin):
             
             # 检查目录是否存在
             if not local_path:
-                self.message_user(request, 
-                    '无法获取仓库本地路径，请检查全局配置中的仓库基础目录设置', 
-                    level=messages.ERROR)
+                error_msg = '无法获取仓库本地路径，请检查全局配置中的仓库基础目录设置'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                self.message_user(request, error_msg, level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
-            print(f"仓库本地路径: {local_path}")  # 调试信息
+            logger.info(f"仓库本地路径: {local_path}")  # 调试信息
             
             if not os.path.exists(local_path):
-                self.message_user(request, 
-                    f'仓库目录不存在：{local_path}\n'
-                    '请先克隆仓库，然后再进行同步操作。', 
-                    level=messages.ERROR)
+                error_msg = f'仓库目录不存在：{local_path}\n请先克隆仓库，然后再进行同步操作。'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                self.message_user(request, error_msg, level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查目录权限
             if not os.access(local_path, os.R_OK | os.W_OK):
-                self.message_user(request, 
-                    f'仓库目录权限不足：{local_path}\n'
-                    '请检查目录权限设置。', 
-                    level=messages.ERROR)
+                error_msg = f'仓库目录权限不足：{local_path}\n请检查目录权限设置。'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                self.message_user(request, error_msg, level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查目录是否是 Git 仓库
             try:
                 git_repo = git.Repo(local_path)
-                print(f"Git 仓库对象创建成功: {git_repo.git_dir}")  # 调试信息
+                logger.info(f"Git 仓库对象创建成功: {git_repo.git_dir}")  # 调试信息
             except git.InvalidGitRepositoryError:
-                self.message_user(request, 
-                    f'目录不是有效的 Git 仓库：{local_path}\n'
-                    '请重新克隆仓库。', 
-                    level=messages.ERROR)
+                error_msg = f'目录不是有效的 Git 仓库：{local_path}\n请重新克隆仓库。'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                self.message_user(request, error_msg, level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查远程仓库配置
             if not git_repo.remotes:
-                self.message_user(request, 
-                    '仓库没有配置远程地址\n'
-                    '请重新克隆仓库。', 
-                    level=messages.ERROR)
+                error_msg = '仓库没有配置远程地址\n请重新克隆仓库。'
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': error_msg})
+                self.message_user(request, error_msg, level=messages.ERROR)
                 return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
-            print(f"远程仓库配置: {[remote.name for remote in git_repo.remotes]}")  # 调试信息
+            logger.info(f"远程仓库配置: {[remote.name for remote in git_repo.remotes]}")  # 调试信息
+            
+            # 检查是否有未提交的更改，如果有则自动提交
+            if not self._handle_uncommitted_changes(git_repo, request):
+                if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                    return JsonResponse({'success': False, 'message': '自动提交更改失败'})
+                return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
             
             # 检查 SSH 密钥配置
             if repo.is_ssh_protocol():
                 config = GlobalConfig.objects.first()
                 if not config or not config.ssh_key:
-                    self.message_user(request, 
-                        'SSH 密钥未配置\n'
-                        '请先在全局配置中设置 SSH 密钥', 
-                        level=messages.ERROR)
+                    error_msg = 'SSH 密钥未配置\n请先在全局配置中设置 SSH 密钥'
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return JsonResponse({'success': False, 'message': error_msg})
+                    self.message_user(request, error_msg, level=messages.ERROR)
                     return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                 
                 # 创建临时 SSH 密钥文件
@@ -726,67 +829,64 @@ class RepositoryAdmin(admin.ModelAdmin):
                 try:
                     # 设置 SSH 密钥文件权限
                     os.chmod(key_path, 0o600)
-                    print(f"SSH 密钥文件创建成功: {key_path}")  # 调试信息
+                    logger.info(f"SSH 密钥文件创建成功: {key_path}")  # 调试信息
                     
                     # 配置 Git 使用临时 SSH 密钥
                     with git_repo.git.custom_environment(GIT_SSH_COMMAND=f'ssh -i {key_path} -o StrictHostKeyChecking=no'):
                         # 尝试获取远程信息
                         try:
-                            print("开始获取远程信息...")  # 调试信息
+                            logger.info("开始获取远程信息...")  # 调试信息
                             git_repo.git.fetch('-v', '--all')
-                            print("远程信息获取成功")  # 调试信息
+                            logger.info("远程信息获取成功")  # 调试信息
                         except git.exc.GitCommandError as e:
-                            print(f"Git 操作失败: {str(e)}")  # 调试信息
-                            if 'Could not read from remote repository' in str(e):
-                                self.message_user(request, 
-                                    '无法访问远程仓库，请检查：\n'
-                                    '1. SSH 密钥是否正确配置\n'
-                                    '2. 远程仓库地址是否正确\n'
-                                    '3. 是否有权限访问该仓库', 
-                                    level=messages.ERROR)
-                            else:
-                                self.message_user(request, f'Git 操作失败：{str(e)}', level=messages.ERROR)
+                            logger.error(f"Git 操作失败: {str(e)}")  # 调试信息
+                            error_msg = '无法访问远程仓库，请检查：\n1. SSH 密钥是否正确配置\n2. 远程仓库地址是否正确\n3. 是否有权限访问该仓库'
+                            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                                return JsonResponse({'success': False, 'message': error_msg})
+                            self.message_user(request, error_msg, level=messages.ERROR)
                             return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                         
                         # 检查分支是否存在
                         try:
-                            print(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
+                            logger.info(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
                             git_repo.git.show_ref(f'refs/remotes/origin/{repo.branch}')
-                            print("分支存在")  # 调试信息
+                            logger.info("分支存在")  # 调试信息
                         except git.exc.GitCommandError:
                             # 获取所有可用分支
                             branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
-                            print(f"可用分支: {branches}")  # 调试信息
-                            self.message_user(request, 
-                                f'分支 {repo.branch} 不存在。\n'
-                                f'可用的分支有：\n' + 
-                                '\n'.join(f'- {branch}' for branch in branches) + 
-                                '\n\n请修改仓库的分支设置。',
-                                level=messages.ERROR)
+                            logger.info(f"可用分支: {branches}")  # 调试信息
+                            error_msg = f'分支 {repo.branch} 不存在。\n可用的分支有：\n' + '\n'.join(f'- {branch}' for branch in branches) + '\n\n请修改仓库的分支设置。'
+                            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                                return JsonResponse({'success': False, 'message': error_msg})
+                            self.message_user(request, error_msg, level=messages.ERROR)
                             return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                         
                         # 更新代码
-                        print("开始更新代码...")  # 调试信息
+                        logger.info("开始更新代码...")  # 调试信息
                         git_repo.git.pull('origin', repo.branch)
-                        print("代码更新成功")  # 调试信息
+                        logger.info("代码更新成功")  # 调试信息
                         repo.last_sync_time = timezone.now()
                         repo.save()
-                        self.message_user(request, '仓库同步成功')
+                        
+                        success_msg = '仓库同步成功'
+                        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                            return JsonResponse({'success': True, 'message': success_msg})
+                        self.message_user(request, success_msg)
                 finally:
                     # 清理临时文件
                     try:
                         os.unlink(key_path)
-                        print("临时 SSH 密钥文件已清理")  # 调试信息
+                        logger.info("临时 SSH 密钥文件已清理")  # 调试信息
                     except:
                         pass
             else:
                 # HTTPS 方式
                 config = GlobalConfig.objects.first()
                 if not config or not config.https_username or not config.https_password:
-                    self.message_user(request, 
-                        'HTTPS 认证信息未配置\n'
-                        '请先在全局配置中设置用户名和密码', 
-                        level=messages.ERROR)
+                    error_msg = 'HTTPS 认证信息未配置\n请先在全局配置中设置用户名和密码'
+                    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                        return JsonResponse({'success': False, 'message': error_msg})
+                    self.message_user(request, error_msg, level=messages.ERROR)
                     return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                 
                 # 配置 Git 使用 HTTPS 认证
@@ -796,48 +896,56 @@ class RepositoryAdmin(admin.ModelAdmin):
                     GIT_PASSWORD=config.https_password
                 ):
                     try:
-                        print("开始获取远程信息...")  # 调试信息
+                        logger.info("开始获取远程信息...")  # 调试信息
                         git_repo.git.fetch('-v', '--all')
-                        print("远程信息获取成功")  # 调试信息
+                        logger.info("远程信息获取成功")  # 调试信息
                         
                         # 检查分支是否存在
                         try:
-                            print(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
+                            logger.info(f"检查分支 {repo.branch} 是否存在...")  # 调试信息
                             git_repo.git.show_ref(f'refs/remotes/origin/{repo.branch}')
-                            print("分支存在")  # 调试信息
+                            logger.info("分支存在")  # 调试信息
                         except git.exc.GitCommandError:
                             # 获取所有可用分支
                             branches = [ref.name.split('/')[-1] for ref in git_repo.refs if ref.name.startswith('refs/remotes/origin/')]
-                            print(f"可用分支: {branches}")  # 调试信息
-                            self.message_user(request, 
-                                f'分支 {repo.branch} 不存在。\n'
-                                f'可用的分支有：\n' + 
-                                '\n'.join(f'- {branch}' for branch in branches) + 
-                                '\n\n请修改仓库的分支设置。',
-                                level=messages.ERROR)
+                            logger.info(f"可用分支: {branches}")  # 调试信息
+                            error_msg = f'分支 {repo.branch} 不存在。\n可用的分支有：\n' + '\n'.join(f'- {branch}' for branch in branches) + '\n\n请修改仓库的分支设置。'
+                            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                                return JsonResponse({'success': False, 'message': error_msg})
+                            self.message_user(request, error_msg, level=messages.ERROR)
                             return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
                         
-                        print("开始更新代码...")  # 调试信息
+                        logger.info("开始更新代码...")  # 调试信息
                         git_repo.git.pull('origin', repo.branch)
-                        print("代码更新成功")  # 调试信息
+                        logger.info("代码更新成功")  # 调试信息
                         repo.last_sync_time = timezone.now()
                         repo.save()
-                        self.message_user(request, '仓库同步成功')
+                        
+                        success_msg = '仓库同步成功'
+                        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                            return JsonResponse({'success': True, 'message': success_msg})
+                        self.message_user(request, success_msg)
                     except git.exc.GitCommandError as e:
-                        print(f"Git 操作失败: {str(e)}")  # 调试信息
-                        self.message_user(request, 
-                            '仓库同步失败，请检查：\n'
-                            '1. HTTPS 认证信息是否正确\n'
-                            '2. 远程仓库地址是否正确\n'
-                            '3. 是否有权限访问该仓库', 
-                            level=messages.ERROR)
+                        logger.error(f"Git 操作失败: {str(e)}")  # 调试信息
+                        error_msg = '仓库同步失败，请检查：\n1. HTTPS 认证信息是否正确\n2. 远程仓库地址是否正确\n3. 是否有权限访问该仓库'
+                        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                            return JsonResponse({'success': False, 'message': error_msg})
+                        self.message_user(request, error_msg, level=messages.ERROR)
             
         except Repository.DoesNotExist:
-            self.message_user(request, '仓库不存在', level=messages.ERROR)
+            error_msg = '仓库不存在'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': error_msg})
+            self.message_user(request, error_msg, level=messages.ERROR)
         except Exception as e:
-            print(f"同步失败: {str(e)}")  # 调试信息
-            self.message_user(request, f'同步失败：{str(e)}\n请检查仓库配置和权限设置。', level=messages.ERROR)
+            logger.error(f"同步失败: {str(e)}")  # 调试信息
+            error_msg = f'同步失败：{str(e)}\n请检查仓库配置和权限设置。'
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+                return JsonResponse({'success': False, 'message': error_msg})
+            self.message_user(request, error_msg, level=messages.ERROR)
         
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({'success': False, 'message': '未知错误'})
         return HttpResponseRedirect(reverse('admin:grading_repository_changelist'))
 
     def push_repository(self, request, repo_id):

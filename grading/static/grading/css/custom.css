@@ -5,3 +5,78 @@
     right: 1rem;
     top: 1rem;
 }
+
+/* 确保评分按钮正确显示 */
+.grade-mode-btn {
+    cursor: pointer;
+}
+
+.grade-mode-btn.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+.grade-button {
+    cursor: pointer;
+}
+
+.grade-button.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+}
+
+/* 确保按钮组正确显示 */
+#letter-grade-buttons,
+#text-grade-buttons {
+    display: inline-block;
+}
+
+/* 评分方式切换按钮样式 */
+.grade-mode-btn {
+    transition: all 0.3s ease;
+}
+
+.grade-mode-btn:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.grade-mode-btn.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* 评分按钮样式 */
+.grade-button {
+    transition: all 0.3s ease;
+}
+
+.grade-button:hover {
+    background-color: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.grade-button.active {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* 确保按钮组切换时的平滑过渡 */
+#letter-grade-buttons,
+#text-grade-buttons {
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+#letter-grade-buttons.hidden,
+#text-grade-buttons.hidden {
+    opacity: 0;
+    visibility: hidden;
+    position: absolute;
+    pointer-events: none;
+}

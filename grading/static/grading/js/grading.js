@@ -1,11 +1,16 @@
+// 立即执行的测试代码
+console.log('=== grading.js 文件已加载 ===');
+console.log('当前时间:', new Date().toLocaleString());
+
 // 全局变量
 let currentFile = '';
 let selectedGrade = 'B';  // 设置默认评分为 B
+let gradeMode = 'letter';  // 评分方式：'letter' 或 'text'
 var currentFilePath = null;
 let pendingGrade = null;  // 待确认的评分
 
 // 获取 CSRF Token
-function getCSRFToken() {
+window.getCSRFToken = function() {
   const name = 'csrftoken';
   let cookieValue = null;
   if (document.cookie && document.cookie !== '') {
@@ -43,14 +48,278 @@ function hideLoading() {
 }
 
 // 设置评分按钮状态
-function setGradeButtonState(grade) {
+window.setGradeButtonState = function(grade) {
+  console.log('=== 设置评分按钮状态开始 ===');
+  console.log('目标评分:', grade);
+  console.log('评分按钮总数:', $('.grade-button').length);
+  
+  // 验证评分参数
+  if (!grade) {
+    console.error('评分参数为空');
+    return;
+  }
+  
+  // 移除所有评分按钮的active状态
   $('.grade-button').removeClass('active');
-  $(`.grade-button[data-grade="${grade}"]`).addClass('active');
+  console.log('已移除所有评分按钮的active状态');
+  
+  // 查找目标按钮
+  const targetButton = $(`.grade-button[data-grade="${grade}"]`);
+  console.log('目标评分按钮:', targetButton.length, targetButton.text());
+  
+  if (targetButton.length === 0) {
+    console.error('未找到目标评分按钮:', grade);
+    console.log('可用的评分按钮:');
+    $('.grade-button').each(function() {
+      console.log('-', $(this).data('grade'), ':', $(this).text());
+    });
+    return;
+  }
+  
+  // 设置目标按钮为active状态
+  targetButton.addClass('active');
+  console.log('已设置目标按钮为active状态');
+  
+  // 更新全局变量
   selectedGrade = grade;
+  
+  console.log('=== 评分按钮状态设置完成 ===');
+  console.log('当前评分:', selectedGrade);
+}
+
+// 切换评分方式
+window.switchGradeMode = function(mode) {
+  console.log('=== 切换评分方式开始 ===');
+  console.log('目标模式:', mode);
+  console.log('当前评分方式按钮数量:', $('.grade-mode-btn').length);
+  console.log('字母评分按钮组:', $('#letter-grade-buttons').length);
+  console.log('文字评分按钮组:', $('#text-grade-buttons').length);
+  
+  // 验证模式参数
+  if (mode !== 'letter' && mode !== 'text') {
+    console.error('无效的评分模式:', mode);
+    return;
+  }
+  
+  gradeMode = mode;
+  
+  // 更新按钮状态
+  $('.grade-mode-btn').removeClass('active');
+  const targetButton = $(`.grade-mode-btn[data-mode="${mode}"]`);
+  console.log('目标按钮:', targetButton.length, targetButton.text());
+  
+  if (targetButton.length === 0) {
+    console.error('未找到目标按钮:', mode);
+    return;
+  }
+  
+  targetButton.addClass('active');
+  
+  // 显示/隐藏对应的评分按钮组
+  if (mode === 'letter') {
+    console.log('切换到字母评分方式');
+    
+    // 隐藏文字评分按钮组
+    $('#text-grade-buttons').hide();
+    console.log('文字评分按钮组已隐藏');
+    
+    // 显示字母评分按钮组
+    $('#letter-grade-buttons').show();
+    console.log('字母评分按钮组已显示');
+    
+    // 验证显示状态
+    console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    
+    // 设置默认评分
+    if (!selectedGrade || !['A', 'B', 'C', 'D', 'E'].includes(selectedGrade)) {
+      console.log('设置默认字母评分: B');
+      selectedGrade = 'B';
+    } else {
+      console.log('保持当前字母评分:', selectedGrade);
+    }
+    
+    // 设置按钮状态
+    setGradeButtonState(selectedGrade);
+    
+  } else if (mode === 'text') {
+    console.log('切换到文字评分方式');
+    
+    // 隐藏字母评分按钮组
+    $('#letter-grade-buttons').hide();
+    console.log('字母评分按钮组已隐藏');
+    
+    // 显示文字评分按钮组
+    $('#text-grade-buttons').show();
+    console.log('文字评分按钮组已显示');
+    
+    // 验证显示状态
+    console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    
+    // 设置默认评分
+    if (!selectedGrade || !['优秀', '良好', '中等', '及格', '不及格'].includes(selectedGrade)) {
+      console.log('设置默认文字评分: 良好');
+      selectedGrade = '良好';
+    } else {
+      console.log('保持当前文字评分:', selectedGrade);
+    }
+    
+    // 设置按钮状态
+    setGradeButtonState(selectedGrade);
+  }
+  
+  console.log('=== 评分方式切换完成 ===');
+  console.log('当前评分:', selectedGrade);
+  console.log('评分方式:', gradeMode);
+  
+  // 验证显示一致性
+  validateGradeModeDisplay();
+}
+
+// 检查教师评价按钮状态
+function checkTeacherCommentButton() {
+  const button = $('#teacher-comment-btn');
+  console.log('Teacher comment button check:');
+  console.log('- Element exists:', button.length > 0);
+  console.log('- Disabled state:', button.prop('disabled'));
+  console.log('- Current file path:', currentFilePath);
+  console.log('- Button text:', button.text());
+}
+
+// 启用教师评价按钮
+function enableTeacherCommentButton() {
+  console.log('Enabling teacher comment button');
+  $('#teacher-comment-btn').prop('disabled', false);
+  checkTeacherCommentButton();
+}
+
+// 禁用教师评价按钮
+function disableTeacherCommentButton() {
+  console.log('Disabling teacher comment button');
+  $('#teacher-comment-btn').prop('disabled', true);
+  checkTeacherCommentButton();
+}
+
+// 验证评分方式显示一致性
+window.validateGradeModeDisplay = function() {
+  console.log('=== 验证评分方式显示一致性 ===');
+  console.log('当前评分方式:', gradeMode);
+  console.log('当前评分:', selectedGrade);
+  
+  // 检查评分方式按钮状态
+  const letterButton = $('.grade-mode-btn[data-mode="letter"]');
+  const textButton = $('.grade-mode-btn[data-mode="text"]');
+  console.log('字母评分按钮active状态:', letterButton.hasClass('active'));
+  console.log('文字评分按钮active状态:', textButton.hasClass('active'));
+  
+  // 检查评分按钮组显示状态
+  const letterGroupVisible = $('#letter-grade-buttons').is(':visible');
+  const textGroupVisible = $('#text-grade-buttons').is(':visible');
+  console.log('字母评分按钮组显示状态:', letterGroupVisible);
+  console.log('文字评分按钮组显示状态:', textGroupVisible);
+  
+  // 检查评分按钮状态
+  const activeGradeButton = $('.grade-button.active');
+  console.log('当前激活的评分按钮:', activeGradeButton.length, activeGradeButton.text());
+  
+  // 验证一致性
+  let isConsistent = true;
+  
+  if (gradeMode === 'letter') {
+    if (!letterButton.hasClass('active')) {
+      console.error('字母评分方式但按钮未激活');
+      isConsistent = false;
+    }
+    if (!letterGroupVisible) {
+      console.error('字母评分方式但按钮组未显示');
+      isConsistent = false;
+    }
+    if (textGroupVisible) {
+      console.error('字母评分方式但文字按钮组仍显示');
+      isConsistent = false;
+    }
+  } else if (gradeMode === 'text') {
+    if (!textButton.hasClass('active')) {
+      console.error('文字评分方式但按钮未激活');
+      isConsistent = false;
+    }
+    if (!textGroupVisible) {
+      console.error('文字评分方式但按钮组未显示');
+      isConsistent = false;
+    }
+    if (letterGroupVisible) {
+      console.error('文字评分方式但字母按钮组仍显示');
+      isConsistent = false;
+    }
+  }
+  
+  console.log('评分方式显示一致性:', isConsistent);
+  return isConsistent;
+}
+
+// 处理评分信息
+window.handleGradeInfo = function(gradeInfo) {
+    console.log('=== 处理评分信息开始 ===');
+    console.log('评分信息:', gradeInfo);
+    console.log('当前评分方式:', gradeMode);
+    console.log('当前评分:', selectedGrade);
+    
+    if (gradeInfo.has_grade && gradeInfo.grade) {
+        // 文件已有评分，设置按钮状态
+        console.log('文件已有评分:', gradeInfo.grade, '类型:', gradeInfo.grade_type);
+        
+        // 更新全局变量
+        selectedGrade = gradeInfo.grade;
+        gradeMode = gradeInfo.grade_type || 'letter';
+        
+        // 根据评分类型切换评分方式
+        if (gradeInfo.grade_type === 'letter') {
+            switchGradeMode('letter');
+        } else if (gradeInfo.grade_type === 'text') {
+            switchGradeMode('text');
+        }
+        
+        // 设置评分按钮状态
+        setGradeButtonState(gradeInfo.grade);
+        
+        console.log('评分按钮状态已更新，当前评分:', selectedGrade, '评分方式:', gradeMode);
+    } else {
+        // 文件没有评分，保持用户当前的评分方式选择
+        console.log('文件没有评分，保持当前评分方式:', gradeMode);
+        
+        // 保持当前的评分方式，不重置
+        // 如果当前没有选择评分方式，才使用默认值
+        if (!gradeMode) {
+            console.log('没有评分方式，使用默认字母评分');
+            gradeMode = 'letter';
+            selectedGrade = 'B';
+        } else {
+            console.log('保持当前评分方式:', gradeMode);
+            // 根据当前评分方式设置默认评分
+            if (gradeMode === 'letter') {
+                selectedGrade = selectedGrade || 'B';
+                console.log('字母评分方式，默认评分:', selectedGrade);
+            } else if (gradeMode === 'text') {
+                selectedGrade = selectedGrade || '良好';
+                console.log('文字评分方式，默认评分:', selectedGrade);
+            }
+        }
+        
+        // 应用当前的评分方式
+        switchGradeMode(gradeMode);
+        setGradeButtonState(selectedGrade);
+        
+        console.log('保持当前评分方式完成，当前评分:', selectedGrade, '评分方式:', gradeMode);
+    }
+    
+    // 验证显示一致性
+    validateGradeModeDisplay();
+    console.log('=== 处理评分信息结束 ===');
 }
 
 // 处理文件内容显示
-function handleFileContent(response) {
+window.handleFileContent = function(response) {
     if (response.status === 'success') {
         const fileContent = $('#file-content');
         fileContent.empty();
@@ -100,16 +369,56 @@ function handleFileContent(response) {
             default:
                 fileContent.html('<div class="alert alert-warning">不支持的文件类型</div>');
         }
+        
+        // 处理评分信息
+        console.log('=== 处理文件内容响应中的评分信息 ===');
+        console.log('评分信息:', response.grade_info);
+        console.log('当前评分方式:', gradeMode);
+        console.log('当前评分:', selectedGrade);
+        
+        if (response.grade_info) {
+            handleGradeInfo(response.grade_info);
+        } else {
+            console.log('响应中没有评分信息，保持当前评分方式');
+            // 如果没有评分信息，保持当前的评分方式选择
+            if (!gradeMode) {
+                console.log('没有评分方式，使用默认字母评分');
+                gradeMode = 'letter';
+                selectedGrade = 'B';
+            } else {
+                console.log('保持当前评分方式:', gradeMode);
+                // 根据当前评分方式设置默认评分
+                if (gradeMode === 'letter') {
+                    selectedGrade = selectedGrade || 'B';
+                    console.log('字母评分方式，默认评分:', selectedGrade);
+                } else if (gradeMode === 'text') {
+                    selectedGrade = selectedGrade || '良好';
+                    console.log('文字评分方式，默认评分:', selectedGrade);
+                }
+            }
+            
+            // 应用当前的评分方式
+            switchGradeMode(gradeMode);
+            setGradeButtonState(selectedGrade);
+            console.log('保持当前评分方式完成，当前评分:', selectedGrade, '评分方式:', gradeMode);
+        }
+        console.log('=== 处理文件内容响应中的评分信息结束 ===');
     } else {
         $('#file-content').html(`<div class="alert alert-danger">${response.message}</div>`);
     }
 }
 
 // 加载文件内容
-function loadFile(path) {
+window.loadFile = function(path) {
     console.log('Loading file:', path);
     showLoading();
     currentFilePath = path;
+    
+    // 禁用教师评价按钮，直到文件加载完成
+    disableTeacherCommentButton();
+    
+    // 禁用确定按钮，直到文件加载完成
+    $('#add-grade-to-file').prop('disabled', true);
     
     // 获取当前文件所在目录
     const dirPath = path.substring(0, path.lastIndexOf('/'));
@@ -203,6 +512,12 @@ function loadFile(path) {
             clearTimeout(timeout);
             console.log('File content response:', response);
             handleFileContent(response);
+            
+            // 启用教师评价按钮
+            enableTeacherCommentButton();
+            
+            // 启用确定按钮
+            $('#add-grade-to-file').prop('disabled', false);
         },
         error: function(xhr, status, error) {
             clearTimeout(timeout);
@@ -210,6 +525,12 @@ function loadFile(path) {
             console.error('XHR status:', xhr.status);
             console.error('XHR response:', xhr.responseText);
             showError('加载文件失败：' + (error || '未知错误'));
+            
+            // 禁用教师评价按钮
+            disableTeacherCommentButton();
+            
+            // 禁用确定按钮
+            $('#add-grade-to-file').prop('disabled', true);
         },
         complete: function() {
             clearTimeout(timeout);
@@ -219,7 +540,7 @@ function loadFile(path) {
 }
 
 // 保存评分
-function saveGrade(grade) {
+window.saveGrade = function(grade) {
     console.log('Saving grade:', grade);
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
@@ -235,14 +556,14 @@ function saveGrade(grade) {
 }
 
 // 获取所有文件节点
-function getAllFileNodes() {
+window.getAllFileNodes = function() {
     const tree = $('#directory-tree').jstree(true);
     const allNodes = tree.get_json('#', { flat: true });
     return allNodes.filter(node => node.type === 'file');
 }
 
 // 获取当前文件在文件列表中的索引
-function getCurrentFileIndex() {
+window.getCurrentFileIndex = function() {
     const fileNodes = getAllFileNodes();
     const currentFile = $('#directory-tree').jstree('get_selected', true)[0];
     if (!currentFile) return -1;
@@ -250,7 +571,7 @@ function getCurrentFileIndex() {
 }
 
 // 导航到上一个文件
-$('#prev-file').on('click', function() {
+window.navigateToPrevFile = function() {
     const fileNodes = getAllFileNodes();
     const currentIndex = getCurrentFileIndex();
     
@@ -258,10 +579,10 @@ $('#prev-file').on('click', function() {
         const prevNode = fileNodes[currentIndex - 1];
         $('#directory-tree').jstree('select_node', prevNode.id);
     }
-});
+}
 
 // 导航到下一个文件
-$('#next-file').on('click', function() {
+window.navigateToNextFile = function() {
     const fileNodes = getAllFileNodes();
     const currentIndex = getCurrentFileIndex();
     
@@ -269,10 +590,10 @@ $('#next-file').on('click', function() {
         const nextNode = fileNodes[currentIndex + 1];
         $('#directory-tree').jstree('select_node', nextNode.id);
     }
-});
+}
 
 // 更新导航按钮状态
-function updateNavigationButtons() {
+window.updateNavigationButtons = function() {
     const fileNodes = getAllFileNodes();
     const currentIndex = getCurrentFileIndex();
     
@@ -288,7 +609,7 @@ $('#directory-tree').on('select_node.jstree', function(e, data) {
 });
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
-function addGradeToFile(grade) {
+window.addGradeToFile = function(grade) {
     console.log('Adding grade to file:', grade);
     console.log('Current file path:', currentFilePath);
     
@@ -358,7 +679,7 @@ function addGradeToFile(grade) {
 }
 
 // 撤销评分
-function cancelGrade() {
+window.cancelGrade = function() {
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
         return;
@@ -407,7 +728,7 @@ function cancelGrade() {
 }
 
 // 初始化文件树
-function initTree() {
+window.initTree = function() {
     console.log('Initializing tree...');
     console.log('Initial tree data:', window.initialTreeData);
     
@@ -497,7 +818,20 @@ function initTree() {
 
 // 页面加载完成后初始化树
 $(document).ready(function() {
+    console.log('=== 页面加载开始 ===');
     console.log('Document ready, initializing tree...');
+    
+    // 基本检查
+    console.log('jQuery版本:', $.fn.jquery);
+    console.log('页面标题:', document.title);
+    
+    // 检查教师评价按钮的初始状态
+    console.log('Initial teacher comment button disabled state:', $('#teacher-comment-btn').prop('disabled'));
+    console.log('Teacher comment button element:', $('#teacher-comment-btn').length);
+    
+    // 确保教师评价按钮初始状态为禁用
+    disableTeacherCommentButton();
+    
     // 设置初始树数据
     if (window.initialTreeData) {
         console.log('Initial tree data:', window.initialTreeData);
@@ -506,34 +840,212 @@ $(document).ready(function() {
         console.error('No initial tree data available');
     }
     
-    // 设置默认评分按钮状态
-    setGradeButtonState('B');
+    // 设置默认评分按钮状态（仅在页面初始化时）
+    console.log('=== 页面初始化评分状态 ===');
+    console.log('初始化前字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('初始化前文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    
+    // 初始化默认状态（如果还没有设置的话）
+    if (!gradeMode) {
+        console.log('初始化默认评分方式: letter');
+        gradeMode = 'letter';
+        selectedGrade = 'B';
+    } else {
+        console.log('保持现有评分方式:', gradeMode, '评分:', selectedGrade);
+    }
+    
+    // 设置默认评分方式
+    switchGradeMode(gradeMode);
+    
+    console.log('初始化后字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('初始化后文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    
+    // 评分模式按钮事件绑定（防止HTML onclick未定义问题）
+    $(document).off('click', '.grade-mode-btn').on('click', '.grade-mode-btn', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var mode = $(this).data('mode');
+        if (typeof window.switchGradeMode === 'function') {
+            window.switchGradeMode(mode);
+        } else {
+            console.error('window.switchGradeMode 未定义');
+        }
+    });
+    
+    // 检查按钮是否存在
+    console.log('=== 评分方式按钮检查 ===');
+    console.log('评分方式按钮总数:', $('.grade-mode-btn').length);
+    $('.grade-mode-btn').each(function(index) {
+        console.log(`按钮 ${index}:`, $(this).text(), 'data-mode:', $(this).data('mode'));
+    });
+    
+    // 检查所有相关元素
+    console.log('=== DOM元素检查 ===');
+    console.log('字母评分按钮组元素:', $('#letter-grade-buttons')[0]);
+    console.log('文字评分按钮组元素:', $('#text-grade-buttons')[0]);
+    console.log('字母评分按钮组HTML:', $('#letter-grade-buttons').html());
+    console.log('文字评分按钮组HTML:', $('#text-grade-buttons').html());
+    console.log('字母评分按钮组CSS display:', $('#letter-grade-buttons').css('display'));
+    console.log('文字评分按钮组CSS display:', $('#text-grade-buttons').css('display'));
+    
+    // 检查评分方式切换功能是否正常
+    console.log('=== 评分方式切换功能检查 ===');
+    console.log('字母等级按钮:', $('.grade-mode-btn[data-mode="letter"]').length);
+    console.log('文字等级按钮:', $('.grade-mode-btn[data-mode="text"]').length);
+    console.log('字母评分按钮组:', $('#letter-grade-buttons').length);
+    console.log('文字评分按钮组:', $('#text-grade-buttons').length);
+    
+    // 检查按钮组的显示状态
+    console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
     
     // 绑定评分按钮点击事件
-    $('.grade-button').click(function() {
+    $(document).on('click', '.grade-button', function() {
         const grade = $(this).data('grade');
         console.log('Grade button clicked:', grade);
         saveGrade(grade);
     });
     
     // 绑定确定按钮点击事件
-    $('#add-grade-to-file').click(function() {
+    $(document).on('click', '#add-grade-to-file', function() {
         console.log('Confirm button clicked, using selected grade:', selectedGrade);
         // 使用当前选中的评分
         addGradeToFile(selectedGrade);
     });
     
     // 绑定撤销按钮点击事件
-    $('#cancel-grade').click(function() {
+    $(document).on('click', '#cancel-grade', function() {
         cancelGrade();
     });
     
     // 绑定导航按钮事件
-    $('#prev-file').click(function() {
+    $(document).on('click', '#prev-file', function() {
         navigateToPrevFile();
     });
     
-    $('#next-file').click(function() {
+    $(document).on('click', '#next-file', function() {
         navigateToNextFile();
     });
+    
+    // 绑定教师评价按钮点击事件
+    $(document).on('click', '#teacher-comment-btn', function() {
+        console.log('教师评价按钮被点击，当前文件路径:', currentFilePath);
+        if (currentFilePath) {
+            loadTeacherComment(currentFilePath);
+            $('#teacherCommentModal').modal('show');
+        } else {
+            alert('请先选择文件');
+        }
+    });
+    
+    // 绑定保存教师评价按钮点击事件
+    $(document).on('click', '#saveTeacherComment', function() {
+        console.log('保存教师评价按钮被点击');
+        saveTeacherComment();
+    });
+    
+    // 模态框显示时清空输入框
+    $('#teacherCommentModal').on('show.bs.modal', function() {
+        $('#teacherCommentText').val('');
+    });
 });
+
+// 教师评价相关函数
+window.loadTeacherComment = function(filePath) {
+    console.log('加载教师评价，文件路径:', filePath);
+    if (!filePath) {
+        $('#currentTeacherComments').text('暂无评价');
+        return;
+    }
+    
+    $.ajax({
+        url: '/grading/get_teacher_comment/',
+        method: 'GET',
+        data: {
+            file_path: filePath
+        },
+        success: function(response) {
+            console.log('=== 获取教师评价响应 ===');
+            console.log('响应内容:', response);
+            console.log('响应类型:', typeof response);
+            console.log('响应success字段:', response.success);
+            console.log('响应comment字段:', response.comment);
+            
+            if (response.success) {
+                console.log('获取评价成功，准备更新显示');
+                const commentText = response.comment || '暂无评价';
+                console.log('评价文本:', commentText);
+                $('#currentTeacherComments').html(commentText.replace(/\n/g, '<br>'));
+                console.log('评价显示已更新');
+            } else {
+                console.error('获取评价失败:', response.message);
+                $('#currentTeacherComments').text('获取评价失败: ' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('获取教师评价失败:', error);
+            console.error('XHR状态:', xhr.status);
+            console.error('XHR响应:', xhr.responseText);
+            $('#currentTeacherComments').text('获取评价失败');
+        }
+    });
+}
+
+window.saveTeacherComment = function() {
+    const comment = $('#teacherCommentText').val().trim();
+    console.log('保存教师评价，内容:', comment);
+    
+    if (!comment) {
+        alert('请输入评价内容');
+        return;
+    }
+    
+    if (!currentFilePath) {
+        alert('请先选择文件');
+        return;
+    }
+    
+    $.ajax({
+        url: '/grading/save_teacher_comment/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            file_path: currentFilePath,
+            comment: comment
+        },
+        success: function(response) {
+            console.log('=== 保存教师评价响应 ===');
+            console.log('响应内容:', response);
+            console.log('响应类型:', typeof response);
+            console.log('响应success字段:', response.success);
+            
+            if (response.success) {
+                console.log('保存成功，准备刷新评价显示');
+                $('#teacherCommentText').val('');
+                
+                // 延迟一点时间再加载评价，确保文件写入完成
+                setTimeout(function() {
+                    console.log('开始重新加载教师评价');
+                    loadTeacherComment(currentFilePath);
+                    
+                    // 重新加载文件内容，确保评分方式显示正确
+                    console.log('重新加载文件内容以更新评分方式显示');
+                    loadFile(currentFilePath);
+                }, 500);
+                
+                $('#teacherCommentModal').modal('hide');
+            } else {
+                console.error('保存失败:', response.message);
+                alert('保存失败: ' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('保存教师评价失败:', error);
+            console.error('XHR状态:', xhr.status);
+            console.error('XHR响应:', xhr.responseText);
+            alert('保存失败，请重试');
+        }
+    });
+}

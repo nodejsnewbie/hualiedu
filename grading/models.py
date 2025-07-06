@@ -7,7 +7,11 @@ import os
 import time
 import random
 import string
+import logging
 from urllib.parse import urlparse, urlunparse
+
+# 获取日志记录器
+logger = logging.getLogger(__name__)
 
 class Student(models.Model):
     student_id = models.CharField(max_length=20, unique=True)
@@ -50,6 +54,7 @@ class Submission(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     comments = models.TextField(blank=True)
     repository_url = models.URLField()
+    teacher_comments = models.TextField(blank=True, null=True, verbose_name="教师评价")
 
     def __str__(self):
         return f"{self.student} - {self.assignment}"
@@ -146,7 +151,7 @@ class Repository(models.Model):
             try:
                 os.makedirs(base_dir, exist_ok=True)
             except Exception as e:
-                print(f"创建基础目录失败: {str(e)}")
+                logger.error(f"创建基础目录失败: {str(e)}")
                 return None
         
         # 构建完整的仓库路径

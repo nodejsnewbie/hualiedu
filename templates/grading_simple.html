@@ -8,14 +8,8 @@
 <link rel="stylesheet" href="{% static 'grading/vendor/bootstrap/bootstrap.min.css' %}">
 <!-- Bootstrap Icons -->
 <link rel="stylesheet" href="{% static 'grading/vendor/bootstrap-icons/font/bootstrap-icons.css' %}">
-<!-- jstree CSS -->
-<link rel="stylesheet" href="{% static 'grading/vendor/jstree/themes/default/style.min.css' %}">
 <!-- Custom CSS -->
 <link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
-<!-- CodeMirror -->
-<link rel="stylesheet" href="{% static 'grading/vendor/codemirror/codemirror.min.css' %}">
-<!-- Viewer.js -->
-<link rel="stylesheet" href="{% static 'grading/vendor/viewerjs/viewer.min.css' %}">
 {% endblock %}
 
 {% block content %}
@@ -28,7 +22,9 @@
                     <h5 class="card-title mb-0">文件目录</h5>
                 </div>
                 <div class="card-body">
-                    <div id="directory-tree"></div>
+                    <div id="directory-tree">
+                        <p class="text-muted">文件树加载中...</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -160,6 +156,8 @@
 <script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
 <!-- Bootstrap Bundle with Popper -->
 <script src="{% static 'grading/vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+<!-- 自定义脚本 -->
+<script src="{% static 'grading/js/grading.js' %}"></script>
 
 <!-- 初始化数据 -->
 <script>
@@ -176,86 +174,4 @@
         }
     });
 </script>
-
-<!-- 自定义脚本 - 在jstree之前加载，确保评分功能优先 -->
-<script src="{% static 'grading/js/grading.js' %}"></script>
-
-<!-- jstree JavaScript -->
-<script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
-
-<!-- CodeMirror -->
-<script src="{% static 'grading/vendor/codemirror/codemirror.min.js' %}"></script>
-<!-- Viewer.js -->
-<script src="{% static 'grading/vendor/viewerjs/viewer.min.js' %}"></script>
-<!-- PDF.js -->
-<script src="{% static 'grading/vendor/pdfjs/pdf.min.js' %}"></script>
-
-<script>
-    // 设置 PDF.js worker 路径
-    pdfjsLib.GlobalWorkerOptions.workerSrc = "{% static 'grading/vendor/pdfjs/pdf.worker.min.js' %}";
-    
-    // 确保评分功能在页面完全加载后重新初始化
-    $(document).ready(function() {
-        console.log('=== 评分系统页面完全加载完成 ===');
-        
-        // 延迟重新初始化评分功能，确保其他库加载完成
-        setTimeout(function() {
-            console.log('重新初始化评分功能...');
-            
-            // 重新绑定评分方式切换按钮事件
-            $(document).off('click', '.grade-mode-btn').on('click', '.grade-mode-btn', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const mode = $(this).data('mode');
-                console.log('=== 评分方式按钮被点击 ===');
-                console.log('按钮模式:', mode);
-                console.log('按钮元素:', this);
-                console.log('按钮文本:', $(this).text());
-                if (typeof switchGradeMode === 'function') {
-                    switchGradeMode(mode);
-                } else {
-                    console.error('switchGradeMode函数未定义');
-                }
-            });
-            
-            // 重新绑定评分按钮点击事件
-            $(document).off('click', '.grade-button').on('click', '.grade-button', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const grade = $(this).data('grade');
-                console.log('Grade button clicked:', grade);
-                if (typeof saveGrade === 'function') {
-                    saveGrade(grade);
-                } else {
-                    console.error('saveGrade函数未定义');
-                }
-            });
-            
-            // 重新绑定确定按钮点击事件
-            $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Confirm button clicked, using selected grade:', selectedGrade);
-                if (typeof addGradeToFile === 'function') {
-                    addGradeToFile(selectedGrade);
-                } else {
-                    console.error('addGradeToFile函数未定义');
-                }
-            });
-            
-            // 重新绑定撤销按钮点击事件
-            $(document).off('click', '#cancel-grade').on('click', '#cancel-grade', function(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                if (typeof cancelGrade === 'function') {
-                    cancelGrade();
-                } else {
-                    console.error('cancelGrade函数未定义');
-                }
-            });
-            
-            console.log('评分功能重新初始化完成');
-        }, 1000);
-    });
-</script>
-{% endblock %}
+{% endblock %} 

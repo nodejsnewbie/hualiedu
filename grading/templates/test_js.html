@@ -1,0 +1,26 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JavaScript Test</title>
+</head>
+<body>
+    <h1>JavaScript Test Page</h1>
+    <div id="test-output"></div>
+    
+    <!-- 使用本地jQuery -->
+    <script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
+    
+    <script>
+        console.log('=== 测试页面JavaScript开始 ===');
+        document.getElementById('test-output').innerHTML = '<p>JavaScript is working!</p>';
+        console.log('=== 测试页面JavaScript结束 ===');
+        
+        // 测试jQuery是否加载
+        console.log('jQuery版本:', $.fn.jquery);
+        console.log('jQuery对象:', typeof $);
+    </script>
+    
+    <script src="{% static 'grading/js/grading.js' %}"></script>
+</body>
+</html> 
