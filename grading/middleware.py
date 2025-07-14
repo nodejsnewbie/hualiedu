@@ -1,5 +1,6 @@
 from django.utils.deprecation import MiddlewareMixin
 
+
 class ContentSecurityPolicyMiddleware(MiddlewareMixin):
     def process_response(self, request, response):
         # 设置 CSP 头
@@ -17,5 +18,5 @@ class ContentSecurityPolicyMiddleware(MiddlewareMixin):
             "frame-ancestors 'none'; "
             "upgrade-insecure-requests;"
         )
-        response['Content-Security-Policy'] = csp
-        return response 
+        response["Content-Security-Policy"] = csp
+        return response

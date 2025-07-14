@@ -2,6 +2,6 @@ from django.apps import AppConfig
 
 
 class GradingConfig(AppConfig):
-    default_auto_field = 'django.db.models.BigAutoField'
-    name = 'grading'
-    verbose_name = '作业评分系统'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "grading"
+    verbose_name = "作业评分系统"

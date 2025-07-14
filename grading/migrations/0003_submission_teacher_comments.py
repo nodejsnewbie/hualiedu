@@ -6,13 +6,13 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('grading', '0002_remove_repository_branches_repository__branches_and_more'),
+        ("grading", "0002_remove_repository_branches_repository__branches_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='submission',
-            name='teacher_comments',
-            field=models.TextField(blank=True, null=True, verbose_name='教师评价'),
+            model_name="submission",
+            name="teacher_comments",
+            field=models.TextField(blank=True, null=True, verbose_name="教师评价"),
         ),
     ]

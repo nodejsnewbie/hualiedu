@@ -8,83 +8,190 @@ class Migration(migrations.Migration):
 
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Assignment',
+            name="Assignment",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=200)),
-                ('description', models.TextField()),
-                ('due_date', models.DateTimeField()),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=200)),
+                ("description", models.TextField()),
+                ("due_date", models.DateTimeField()),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
             options={
-                'ordering': ['-due_date'],
+                "ordering": ["-due_date"],
             },
         ),
         migrations.CreateModel(
-            name='GlobalConfig',
+            name="GlobalConfig",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('https_username', models.CharField(blank=True, help_text='HTTPS 认证用户名', max_length=100, null=True)),
-                ('https_password', models.CharField(blank=True, help_text='HTTPS 认证密码', max_length=100, null=True)),
-                ('ssh_key', models.TextField(blank=True, help_text='SSH 私钥内容', null=True)),
-                ('ssh_key_file', models.FileField(blank=True, help_text='SSH 私钥文件', null=True, upload_to='ssh_keys/')),
-                ('repo_base_dir', models.CharField(default='~/repo', help_text='仓库克隆的基础目录，默认为 ~/repo', max_length=255)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                (
+                    "https_username",
+                    models.CharField(
+                        blank=True,
+                        help_text="HTTPS 认证用户名",
+                        max_length=100,
+                        null=True,
+                    ),
+                ),
+                (
+                    "https_password",
+                    models.CharField(
+                        blank=True,
+                        help_text="HTTPS 认证密码",
+                        max_length=100,
+                        null=True,
+                    ),
+                ),
+                (
+                    "ssh_key",
+                    models.TextField(blank=True, help_text="SSH 私钥内容", null=True),
+                ),
+                (
+                    "ssh_key_file",
+                    models.FileField(
+                        blank=True,
+                        help_text="SSH 私钥文件",
+                        null=True,
+                        upload_to="ssh_keys/",
+                    ),
+                ),
+                (
+                    "repo_base_dir",
+                    models.CharField(
+                        default="~/repo",
+                        help_text="仓库克隆的基础目录，默认为 ~/repo",
+                        max_length=255,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
             options={
-                'verbose_name': '全局配置',
-                'verbose_name_plural': '全局配置',
+                "verbose_name": "全局配置",
+                "verbose_name_plural": "全局配置",
             },
         ),
         migrations.CreateModel(
-            name='Repository',
+            name="Repository",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('name', models.CharField(max_length=255, unique=True)),
-                ('url', models.CharField(max_length=255, unique=True)),
-                ('branch', models.CharField(default='main', max_length=255)),
-                ('branches', models.JSONField(default=list, help_text='仓库的所有分支列表')),
-                ('last_sync_time', models.DateTimeField(blank=True, null=True)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("name", models.CharField(max_length=255, unique=True)),
+                ("url", models.CharField(max_length=255, unique=True)),
+                ("branch", models.CharField(default="main", max_length=255)),
+                (
+                    "branches",
+                    models.JSONField(default=list, help_text="仓库的所有分支列表"),
+                ),
+                ("last_sync_time", models.DateTimeField(blank=True, null=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
         ),
         migrations.CreateModel(
-            name='Student',
+            name="Student",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('student_id', models.CharField(max_length=20, unique=True)),
-                ('name', models.CharField(max_length=100)),
-                ('class_name', models.CharField(max_length=50)),
-                ('created_at', models.DateTimeField(auto_now_add=True)),
-                ('updated_at', models.DateTimeField(auto_now=True)),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("student_id", models.CharField(max_length=20, unique=True)),
+                ("name", models.CharField(max_length=100)),
+                ("class_name", models.CharField(max_length=50)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("updated_at", models.DateTimeField(auto_now=True)),
             ],
             options={
-                'ordering': ['student_id'],
+                "ordering": ["student_id"],
             },
         ),
         migrations.CreateModel(
-            name='Submission',
+            name="Submission",
             fields=[
-                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('submitted_at', models.DateTimeField(auto_now_add=True)),
-                ('grade', models.DecimalField(blank=True, decimal_places=2, max_digits=5, null=True)),
-                ('status', models.CharField(choices=[('pending', '待评分'), ('graded', '已评分'), ('late', '逾期提交'), ('failed', '未通过')], default='pending', max_length=20)),
-                ('comments', models.TextField(blank=True)),
-                ('repository_url', models.URLField()),
-                ('assignment', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='submissions', to='grading.assignment')),
-                ('student', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='submissions', to='grading.student')),
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="ID",
+                    ),
+                ),
+                ("submitted_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "grade",
+                    models.DecimalField(
+                        blank=True, decimal_places=2, max_digits=5, null=True
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("pending", "待评分"),
+                            ("graded", "已评分"),
+                            ("late", "逾期提交"),
+                            ("failed", "未通过"),
+                        ],
+                        default="pending",
+                        max_length=20,
+                    ),
+                ),
+                ("comments", models.TextField(blank=True)),
+                ("repository_url", models.URLField()),
+                (
+                    "assignment",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="submissions",
+                        to="grading.assignment",
+                    ),
+                ),
+                (
+                    "student",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="submissions",
+                        to="grading.student",
+                    ),
+                ),
             ],
             options={
-                'ordering': ['-submitted_at'],
-                'unique_together': {('student', 'assignment')},
+                "ordering": ["-submitted_at"],
+                "unique_together": {("student", "assignment")},
             },
         ),
     ]

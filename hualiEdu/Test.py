@@ -1,4 +1,3 @@
-
 import docx
 from volcengine import maas
 
@@ -18,7 +17,7 @@ def read_docx(file_path):
     full_text = []
     for para in doc.paragraphs:
         full_text.append(para.text)
-    return '\n'.join(full_text)
+    return "\n".join(full_text)
 
 
 def get_score_from_maas(question, model_name="deepseek"):
@@ -29,23 +28,18 @@ def get_score_from_maas(question, model_name="deepseek"):
     :return: 作业分数
     """
     request = {
-        "model": {
-            "name": model_name
-        },
-        "parameters": {
-            "temperature": 0.7
-        },
+        "model": {"name": model_name},
+        "parameters": {"temperature": 0.7},
         "messages": [
             {
                 "role": "user",
-                "content": f"请根据作业内容给出一个 0 - 100 的分数：{question}"
+                "content": f"请根据作业内容给出一个 0 - 100 的分数：{question}",
             }
-        ]
+        ],
     }
     try:
         response = maas_client.chat(request)
-        score_text = response.get('choices', [{}])[0].get(
-            'message', {}).get('content')
+        score_text = response.get("choices", [{}])[0].get("message", {}).get("content")
         # 简单处理，假设返回的内容是一个有效的分数
         try:
             score = int(score_text.strip())
