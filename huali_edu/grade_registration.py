@@ -85,7 +85,7 @@ class GradeRegistration:
             dict: 学生行号映射，key为学生姓名，value为行号
         """
         student_rows = {}
-        with open(excel_path, 'rb') as f:
+        with open(str(excel_path), 'rb') as f:
             wb = openpyxl.load_workbook(f)
             ws = wb.active
             
@@ -97,88 +97,137 @@ class GradeRegistration:
                     
         return student_rows
     
-    def write_grade_to_excel(self, excel_path: str, student_name: str, homework_number: int, grade: str) -> None:
+    def write_grade_to_excel(self, excel_path: str, student_name: str, homework_dir_name: str, grade: str) -> None:
         """
-        将学生成绩写入Excel文件
+        将学生成绩写入Excel文件（根据作业目录名定位列号）
 
         Args:
             excel_path: Excel文件路径
             student_name: 学生姓名
-            homework_number: 作业次数
+            homework_dir_name: 作业目录名（如“第1次作业”）
             grade: 成绩（A/B/C/D/E）
-
-        Raises:
-            FileNotFoundError: 如果找不到对应的Excel文件
-            ValueError: 如果作业列索引超出当前列数
         """
         logger.info("="*50)
         logger.info(f"开始写入成绩到Excel文件")
         logger.info(f"Excel文件路径: {excel_path}")
         logger.info(f"学生姓名: {student_name}")
-        logger.info(f"作业次数: {homework_number}")
+        logger.info(f"作业目录名: {homework_dir_name}")
         logger.info(f"成绩: {grade}")
         logger.info("-"*30)
-        
         try:
-            # 检查文件是否存在
             if not os.path.exists(excel_path):
                 logger.error(f"Excel文件不存在: {excel_path}")
                 raise FileNotFoundError(f"找不到Excel文件: {excel_path}")
-            
-            # 检查文件权限
             if not os.access(excel_path, os.W_OK):
                 logger.error(f"无权限写入Excel文件: {excel_path}")
                 raise PermissionError(f"无权限写入Excel文件: {excel_path}")
-            
-            # 读取Excel文件
             with open(excel_path, 'rb') as f:
                 wb = openpyxl.load_workbook(f)
                 ws = wb.active
-                
                 logger.info(f"成功打开Excel文件")
                 logger.info(f"当前工作表: {ws.title}")
                 logger.info(f"工作表维度: 行数={ws.max_row}, 列数={ws.max_column}")
-
-                # 缓存机制同前
+                # 加载学生名单
                 if excel_path not in self._student_cache:
                     logger.info("加载学生名单到缓存")
-                    self._student_cache[excel_path] = self._load_student_list(excel_path)
+                    self._student_cache[excel_path] = self._load_student_list(Path(excel_path))
                 student_rows = self._student_cache[excel_path]
-                
                 if student_name not in student_rows:
                     logger.warning(f"学生 {student_name} 在 {excel_path} 中未找到")
                     logger.info("当前学生名单:")
                     for name in student_rows.keys():
                         logger.info(f"- {name}")
                     return
-
                 student_row = student_rows[student_name]
                 logger.info(f"找到学生 {student_name} 在第 {student_row} 行")
-                
-                # 第1列是序号，第2列是学号，第3列是姓名，第4列开始是作业成绩
-                homework_col_idx = 3 + homework_number
-                logger.info(f"作业列索引: {homework_col_idx} (第{homework_number}次作业)")
-                
-                if homework_col_idx > ws.max_column:
-                    logger.error(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
-                    raise ValueError(f"作业列索引 {homework_col_idx} 超出当前列数 {ws.max_column}")
-
-                # 获取当前单元格的值
-                current_value = ws.cell(row=student_row, column=homework_col_idx).value
-                logger.info(f"当前单元格值: {current_value}")
-                
-                # 写入新值
-                ws.cell(row=student_row, column=homework_col_idx, value=grade)
-                logger.info(f"已写入新值: {grade}")
-                
-                # 保存文件
+                # 解析作业序号
+                match = re.search(r'第([一二三四五六七八九十\d]+)次作业|作业([一二三四五六七八九十\d]+)', homework_dir_name)
+                if not match:
+                    logger.error(f"无法从目录名中提取作业序号: {homework_dir_name}")
+                    raise ValueError(f"无法从目录名中提取作业序号: {homework_dir_name}")
+                number = match.group(1) or match.group(2)
+                if re.match(r'[一二三四五六七八九十]+', number):
+                    chinese_numbers = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                                      '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+                    homework_number = chinese_numbers.get(number, 0)
+                else:
+                    homework_number = int(number)
+                col_idx = 3 + homework_number  # 第4列起
+                logger.info(f"成绩将写入第 {col_idx} 列 (作业序号: {homework_number})")
+                ws.cell(row=student_row, column=col_idx, value=grade)
                 try:
                     wb.save(excel_path)
                     logger.info(f"成功保存Excel文件: {excel_path}")
                 except Exception as e:
                     logger.error(f"保存Excel文件失败: {str(e)}")
                     raise
-                
+        except Exception as e:
+            logger.error(f"写入成绩到Excel文件失败: {str(e)}")
+            raise
+        finally:
+            logger.info("="*50)
+    
+    def write_grade_to_excel_by_dirname(self, excel_path: str, student_name: str, homework_dir_name: str, grade: str) -> None:
+        """
+        新增：根据作业目录名直接定位成绩列（第4列起），不考虑列名。
+        Args:
+            excel_path: Excel文件路径
+            student_name: 学生姓名
+            homework_dir_name: 作业目录名（如“第1次作业”）
+            grade: 成绩（A/B/C/D/E）
+        """
+        logger.info("="*50)
+        logger.info(f"[ByDirName] 开始写入成绩到Excel文件")
+        logger.info(f"Excel文件路径: {excel_path}")
+        logger.info(f"学生姓名: {student_name}")
+        logger.info(f"作业目录名: {homework_dir_name}")
+        logger.info(f"成绩: {grade}")
+        logger.info("-"*30)
+        try:
+            if not os.path.exists(excel_path):
+                logger.error(f"Excel文件不存在: {excel_path}")
+                raise FileNotFoundError(f"找不到Excel文件: {excel_path}")
+            if not os.access(excel_path, os.W_OK):
+                logger.error(f"无权限写入Excel文件: {excel_path}")
+                raise PermissionError(f"无权限写入Excel文件: {excel_path}")
+            with open(excel_path, 'rb') as f:
+                wb = openpyxl.load_workbook(f)
+                ws = wb.active
+                logger.info(f"成功打开Excel文件")
+                logger.info(f"当前工作表: {ws.title}")
+                logger.info(f"工作表维度: 行数={ws.max_row}, 列数={ws.max_column}")
+                if excel_path not in self._student_cache:
+                    logger.info("加载学生名单到缓存")
+                    self._student_cache[excel_path] = self._load_student_list(Path(excel_path))
+                student_rows = self._student_cache[excel_path]
+                if student_name not in student_rows:
+                    logger.warning(f"学生 {student_name} 在 {excel_path} 中未找到")
+                    logger.info("当前学生名单:")
+                    for name in student_rows.keys():
+                        logger.info(f"- {name}")
+                    return
+                student_row = student_rows[student_name]
+                logger.info(f"找到学生 {student_name} 在第 {student_row} 行")
+                match = re.search(r'第([一二三四五六七八九十\d]+)次作业|作业([一二三四五六七八九十\d]+)', homework_dir_name)
+                if not match:
+                    logger.error(f"无法从目录名中提取作业序号: {homework_dir_name}")
+                    raise ValueError(f"无法从目录名中提取作业序号: {homework_dir_name}")
+                number = match.group(1) or match.group(2)
+                if re.match(r'[一二三四五六七八九十]+', number):
+                    chinese_numbers = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+                                      '六': 6, '七': 7, '八': 8, '九': 9, '十': 10}
+                    homework_number = chinese_numbers.get(number, 0)
+                else:
+                    homework_number = int(number)
+                col_idx = 3 + homework_number  # 第4列起
+                logger.info(f"成绩将写入第 {col_idx} 列 (作业序号: {homework_number})")
+                ws.cell(row=student_row, column=col_idx, value=grade)
+                try:
+                    wb.save(excel_path)
+                    logger.info(f"成功保存Excel文件: {excel_path}")
+                except Exception as e:
+                    logger.error(f"保存Excel文件失败: {str(e)}")
+                    raise
         except Exception as e:
             logger.error(f"写入成绩到Excel文件失败: {str(e)}")
             raise
@@ -245,7 +294,7 @@ class GradeRegistration:
             ValueError: If an invalid grade is found
         """
         try:
-            doc = Document(path)
+            doc = Document(str(path))
             found_grade_pattern = False
             
             for paragraph in doc.paragraphs:
@@ -311,9 +360,9 @@ class GradeRegistration:
             logger.info(f"根据成绩登记表判断: {'多班级' if is_multi_class else '单班级'}")
 
             if is_multi_class:
-                self._process_multi_class(repo_path)
+                self._process_multi_class(str(repo_path))
             else:
-                self._process_single_class(repo_path, excel_file, year, classes)
+                self._process_single_class(str(repo_path), str(excel_file), year, classes)
             
         logger.info("="*50)
 
@@ -406,59 +455,40 @@ class GradeRegistration:
             
             # 处理每个班级目录下的作业
             for class_dir in class_dirs:
-                self._process_single_class(class_dir, excel_file, year, None)
+                self._process_single_class(class_dir, excel_file, year, "")
                 # logger.info(f"处理班级目录: {class_dir}")
                 # self._process_docx_files_batch(class_dir, excel_file)
 
     def _process_docx_files_batch(self, dir_path: str, excel_file: str) -> None:
         """处理指定目录下的所有docx文件"""
-        # 查找所有docx文件
         docx_files = glob.glob(os.path.join(dir_path, "*.docx"))
         if not docx_files:
             logger.warning(f"在 {dir_path} 中未找到docx文件")
             return
-        
         logger.info(f"在 {dir_path} 中找到 {len(docx_files)} 个docx文件")
-        
-        # 处理每个docx文件
+        homework_dir_name = os.path.basename(dir_path)
         for docx_file in docx_files:
             try:
-                # 验证文件格式
                 if not self._is_valid_docx(docx_file):
                     logger.warning(f"文件格式无效: {docx_file}")
                     continue
-                
                 logger.info(f"处理文件: {docx_file}")
                 logger.info("=" * 50)
-                
-                # 提取作业次数
-                homework_number = self.get_homework_number_from_path(docx_file)
-                if not homework_number:
-                    logger.warning(f"无法从路径中提取作业次数: {docx_file}")
-                    continue
-                
-                # 提取学生姓名
                 try:
                     student_name = self._extract_student_name(docx_file)
                 except ValueError as e:
                     logger.warning(str(e))
                     continue
-                
-                # 提取成绩
                 try:
-                    grade = self._extract_grade_from_docx(docx_file)
+                    grade = self._extract_grade_from_docx(Path(docx_file))
                 except Exception as e:
                     logger.warning(f"提取成绩失败: {str(e)}")
                     continue
-                
                 logger.info("提取信息:")
                 logger.info(f"- 学生: {student_name}")
-                logger.info(f"- 作业: {homework_number}")
+                logger.info(f"- 作业目录: {homework_dir_name}")
                 logger.info(f"- 成绩: {grade}")
-                
-                # 写入成绩
-                self.write_grade_to_excel(excel_file, student_name, homework_number, grade)
-                
+                self.write_grade_to_excel(excel_file, student_name, homework_dir_name, grade)
             except Exception as e:
                 logger.error(f"处理文件 {docx_file} 时发生错误: {str(e)}")
                 continue

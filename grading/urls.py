@@ -23,4 +23,7 @@ urlpatterns = [
     path('get_dir_file_count/', views.get_dir_file_count, name='get_dir_file_count'),
     path('save_teacher_comment/', views.save_teacher_comment, name='save_teacher_comment'),
     path('get_teacher_comment/', views.get_teacher_comment, name='get_teacher_comment'),
+    # 批量登分相关路由
+    path('batch-grade/', views.batch_grade_page, name='batch_grade_page'),
+    path('batch-grade/api/', views.batch_grade_registration, name='batch_grade_registration'),
 ]

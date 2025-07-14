@@ -26,6 +26,7 @@ from django.contrib.auth.decorators import login_required
 from django.urls import reverse
 import pandas as pd
 import io
+import glob
 
 logger = logging.getLogger(__name__)
 
@@ -1291,6 +1292,35 @@ def add_grade_to_file(request):
                 # 保存文档
                 doc.save(full_path)
                 logger.info(f'成功添加评分到 Word 文档: {full_path}')
+                # 新增：登记成绩到平时成绩登记表
+                try:
+                    from huali_edu.grade_registration import GradeRegistration
+                    grader = GradeRegistration()
+                    rel_path = os.path.relpath(full_path, base_dir)
+                    path_parts = rel_path.split(os.sep)
+                    if len(path_parts) >= 3:
+                        repo_dir = path_parts[0]
+                        homework_dir = path_parts[1]
+                        file_name = path_parts[2]
+                        student_name = os.path.splitext(file_name)[0]
+                        repo_abs_path = os.path.join(base_dir, repo_dir)
+                        from pathlib import Path
+                        excel_files = list(Path(repo_abs_path).glob('平时成绩登记表-*.xlsx'))
+                        if excel_files:
+                            excel_path = str(excel_files[0])
+                            grader.write_grade_to_excel(
+                                excel_path=excel_path,
+                                student_name=student_name,
+                                homework_dir_name=homework_dir,
+                                grade=grade
+                            )
+                            logger.info(f'已登记成绩到登记表: {excel_path}, 学生: {student_name}, 作业: {homework_dir}, 成绩: {grade}')
+                        else:
+                            logger.warning(f'未找到登记表: {repo_abs_path}/平时成绩登记表-*.xlsx')
+                    else:
+                        logger.warning(f'路径结构无法推断登记表信息: {rel_path}')
+                except Exception as e:
+                    logger.error(f'登记成绩到登记表失败: {str(e)}')
                 return JsonResponse({
                     'status': 'success',
                     'message': '评分已添加',
@@ -1325,6 +1355,35 @@ def add_grade_to_file(request):
                     f.write(f'\n老师评分：{grade}\n')
                 
                 logger.info(f'成功添加评分到文件: {full_path}')
+                # 新增：登记成绩到平时成绩登记表
+                try:
+                    from huali_edu.grade_registration import GradeRegistration
+                    grader = GradeRegistration()
+                    rel_path = os.path.relpath(full_path, base_dir)
+                    path_parts = rel_path.split(os.sep)
+                    if len(path_parts) >= 3:
+                        repo_dir = path_parts[0]
+                        homework_dir = path_parts[1]
+                        file_name = path_parts[2]
+                        student_name = os.path.splitext(file_name)[0]
+                        repo_abs_path = os.path.join(base_dir, repo_dir)
+                        from pathlib import Path
+                        excel_files = list(Path(repo_abs_path).glob('平时成绩登记表-*.xlsx'))
+                        if excel_files:
+                            excel_path = str(excel_files[0])
+                            grader.write_grade_to_excel(
+                                excel_path=excel_path,
+                                student_name=student_name,
+                                homework_dir_name=homework_dir,
+                                grade=grade
+                            )
+                            logger.info(f'已登记成绩到登记表: {excel_path}, 学生: {student_name}, 作业: {homework_dir}, 成绩: {grade}')
+                        else:
+                            logger.warning(f'未找到登记表: {repo_abs_path}/平时成绩登记表-*.xlsx')
+                    else:
+                        logger.warning(f'路径结构无法推断登记表信息: {rel_path}')
+                except Exception as e:
+                    logger.error(f'登记成绩到登记表失败: {str(e)}')
                 return JsonResponse({
                     'status': 'success',
                     'message': '评分已添加到文件末尾',
@@ -1873,3 +1932,170 @@ def get_teacher_comment(request):
 def test_grading_no_auth(request):
     """无需登录权限的评分功能测试页面"""
     return render(request, 'test_grading_no_auth.html')
+
+@login_required
+@require_http_methods(['GET', 'POST'])
+def batch_grade_registration(request):
+    """批量登分功能"""
+    try:
+        logger.info('开始处理批量登分请求')
+        
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error('用户未认证')
+            return JsonResponse({
+                'status': 'error',
+                'message': '请先登录'
+            }, status=403)
+        
+        if not request.user.is_staff:
+            logger.error('用户无权限')
+            return JsonResponse({
+                'status': 'error',
+                'message': '无权限访问'
+            }, status=403)
+        
+        if request.method == 'GET':
+            # 获取仓库列表
+            return _get_repository_list(request)
+        elif request.method == 'POST':
+            # 执行批量登分
+            return _execute_batch_grade_registration(request)
+            
+    except Exception as e:
+        logger.error(f'批量登分处理失败: {str(e)}')
+        return JsonResponse({
+            'status': 'error',
+            'message': f'批量登分处理失败: {str(e)}'
+        }, status=500)
+
+
+def _get_repository_list(request):
+    """获取仓库列表"""
+    try:
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            logger.error('未配置仓库基础目录')
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 展开路径中的用户目录符号（~）
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        
+        if not os.path.exists(base_dir):
+            logger.error(f'仓库基础目录不存在: {base_dir}')
+            return JsonResponse({
+                'status': 'error',
+                'message': f'仓库基础目录不存在: {base_dir}'
+            })
+        
+        # 获取基础目录下的所有子目录（仓库）
+        repositories = []
+        for item in os.listdir(base_dir):
+            item_path = os.path.join(base_dir, item)
+            if os.path.isdir(item_path):
+                # 检查是否包含平时成绩登记表
+                excel_files = glob.glob(os.path.join(item_path, "平时成绩登记表-*.xlsx"))
+                if excel_files:
+                    repositories.append({
+                        'name': item,
+                        'path': item,
+                        'excel_count': len(excel_files),
+                        'excel_files': [os.path.basename(f) for f in excel_files]
+                    })
+        
+        logger.info(f'找到 {len(repositories)} 个包含成绩登记表的仓库')
+        return JsonResponse({
+            'status': 'success',
+            'repositories': repositories
+        })
+        
+    except Exception as e:
+        logger.error(f'获取仓库列表失败: {str(e)}')
+        return JsonResponse({
+            'status': 'error',
+            'message': f'获取仓库列表失败: {str(e)}'
+        })
+
+
+def _execute_batch_grade_registration(request):
+    """执行批量登分"""
+    try:
+        repository_name = request.POST.get('repository')
+        if not repository_name:
+            return JsonResponse({
+                'status': 'error',
+                'message': '未选择仓库'
+            })
+        
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return JsonResponse({
+                'status': 'error',
+                'message': '未配置仓库基础目录'
+            })
+        
+        # 构建完整的仓库路径
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        repository_path = os.path.join(base_dir, repository_name)
+        
+        if not os.path.exists(repository_path):
+            return JsonResponse({
+                'status': 'error',
+                'message': f'仓库路径不存在: {repository_path}'
+            })
+        
+        logger.info(f'开始批量登分，仓库: {repository_path}')
+        
+        # 导入并执行批量登分逻辑
+        from huali_edu.grade_registration import GradeRegistration
+        
+        grader = GradeRegistration()
+        grader.repo_path = Path(repository_path)
+        
+        # 执行批量登分
+        grader.process_docx_files(repository_path)
+        
+        logger.info(f'批量登分完成，仓库: {repository_path}')
+        return JsonResponse({
+            'status': 'success',
+            'message': f'批量登分完成，仓库: {repository_name}'
+        })
+        
+    except Exception as e:
+        logger.error(f'执行批量登分失败: {str(e)}')
+        return JsonResponse({
+            'status': 'error',
+            'message': f'执行批量登分失败: {str(e)}'
+        })
+
+
+@login_required
+@require_http_methods(['GET'])
+def batch_grade_page(request):
+    """批量登分页面"""
+    try:
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            return HttpResponseForbidden('请先登录')
+        
+        if not request.user.is_staff:
+            return HttpResponseForbidden('无权限访问')
+        
+        # 获取全局配置
+        config = GlobalConfig.objects.first()
+        if not config:
+            config = GlobalConfig.objects.create(repo_base_dir='~/jobs')
+        
+        return render(request, 'batch_grade.html', {
+            'config': config,
+            'base_dir': os.path.expanduser(config.repo_base_dir)
+        })
+        
+    except Exception as e:
+        logger.error(f'批量登分页面加载失败: {str(e)}')
+        return HttpResponseServerError('页面加载失败')

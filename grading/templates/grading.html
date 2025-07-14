@@ -26,6 +26,11 @@
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件目录</h5>
+                    <div class="mt-2">
+                        <a href="{% url 'grading:batch_grade_page' %}" class="btn btn-success btn-sm">
+                            <i class="bi bi-tasks"></i> 批量登分
+                        </a>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="directory-tree"></div>
