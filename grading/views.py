@@ -671,10 +671,6 @@ def get_directory_tree(file_path=''):
         logger.error(error_msg)
         return []
 
-def get_file_content(file_path):
-    # Implementation of get_file_content function
-    pass
-
 def get_file_grade_info(full_path):
     """获取文件中的评分信息"""
     try:
@@ -769,10 +765,6 @@ def get_file_grade_info(full_path):
     except Exception as e:
         logger.error(f'获取文件评分信息失败: {str(e)}')
         return {'has_grade': False, 'grade': None, 'grade_type': None, 'in_table': False}
-
-def save_file_grade(file_path, grade):
-    # Implementation of save_file_grade function
-    pass
 
 @login_required
 @require_http_methods(["GET"])
