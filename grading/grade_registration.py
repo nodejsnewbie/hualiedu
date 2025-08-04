@@ -1,9 +1,7 @@
 import os
 from pathlib import Path
-import pandas as pd
 import re
 from docx import Document
-from datetime import datetime
 import openpyxl
 import logging
 import glob
@@ -128,7 +126,7 @@ class GradeRegistration:
             grade: 成绩（A/B/C/D/E）
         """
         logger.info("=" * 50)
-        logger.info(f"开始写入成绩到Excel文件")
+        logger.info("开始写入成绩到Excel文件")
         logger.info(f"Excel文件路径: {excel_path}")
         logger.info(f"学生姓名: {student_name}")
         logger.info(f"作业目录名: {homework_dir_name}")
@@ -144,7 +142,7 @@ class GradeRegistration:
             with open(excel_path, "rb") as f:
                 wb = openpyxl.load_workbook(f)
                 ws = wb.active
-                logger.info(f"成功打开Excel文件")
+                logger.info("成功打开Excel文件")
                 logger.info(f"当前工作表: {ws.title}")
                 logger.info(f"工作表维度: 行数={ws.max_row}, 列数={ws.max_column}")
                 # 加载学生名单
@@ -214,7 +212,7 @@ class GradeRegistration:
             grade: 成绩（A/B/C/D/E）
         """
         logger.info("=" * 50)
-        logger.info(f"[ByDirName] 开始写入成绩到Excel文件")
+        logger.info("[ByDirName] 开始写入成绩到Excel文件")
         logger.info(f"Excel文件路径: {excel_path}")
         logger.info(f"学生姓名: {student_name}")
         logger.info(f"作业目录名: {homework_dir_name}")
@@ -230,7 +228,7 @@ class GradeRegistration:
             with open(excel_path, "rb") as f:
                 wb = openpyxl.load_workbook(f)
                 ws = wb.active
-                logger.info(f"成功打开Excel文件")
+                logger.info("成功打开Excel文件")
                 logger.info(f"当前工作表: {ws.title}")
                 logger.info(f"工作表维度: 行数={ws.max_row}, 列数={ws.max_column}")
                 if excel_path not in self._student_cache:
@@ -347,11 +345,9 @@ class GradeRegistration:
         """
         try:
             doc = Document(str(path))
-            found_grade_pattern = False
 
             for paragraph in doc.paragraphs:
                 if "老师评分：" in paragraph.text:
-                    found_grade_pattern = True
                     grade_text = paragraph.text.split("老师评分：")[-1].strip()
                     if grade_text:
                         if grade_text in ["A", "B", "C", "D", "E"]:
@@ -407,7 +403,7 @@ class GradeRegistration:
             classes = class_name.split("班")[0].split("计算机")[1]  # 例如：1-2 或 G1
             year = class_name.split("计算机")[0]  # 例如：23
 
-            logger.info(f"班级信息:")
+            logger.info("班级信息:")
             logger.info(f"- 年级: {year}")
             logger.info(f"- 班级: {classes}")
 
@@ -517,7 +513,7 @@ class GradeRegistration:
                     class_dirs.append(class_dir)
 
             if not class_dirs:
-                logger.warning(f"未找到对应的班级目录")
+                logger.warning("未找到对应的班级目录")
                 continue
 
             # 处理每个班级目录下的作业
@@ -569,5 +565,5 @@ class GradeRegistration:
                 # 检查是否包含必要的docx文件结构
                 required_files = ["word/document.xml", "[Content_Types].xml"]
                 return all(file in zip_ref.namelist() for file in required_files)
-        except:
+        except Exception:
             return False

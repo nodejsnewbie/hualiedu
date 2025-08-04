@@ -3,7 +3,7 @@ import logging
 import mimetypes
 import subprocess
 from django.conf import settings
-from .config import ALLOWED_FILE_TYPES, FILE_ENCODINGS, FILE_PROCESSING
+from .config import FILE_ENCODINGS
 import mammoth
 import base64
 import shutil
@@ -373,3 +373,44 @@ class GradeHandler:
         from .config import GRADE_LEVELS
 
         return GRADE_LEVELS.get(grade, {}).get("description", "未知")
+
+
+from docx import Document
+from volcenginesdkarkruntime import Ark
+
+
+def read_word_file(file_path):
+    """读取 Word 文件内容"""
+    doc = Document(file_path)
+    full_text = []
+    for para in doc.paragraphs:
+        full_text.append(para.text)
+    return '\n'.join(full_text)
+
+
+def get_ai_evaluation(api_key, text):
+    """调用火山引擎 AI 获取成绩和评价"""
+    client = Ark(api_key=api_key)
+    prompt = f"请阅读以下内容并给出成绩和 50 字以内的评价：\n{text}"
+    try:
+        resp = client.chat.completions.create(
+            model="deepseek-r1-250528",
+            messages=[{"content": prompt, "role": "user"}],
+        )
+        return resp.choices[0].message.content
+    except Exception as e:
+        return f"请求出错：{str(e)}"
+
+
+def process_multiple_files(api_key, file_paths):
+    """处理多个 Word 文件"""
+    results = {}
+    for file_path in file_paths:
+        try:
+            text = read_word_file(file_path)
+            evaluation = get_ai_evaluation(api_key, text)
+            results[file_path] = evaluation
+        except Exception as e:
+            results[file_path] = f"处理文件出错：{str(e)}"
+    return results
+

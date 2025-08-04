@@ -109,6 +109,9 @@
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
                             确定
                         </button>
+                        <button type="button" class="btn btn-info me-2" id="ai-score-btn" disabled>
+                            <i class="bi bi-robot"></i> AI评分
+                        </button>
                         <button type="button" class="btn btn-outline-secondary" id="cancel-grade">
                             撤销
                         </button>
@@ -117,6 +120,25 @@
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 批量AI评分结果模态框 -->
+<div class="modal fade" id="batchScoreResultModal" tabindex="-1" aria-labelledby="batchScoreResultModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="batchScoreResultModalLabel">批量AI评分结果</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p id="batch-score-summary" class="fw-bold"></p>
+                <div id="batch-score-results-body"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
             </div>
         </div>
     </div>

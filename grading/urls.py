@@ -29,6 +29,8 @@ urlpatterns = [
         "save_teacher_comment/", views.save_teacher_comment, name="save_teacher_comment"
     ),
     path("get_teacher_comment/", views.get_teacher_comment, name="get_teacher_comment"),
+    path("ai_score/", views.ai_score_view, name="ai_score"),
+    path("batch_ai_score/", views.batch_ai_score_view, name="batch_ai_score"),
     # 批量登分相关路由
     path("batch-grade/", views.batch_grade_page, name="batch_grade_page"),
     path(
@@ -36,4 +38,5 @@ urlpatterns = [
         views.batch_grade_registration,
         name="batch_grade_registration",
     ),
+    path("upload_homework/", views.UploadAndScoreHomeworkView.as_view(), name="upload_homework"),
 ]

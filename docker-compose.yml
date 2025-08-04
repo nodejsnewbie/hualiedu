@@ -32,7 +32,7 @@ services:
       - DATABASE_NAME=${MYSQL_DATABASE:-mydatabase}
       - DATABASE_USER=${MYSQL_USER:-user}
       - DATABASE_PASSWORD=${MYSQL_PASSWORD:-password}
-      - SECRET_KEY=${DJANGO_SECRET_KEY:-your-secret-key-here}
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here}
       - DEBUG=0
     volumes:
       - static_volume:/app/staticfiles

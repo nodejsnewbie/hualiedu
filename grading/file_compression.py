@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 import zipfile
-import shutil
 from typing import List, Union
 
 

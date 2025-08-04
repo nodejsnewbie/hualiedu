@@ -1,40 +1,37 @@
-import os
-import sys
-import unittest
+from django.test import TestCase
 from pathlib import Path
 import pandas as pd
 import shutil
 import tempfile
-import docx
-import logging
+from grading.grade_registration import GradeRegistration
 
-# Add the project root directory to Python path
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, project_root)
-
-from huali_edu.grade_registration import GradeRegistration
-from huali_edu.logging_config import setup_logging
-
-# 设置日志配置
-setup_logging()
-logger = logging.getLogger(__name__)
-
-class GradeRegistrationTest(unittest.TestCase):
+class GradeRegistrationTest(TestCase):
     def setUp(self):
         """Set up test data"""
         self.grade_reg = GradeRegistration()
         
-        # 使用真实仓库路径
-        self.single_class_repo = Path("/Users/linyuan/jobs/22g-class-java-homework")
-        self.multi_class_repo = Path("/Users/linyuan/jobs/23java-mode-homework")
-        
         # 创建临时目录用于测试
         self.temp_dir = tempfile.mkdtemp()
+        self.single_class_repo = Path(self.temp_dir) / "22g-class-java-homework"
+        self.multi_class_repo = Path(self.temp_dir) / "23java-mode-homework"
+        self.single_class_repo.mkdir()
+        self.multi_class_repo.mkdir()
+
+        # 创建测试文件和目录
+        (self.single_class_repo / "第一次作业").mkdir()
+        (self.single_class_repo / "第一次作业" / "朱俏任.docx").touch()
+        (self.multi_class_repo / "23计算机1班").mkdir()
+        (self.multi_class_repo / "23计算机1班" / "第一次作业").mkdir()
+        (self.multi_class_repo / "23计算机1班" / "第一次作业" / "黄嘉伟.docx").touch()
         
         # 原始Excel文件
         self.single_class_excel = self.single_class_repo / "平时成绩登记表-22计算机G1班.xlsx"
         self.multi_class_excel = self.multi_class_repo / "平时成绩登记表-23计算机1-2班.xlsx"
         
+        # 创建空的Excel文件
+        pd.DataFrame().to_excel(self.single_class_excel, index=False)
+        pd.DataFrame().to_excel(self.multi_class_excel, index=False)
+
         # 创建备份
         self.single_class_excel_backup = Path(self.temp_dir) / "single_class_backup.xlsx"
         self.multi_class_excel_backup = Path(self.temp_dir) / "multi_class_backup.xlsx"
@@ -47,29 +44,11 @@ class GradeRegistrationTest(unittest.TestCase):
             
         # 设置仓库路径
         self.grade_reg.repo_path = self.single_class_repo
-        
-        logger.info("="*50)
-        logger.info("开始测试")
-        logger.info(f"单班级仓库路径: {self.single_class_repo}")
-        logger.info(f"多班级仓库路径: {self.multi_class_repo}")
-        logger.info("="*50)
-    
+
     def tearDown(self):
         """Clean up test data"""
-        # # 恢复原始Excel文件
-        # if self.single_class_excel_backup.exists():
-        #     shutil.copy2(self.single_class_excel_backup, self.single_class_excel)
-        
-        # if self.multi_class_excel_backup.exists():
-        #     shutil.copy2(self.multi_class_excel_backup, self.multi_class_excel)
-        
-        # 删除临时目录
         shutil.rmtree(self.temp_dir)
-        
-        logger.info("="*50)
-        logger.info("测试结束")
-        logger.info("="*50)
-    
+
     def test_repository_type_detection(self):
         """测试仓库类型判断（单班级/多班级）"""
         # 测试单班级仓库
@@ -111,7 +90,7 @@ class GradeRegistrationTest(unittest.TestCase):
         self.grade_reg.write_grade_to_excel(
             excel_path=excel_path,
             student_name="朱俏任",
-            homework_number=1,
+            homework_dir_name="第一次作业",
             grade="A"
         )
     
@@ -124,17 +103,13 @@ class GradeRegistrationTest(unittest.TestCase):
         self.grade_reg.write_grade_to_excel(
             excel_path=excel_path,
             student_name="黄嘉伟",
-            homework_number=1,
+            homework_dir_name="第一次作业",
             grade="A"
         )
     
     def test_process_docx_files(self):
         """测试处理整个仓库的docx文件"""
-        logger.info("开始测试 process_docx_files")
-        
         # 测试处理单班级仓库
-        logger.info("-"*30)
-        logger.info("处理单班级仓库")
         self.grade_reg.process_docx_files(str(self.single_class_repo))
         
         # 验证单班级Excel文件更新
@@ -151,13 +126,7 @@ class GradeRegistrationTest(unittest.TestCase):
             grade = df.iloc[student_row, 3]
             self.assertIsNotNone(grade, "Grade should not be None")
             self.assertIn(grade, ["A", "B", "C", "D", "E"], "Grade should be one of A, B, C, D, E")
-            logger.info(f"找到学生'朱俏任'的成绩: {grade}")
-        else:
-            logger.warning("学生'朱俏任'在Excel文件中未找到")
-        
         # 测试处理多班级仓库
-        logger.info("-"*30)
-        logger.info("处理多班级仓库")
         self.grade_reg.process_docx_files(str(self.multi_class_repo))
         
         # 验证多班级Excel文件更新
@@ -173,17 +142,4 @@ class GradeRegistrationTest(unittest.TestCase):
             # 检查第1次作业的成绩（第4列）
             grade = df.iloc[student_row, 3]
             self.assertIsNotNone(grade, "Grade should not be None")
-            self.assertIn(grade, ["A", "B", "C", "D", "E"], "Grade should be one of A, B, C, D, E")
-            logger.info(f"找到学生'黄嘉伟'的成绩: {grade}")
-        else:
-            logger.warning("学生'黄嘉伟'在Excel文件中未找到")
-            
-        # 打印Excel文件中的所有学生名单，用于调试
-        logger.info("Excel文件中的学生名单:")
-        for student in df[2].dropna():
-            logger.info(f"- {student}")
-        
-        logger.info("测试 process_docx_files 完成")
-
-if __name__ == '__main__':
-    unittest.main() 
+            self.assertIn(grade, ["A", "B", "C", "D", "E"], "Grade should be one of A, B, C, D, E") 

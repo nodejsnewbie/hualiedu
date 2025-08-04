@@ -13,9 +13,6 @@ from django.utils import timezone
 from django.shortcuts import render
 from django import forms
 from .models import Student, Assignment, Submission, Repository, GlobalConfig
-from django.conf import settings
-from django.core.files.storage import FileSystemStorage
-from pathlib import Path
 from urllib.parse import urlparse
 from django.core.exceptions import ValidationError
 
@@ -532,7 +529,7 @@ class RepositoryForm(forms.ModelForm):
                 if instance.is_ssh_protocol() and config.ssh_key:
                     try:
                         os.remove(ssh_key_path)
-                    except:
+                    except Exception:
                         pass
 
             except Exception as e:
@@ -804,7 +801,7 @@ class RepositoryAdmin(admin.ModelAdmin):
             if repo.is_ssh_protocol() and config.ssh_key:
                 try:
                     os.remove(ssh_key_path)
-                except:
+                except Exception:
                     pass
 
         except Repository.DoesNotExist:
@@ -1019,7 +1016,7 @@ class RepositoryAdmin(admin.ModelAdmin):
                     try:
                         os.unlink(key_path)
                         logger.info("临时 SSH 密钥文件已清理")  # 调试信息
-                    except:
+                    except Exception:
                         pass
             else:
                 # HTTPS 方式

@@ -1,12 +1,6 @@
 from django.db import models
-from django.utils import timezone
 from django.core.exceptions import ValidationError
-from django.conf import settings
-from pathlib import Path
 import os
-import time
-import random
-import string
 import logging
 from urllib.parse import urlparse, urlunparse
 

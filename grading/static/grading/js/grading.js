@@ -201,6 +201,22 @@ function disableTeacherCommentButton() {
   checkTeacherCommentButton();
 }
 
+// 启用AI评分按钮
+function enableAiScoreButton() {
+  console.log('=== 启用AI评分按钮 ===');
+  console.log('按钮元素:', $('#ai-score-btn').length);
+  console.log('启用前状态:', $('#ai-score-btn').prop('disabled'));
+  $('#ai-score-btn').prop('disabled', false);
+  console.log('启用后状态:', $('#ai-score-btn').prop('disabled'));
+  console.log('按钮文本:', $('#ai-score-btn').text());
+}
+
+// 禁用AI评分按钮
+function disableAiScoreButton() {
+  console.log('Disabling AI score button');
+  $('#ai-score-btn').prop('disabled', true);
+}
+
 // 验证评分方式显示一致性
 window.validateGradeModeDisplay = function() {
   console.log('=== 验证评分方式显示一致性 ===');
@@ -417,6 +433,9 @@ window.loadFile = function(path) {
     // 禁用教师评价按钮，直到文件加载完成
     disableTeacherCommentButton();
     
+    // 禁用AI评分按钮，直到文件加载完成
+    disableAiScoreButton();
+    
     // 禁用确定按钮，直到文件加载完成
     $('#add-grade-to-file').prop('disabled', true);
     
@@ -516,6 +535,9 @@ window.loadFile = function(path) {
             // 启用教师评价按钮
             enableTeacherCommentButton();
             
+            // 启用AI评分按钮
+            enableAiScoreButton();
+            
             // 启用确定按钮
             $('#add-grade-to-file').prop('disabled', false);
         },
@@ -528,6 +550,9 @@ window.loadFile = function(path) {
             
             // 禁用教师评价按钮
             disableTeacherCommentButton();
+            
+            // 禁用AI评分按钮
+            disableAiScoreButton();
             
             // 禁用确定按钮
             $('#add-grade-to-file').prop('disabled', true);
@@ -771,7 +796,21 @@ window.initTree = function() {
                 'icon': 'jstree-folder'
             }
         },
-        'plugins': ['types', 'wholerow', 'state'],
+        'plugins': ['types', 'wholerow', 'state', 'contextmenu'],
+        'contextmenu': {
+            'items': function(node) {
+                var items = {};
+                if (node.type === 'folder') {
+                    items.batchAiScore = {
+                        "label": "<i class='bi bi-robot'></i> 批量AI评分",
+                        "action": function(obj) {
+                            handleBatchAiScore(node.id);
+                        }
+                    };
+                }
+                return items;
+            }
+        },
         'state': {
             'key': 'grading-tree',
             'filter': function(state) {
@@ -816,6 +855,59 @@ window.initTree = function() {
     });
 }
 
+// 新增：处理批量AI评分
+function handleBatchAiScore(path) {
+    if (!confirm(`确定要对目录 "${path}" 下的所有作业进行批量AI评分吗？\n这个过程可能需要一些时间。`)) {
+        return;
+    }
+
+    console.log('开始批量AI评分，目录路径:', path);
+    showLoading();
+
+    $.ajax({
+        url: '/grading/batch_ai_score/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            path: path
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                // 构建结果显示的HTML
+                let resultsHtml = '<ul class="list-group">';
+                response.results.forEach(function(result) {
+                    if (result.success) {
+                        resultsHtml += `<li class="list-group-item list-group-item-success">${result.file}: 成功 (分数: ${result.score}, 等级: ${result.grade})</li>`;
+                    } else {
+                        resultsHtml += `<li class="list-group-item list-group-item-danger">${result.file}: 失败 (${result.error})</li>`;
+                    }
+                });
+                resultsHtml += '</ul>';
+
+                // 使用一个模态框来显示详细结果
+                $('#batch-score-results-body').html(resultsHtml);
+                $('#batch-score-summary').text(response.message);
+                $('#batchScoreResultModal').modal('show');
+
+                // 刷新文件树以更新状态
+                $('#directory-tree').jstree(true).refresh();
+
+            } else {
+                showError('批量AI评分失败: ' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('批量AI评分请求失败:', error);
+            showError('批量AI评分请求失败: ' + (xhr.responseJSON ? xhr.responseJSON.message : '服务器错误'));
+        },
+        complete: function() {
+            hideLoading();
+        }
+    });
+}
+
 // 页面加载完成后初始化树
 $(document).ready(function() {
     console.log('=== 页面加载开始 ===');
@@ -831,6 +923,9 @@ $(document).ready(function() {
     
     // 确保教师评价按钮初始状态为禁用
     disableTeacherCommentButton();
+    
+    // 确保AI评分按钮初始状态为禁用
+    disableAiScoreButton();
     
     // 设置初始树数据
     if (window.initialTreeData) {
@@ -943,6 +1038,55 @@ $(document).ready(function() {
         console.log('保存教师评价按钮被点击');
         saveTeacherComment();
     });
+
+    // 新增：绑定AI评分按钮点击事件
+    $(document).on('click', '#ai-score-btn', function() {
+        console.log('=== AI评分按钮被点击 ===');
+        console.log('当前文件路径:', currentFilePath);
+        console.log('按钮状态:', $(this).prop('disabled'));
+        console.log('按钮文本:', $(this).text());
+        
+        if (!currentFilePath) {
+            alert('请先选择一个文件进行AI评分');
+            return;
+        }
+        
+        console.log('AI评分按钮被点击，文件路径:', currentFilePath);
+        showLoading();
+        
+        // 禁用按钮防止重复点击
+        $(this).prop('disabled', true).html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> 评分中...');
+
+        $.ajax({
+            url: '/grading/ai_score/',
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': getCSRFToken()
+            },
+            data: {
+                path: currentFilePath
+            },
+            success: function(response) {
+                if (response.status === 'success') {
+                    // 使用一个模态框或者alert来显示结果
+                    alert(`AI评分完成！\n\n分数: ${response.score}\n等级: ${response.grade}\n\n评语:\n${response.comment}`);
+                    // 刷新文件内容以显示新的评分和评语
+                    loadFile(currentFilePath);
+                } else {
+                    showError('AI评分失败: ' + response.message);
+                }
+            },
+            error: function(xhr, status, error) {
+                console.error('AI评分请求失败:', error);
+                showError('AI评分请求失败: ' + (xhr.responseJSON ? xhr.responseJSON.message : '服务器错误'));
+            },
+            complete: function() {
+                // 恢复按钮状态
+                $('#ai-score-btn').prop('disabled', false).html('<i class="bi bi-robot"></i> AI评分');
+                hideLoading();
+            }
+        });
+    });
     
     // 模态框显示时清空输入框
     $('#teacherCommentModal').on('show.bs.modal', function() {
@@ -1049,3 +1193,46 @@ window.saveTeacherComment = function() {
         }
     });
 }
+
+// ====== 作业上传与AI评分 ======
+$(document).ready(function() {
+    $('#upload-homework-form').on('submit', function(e) {
+        e.preventDefault();
+        var formData = new FormData(this);
+        $('#ai-score-result').hide();
+        $('#ai-score').text('');
+        $('#ai-comment').text('');
+        // 显示加载中
+        var $btn = $(this).find('button[type=submit]');
+        var oldText = $btn.text();
+        $btn.prop('disabled', true).text('上传中...');
+        $.ajax({
+            url: '/grading/upload_homework/',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function(resp) {
+                if (resp.score !== undefined && resp.comment !== undefined) {
+                    $('#ai-score').html('<strong>分数：</strong>' + resp.score);
+                    $('#ai-comment').html('<strong>评语：</strong>' + resp.comment.replace(/\n/g, '<br>'));
+                    $('#ai-score-result').show();
+                } else {
+                    $('#ai-score').html('<span class="text-danger">未获取到评分结果</span>');
+                    $('#ai-score-result').show();
+                }
+            },
+            error: function(xhr) {
+                let msg = '上传或评分失败';
+                if (xhr.responseJSON && xhr.responseJSON.error) {
+                    msg = xhr.responseJSON.error;
+                }
+                $('#ai-score').html('<span class="text-danger">' + msg + '</span>');
+                $('#ai-score-result').show();
+            },
+            complete: function() {
+                $btn.prop('disabled', false).text(oldText);
+            }
+        });
+    });
+});

@@ -1,30 +1,22 @@
-import unittest
-import os
-import logging
+from django.test import TestCase
 from pathlib import Path
 import pandas as pd
-from huali_edu.grade_registration import GradeRegistration
+from grading.grade_registration import GradeRegistration
+import tempfile
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-class SingleClassTest(unittest.TestCase):
+class SingleClassTest(TestCase):
     def setUp(self):
         """设置测试环境"""
-        logger.info("="*50)
-        logger.info("开始测试")
-        
-        # 使用真实的仓库路径
-        self.repo_path = Path("/Users/linyuan/jobs/22g-class-java-homework")
-        
-        # 验证仓库路径是否存在
-        if not self.repo_path.exists():
-            raise FileNotFoundError(f"仓库路径不存在: {self.repo_path}")
-        
-        logger.info(f"单班级仓库路径: {self.repo_path}")
-        logger.info("="*50)
-    
+        self.grader = GradeRegistration()
+        self.temp_dir = tempfile.mkdtemp()
+        self.repo_path = Path(self.temp_dir) / "22g-class-java-homework"
+        self.repo_path.mkdir()
+
+        # 创建测试文件和目录
+        (self.repo_path / "第一次作业").mkdir()
+        (self.repo_path / "第一次作业" / "朱俏任.docx").touch()
+        (self.repo_path / "平时成绩登记表-22计算机G1班.xlsx").touch()
+
     def test_single_class_processing(self):
         """测试单班级仓库的处理"""
         # 创建GradeRegistration实例
@@ -38,8 +30,7 @@ class SingleClassTest(unittest.TestCase):
         self.assertTrue(len(excel_files) > 0, "未找到成绩登记表文件")
         
         for excel_file in excel_files:
-            logger.info(f"验证成绩登记表: {excel_file}")
-            df = pd.read_excel(excel_file)
+            df = pd.read_excel(excel_file, engine='openpyxl')
             
             # 验证成绩列是否存在
             self.assertTrue('第1次作业' in df.columns, f"成绩登记表 {excel_file} 缺少第1次作业列")
@@ -74,7 +65,7 @@ class SingleClassTest(unittest.TestCase):
         
         # 验证成绩登记表文件的内容
         for excel_file in excel_files:
-            df = pd.read_excel(excel_file)
+            df = pd.read_excel(excel_file, engine='openpyxl')
             
             # 验证必要的列是否存在
             required_columns = ['序号', '学号', '姓名']
@@ -84,7 +75,4 @@ class SingleClassTest(unittest.TestCase):
             
             # 验证学生名单不为空
             self.assertTrue(len(df) > 0, 
-                          f"成绩登记表 {excel_file} 中没有学生记录")
-
-if __name__ == '__main__':
-    unittest.main() 
+                          f"成绩登记表 {excel_file} 中没有学生记录") 

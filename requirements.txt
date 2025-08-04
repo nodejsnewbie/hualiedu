@@ -38,6 +38,7 @@ frozendict==2.4.6
 frozenlist==1.5.0
 gitdb==4.0.12
 GitPython==3.1.44
+google==3.0.0
 gunicorn==23.0.0
 html5lib==1.1
 idna==3.10
@@ -52,7 +53,7 @@ multidict==6.4.3
 multitasking==0.0.11
 mysqlclient==2.2.4
 nest-asyncio==1.6.0
-numpy==2.3.1
+numpy @ file:///Users/runner/miniforge3/conda-bld/numpy_1751342200966/work/dist/numpy-2.3.1-cp313-cp313-macosx_11_0_arm64.whl#sha256=9d72f77229ea5e1fa0dd7799c9f30e3bffa763b2158251f3c9addec03c4f58d8
 openpyxl==3.1.5
 openvino==2025.0.0
 openvino-telemetry==2024.1.0
@@ -65,8 +66,11 @@ pluggy==1.6.0
 prompt_toolkit==3.0.50
 propcache==0.3.1
 protobuf==6.31.1
-psycopg2-binary==2.9.10
+psycopg2 @ file:///Users/runner/miniforge3/conda-bld/psycopg2-split_1750255490648/work
+psycopg2-binary @ file:///home/conda/feedstock_root/build_artifacts/psycopg2-split_1750255432256/work/psycopg2-binary
+py==1.11.0
 pycparser==2.22
+pycryptodome==3.9.9
 Pygments==2.19.2
 PyMuPDF==1.25.0
 pypinyin==0.54.0
@@ -87,30 +91,31 @@ PyQtPurchasing==5.15.6
 PyQtWebEngine==5.15.7
 pytest==8.4.1
 python-crontab==3.2.0
-python-dateutil==2.9.0.post0
+python-dateutil @ file:///home/conda/feedstock_root/build_artifacts/bld/rattler-build_python-dateutil_1751104122/work
 python-docx==1.1.2
 python-dotenv==1.1.0
 python-magic==0.4.27
 python-pptx==1.0.2
-pytz==2025.2
+pytz @ file:///home/conda/feedstock_root/build_artifacts/pytz_1742920838005/work
 redis==5.2.1
 requests==2.32.3
+retry==0.9.2
 setuptools==80.9.0
-six==1.17.0
+six @ file:///home/conda/feedstock_root/build_artifacts/six_1733380938961/work
 smmap==5.0.2
 soupsieve==2.6
-sqlparse==0.5.3
+sqlparse @ file:///home/conda/feedstock_root/build_artifacts/sqlparse_1734007102193/work
 tabulate==0.9.0
-TBB==0.2
 tqdm==4.67.1
 typing_extensions==4.12.2
-tzdata==2025.2
+tzdata @ file:///home/conda/feedstock_root/build_artifacts/python-tzdata_1742745135198/work
 urllib3==2.4.0
 vine==5.1.0
+volcengine==1.0.193
 wcwidth==0.2.13
 webencodings==0.5.1
 websockets==15.0.1
-wheel @ file:///opt/homebrew/Cellar/python%403.13/3.13.2/libexec/wheel-0.45.1-py3-none-any.whl#sha256=b9235939e2096903717cb6bfc132267f8a7e46deb2ec3ef9c5e234ea301795d0
+wheel==0.45.1
 whitenoise==6.9.0
 xlrd==2.0.1
 xlsxwriter==3.2.5
