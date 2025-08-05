@@ -705,6 +705,7 @@ def get_file_grade_info(full_path):
             "grade": None,
             "grade_type": None,  # 'letter' 或 'text'
             "in_table": False,
+            "ai_grading_disabled": False,
         }
 
         if ext == ".docx":
@@ -809,6 +810,9 @@ def get_file_grade_info(full_path):
             except Exception as e:
                 logger.error(f"检查文件评分失败: {str(e)}")
 
+        if grade_info["has_grade"]:
+            grade_info["ai_grading_disabled"] = True
+
         logger.info(f"文件评分信息: {grade_info}")
         return grade_info
 
@@ -819,6 +823,7 @@ def get_file_grade_info(full_path):
             "grade": None,
             "grade_type": None,
             "in_table": False,
+            "ai_grading_disabled": False,
         }
 
 
@@ -2435,7 +2440,7 @@ def volcengine_score_homework(content):
     api_key = "e7a701b6-3bc7-470a-8d1f-2a289dd015da"
     client = Ark(api_key=api_key)
     
-    prompt = f"请为以下学生作业打分（满分100分），并给出百字以内的简短评语：\n{content}"
+    prompt = f"请为以下学生作业打分（满分100分），并给出百字以内的简短评语。请只输出分数和评语，不要包含其他任何多余的内容。例如：’分数：95分\n评价：这位同学的作业完成度很高‘：\n{content}"
     logger.info(f"发送给AI的提示词长度: {len(prompt)}")
     
     try:
