@@ -177,4 +177,4 @@ tail -f logs/app.log
 
 # 查看最近的错误
 grep ERROR logs/app.log
-``` 
+```

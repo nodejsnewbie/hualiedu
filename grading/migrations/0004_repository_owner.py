@@ -8,14 +8,20 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('grading', '0003_submission_teacher_comments'),
+        ("grading", "0003_submission_teacher_comments"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='repository',
-            name='owner',
-            field=models.ForeignKey(blank=True, help_text='仓库所有者', null=True, on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL),
+            model_name="repository",
+            name="owner",
+            field=models.ForeignKey(
+                blank=True,
+                help_text="仓库所有者",
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                to=settings.AUTH_USER_MODEL,
+            ),
         ),
     ]

@@ -1,4 +1,5 @@
 import os
+
 from docx import Document
 from volcenginesdkarkruntime import Ark
 
@@ -9,7 +10,7 @@ def read_word_file(file_path):
     full_text = []
     for para in doc.paragraphs:
         full_text.append(para.text)
-    return '\n'.join(full_text)
+    return "\n".join(full_text)
 
 
 def get_ai_evaluation(api_key, text):
@@ -42,7 +43,7 @@ def process_multiple_files(api_key, file_paths):
 if __name__ == "__main__":
     # 从环境变量获取 API Key
     api_key = os.environ.get("ARK_API_KEY")
-    api_key = 'TWpOaFlUZ3lNemsxTURNd05EUmxOVGswWlRZelptUXpNakJqT1RCa05HRQ=='
+    api_key = "TWpOaFlUZ3lNemsxTURNd05EUmxOVGswWlRZelptUXpNakJqT1RCa05HRQ=="
     if not api_key:
         print("请设置 ARK_API_KEY 环境变量")
     else:

@@ -1,11 +1,14 @@
 """
 Django model tests for the grading app.
 """
-from django.test import TestCase
+
+import os
+
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.test import TestCase
+
 from grading.models import GlobalConfig, Repository
-import os
 
 
 class GlobalConfigModelTest(TestCase):
@@ -13,9 +16,7 @@ class GlobalConfigModelTest(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.config = GlobalConfig.objects.create(
-            repo_base_dir="~/test_jobs"
-        )
+        self.config = GlobalConfig.objects.create(repo_base_dir="~/test_jobs")
 
     def test_global_config_creation(self):
         """Test GlobalConfig model creation."""
@@ -45,16 +46,13 @@ class RepositoryModelTest(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.user = User.objects.create_user(
-            username='testuser',
-            password='testpass123'
-        )
+        self.user = User.objects.create_user(username="testuser", password="testpass123")
         self.repository = Repository.objects.create(
             name="test-repo",
             url="https://github.com/test/test-repo.git",
             branch="main",
             branches=["main", "develop"],
-            owner=self.user
+            owner=self.user,
         )
 
     def test_repository_creation(self):
@@ -89,9 +87,7 @@ class RepositoryModelTest(TestCase):
     def test_repository_default_values(self):
         """Test Repository default values."""
         repo = Repository.objects.create(
-            name="default-repo",
-            url="https://github.com/test/default-repo.git",
-            owner=self.user
+            name="default-repo", url="https://github.com/test/default-repo.git", owner=self.user
         )
         self.assertEqual(repo.branch, "main")
         self.assertEqual(repo.branches, ["main"])
@@ -102,21 +98,18 @@ class RepositoryModelTest(TestCase):
         repo2 = Repository.objects.create(
             name="test-repo",  # Same name
             url="https://github.com/test/test-repo2.git",
-            owner=self.user
+            owner=self.user,
         )
         # Current implementation allows this, but we can test the behavior
         self.assertNotEqual(self.repository.id, repo2.id)
 
     def test_repository_different_owners_same_name(self):
         """Test that different owners can have repositories with same name."""
-        user2 = User.objects.create_user(
-            username='testuser2',
-            password='testpass123'
-        )
+        user2 = User.objects.create_user(username="testuser2", password="testpass123")
         repo2 = Repository.objects.create(
             name="test-repo",  # Same name as first repo
             url="https://github.com/test/test-repo2.git",
-            owner=user2
+            owner=user2,
         )
         self.assertNotEqual(self.repository.owner, repo2.owner)
         self.assertEqual(self.repository.name, repo2.name)
@@ -127,13 +120,8 @@ class ModelIntegrationTest(TestCase):
 
     def setUp(self):
         """Set up test data."""
-        self.user = User.objects.create_user(
-            username='integrationuser',
-            password='testpass123'
-        )
-        self.config = GlobalConfig.objects.create(
-            repo_base_dir="~/integration_test"
-        )
+        self.user = User.objects.create_user(username="integrationuser", password="testpass123")
+        self.config = GlobalConfig.objects.create(repo_base_dir="~/integration_test")
 
     def test_models_work_together(self):
         """Test that models can work together."""
@@ -141,7 +129,7 @@ class ModelIntegrationTest(TestCase):
         repo = Repository.objects.create(
             name="integration-repo",
             url="https://github.com/test/integration-repo.git",
-            owner=self.user
+            owner=self.user,
         )
 
         # Verify both models exist
@@ -157,9 +145,7 @@ class ModelIntegrationTest(TestCase):
         """Test cascade delete behavior."""
         # Create a repository
         repo = Repository.objects.create(
-            name="cascade-repo",
-            url="https://github.com/test/cascade-repo.git",
-            owner=self.user
+            name="cascade-repo", url="https://github.com/test/cascade-repo.git", owner=self.user
         )
 
         # Delete the user
