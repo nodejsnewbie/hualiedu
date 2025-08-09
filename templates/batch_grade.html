@@ -13,39 +13,39 @@
         cursor: pointer;
         transition: all 0.3s ease;
     }
-    
+
     .repository-card:hover {
         border-color: #007bff;
         box-shadow: 0 2px 8px rgba(0,123,255,0.2);
     }
-    
+
     .repository-card.selected {
         border-color: #007bff;
         background-color: #f8f9fa;
     }
-    
+
     .excel-files {
         font-size: 0.9em;
         color: #666;
         margin-top: 8px;
     }
-    
+
     .loading {
         display: none;
     }
-    
+
     .result-message {
         margin-top: 20px;
         padding: 15px;
         border-radius: 5px;
     }
-    
+
     .result-success {
         background-color: #d4edda;
         border: 1px solid #c3e6cb;
         color: #155724;
     }
-    
+
     .result-error {
         background-color: #f8d7da;
         border: 1px solid #f5c6cb;
@@ -121,7 +121,7 @@
 <script>
 $(document).ready(function() {
     let selectedRepository = null;
-    
+
     // 加载仓库列表
     function loadRepositoryList() {
         $('#repository-list').html(`
@@ -132,7 +132,7 @@ $(document).ready(function() {
                 <p class="mt-2">正在加载仓库列表...</p>
             </div>
         `);
-        
+
         $.ajax({
             url: '{% url "grading:batch_grade_registration" %}',
             method: 'GET',
@@ -148,7 +148,7 @@ $(document).ready(function() {
             }
         });
     }
-    
+
     // 显示仓库列表
     function displayRepositoryList(repositories) {
         if (repositories.length === 0) {
@@ -164,7 +164,7 @@ $(document).ready(function() {
             `);
             return;
         }
-        
+
         let html = '<div class="row">';
         repositories.forEach(function(repo) {
             html += `
@@ -184,9 +184,9 @@ $(document).ready(function() {
             `;
         });
         html += '</div>';
-        
+
         $('#repository-list').html(html);
-        
+
         // 绑定点击事件
         $('.repository-card').click(function() {
             $('.repository-card').removeClass('selected');
@@ -195,18 +195,18 @@ $(document).ready(function() {
             $('#batch-grade-btn').prop('disabled', false);
         });
     }
-    
+
     // 执行批量登分
     function executeBatchGrade() {
         if (!selectedRepository) {
             showError('请先选择要处理的仓库');
             return;
         }
-        
+
         $('#loading').show();
         $('#result').hide();
         $('#batch-grade-btn').prop('disabled', true);
-        
+
         $.ajax({
             url: '{% url "grading:batch_grade_registration" %}',
             method: 'POST',
@@ -231,21 +231,21 @@ $(document).ready(function() {
             }
         });
     }
-    
+
     // 显示成功消息
     function showSuccess(message) {
         $('#result').removeClass('result-error').addClass('result-success').html(`
             <i class="fas fa-check-circle"></i> ${message}
         `).show();
     }
-    
+
     // 显示错误消息
     function showError(message) {
         $('#result').removeClass('result-success').addClass('result-error').html(`
             <i class="fas fa-exclamation-triangle"></i> ${message}
         `).show();
     }
-    
+
     // 绑定事件
     $('#batch-grade-btn').click(executeBatchGrade);
     $('#refresh-btn').click(function() {
@@ -253,9 +253,9 @@ $(document).ready(function() {
         $('#batch-grade-btn').prop('disabled', true);
         loadRepositoryList();
     });
-    
+
     // 初始加载
     loadRepositoryList();
 });
 </script>
-{% endblock %} 
+{% endblock %}

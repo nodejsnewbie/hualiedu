@@ -1,5 +1,7 @@
 from django.test import TestCase
+
 from grading.views import volcengine_score_homework
+
 
 class TestVolcengineScoreHomework(TestCase):
     def test_normal(self):

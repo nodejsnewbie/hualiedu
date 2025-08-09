@@ -13,7 +13,7 @@
 {% block content %}
 <div class="container mt-4">
     <h2>评分系统调试页面</h2>
-    
+
     <div class="row">
         <div class="col-md-6">
             <div class="card">
@@ -27,7 +27,7 @@
                 </div>
             </div>
         </div>
-        
+
         <div class="col-md-6">
             <div class="card">
                 <div class="card-header">
@@ -41,7 +41,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="row mt-4">
         <div class="col-12">
             <div class="card">
@@ -60,7 +60,7 @@
                                 文字等级
                             </button>
                         </div>
-                        
+
                         <!-- 字母等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="字母评分选项" id="letter-grade-buttons">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
@@ -69,7 +69,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="E">E</button>
                         </div>
-                        
+
                         <!-- 文字等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="文字评分选项" id="text-grade-buttons" style="display: none;">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="优秀">优秀</button>
@@ -78,7 +78,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="及格">及格</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="不及格">不及格</button>
                         </div>
-                        
+
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file">
                             确定
                         </button>
@@ -90,7 +90,7 @@
             </div>
         </div>
     </div>
-    
+
     <div class="row mt-4">
         <div class="col-12">
             <div class="card">
@@ -143,14 +143,14 @@ console.error = function(...args) {
 function checkDOMElements() {
     const results = document.getElementById('dom-check-results');
     let html = '<ul>';
-    
+
     // 检查评分方式按钮
     const gradeModeButtons = document.querySelectorAll('.grade-mode-btn');
     html += `<li>评分方式按钮: ${gradeModeButtons.length} 个</li>`;
     gradeModeButtons.forEach((btn, index) => {
         html += `<li>  - 按钮 ${index + 1}: "${btn.textContent.trim()}" (data-mode: "${btn.dataset.mode}")</li>`;
     });
-    
+
     // 检查字母评分按钮组
     const letterButtons = document.getElementById('letter-grade-buttons');
     html += `<li>字母评分按钮组: ${letterButtons ? '存在' : '不存在'}</li>`;
@@ -158,7 +158,7 @@ function checkDOMElements() {
         html += `<li>  - 显示状态: ${letterButtons.style.display}</li>`;
         html += `<li>  - 可见性: ${letterButtons.offsetParent !== null ? '可见' : '不可见'}</li>`;
     }
-    
+
     // 检查文字评分按钮组
     const textButtons = document.getElementById('text-grade-buttons');
     html += `<li>文字评分按钮组: ${textButtons ? '存在' : '不存在'}</li>`;
@@ -166,14 +166,14 @@ function checkDOMElements() {
         html += `<li>  - 显示状态: ${textButtons.style.display}</li>`;
         html += `<li>  - 可见性: ${textButtons.offsetParent !== null ? '可见' : '不可见'}</li>`;
     }
-    
+
     // 检查评分按钮
     const gradeButtons = document.querySelectorAll('.grade-button');
     html += `<li>评分按钮: ${gradeButtons.length} 个</li>`;
     gradeButtons.forEach((btn, index) => {
         html += `<li>  - 按钮 ${index + 1}: "${btn.textContent.trim()}" (data-grade: "${btn.dataset.grade}")</li>`;
     });
-    
+
     html += '</ul>';
     results.innerHTML = html;
 }
@@ -182,18 +182,18 @@ function checkDOMElements() {
 function testJSFunctions() {
     const results = document.getElementById('js-test-results');
     let html = '<ul>';
-    
+
     // 测试全局变量
     html += `<li>selectedGrade: ${typeof selectedGrade !== 'undefined' ? selectedGrade : '未定义'}</li>`;
     html += `<li>gradeMode: ${typeof gradeMode !== 'undefined' ? gradeMode : '未定义'}</li>`;
-    
+
     // 测试函数是否存在
     html += `<li>switchGradeMode函数: ${typeof switchGradeMode === 'function' ? '存在' : '不存在'}</li>`;
     html += `<li>setGradeButtonState函数: ${typeof setGradeButtonState === 'function' ? '存在' : '不存在'}</li>`;
-    
+
     // 测试jQuery
     html += `<li>jQuery版本: ${typeof $ !== 'undefined' ? $.fn.jquery : '未加载'}</li>`;
-    
+
     html += '</ul>';
     results.innerHTML = html;
 }
@@ -201,18 +201,18 @@ function testJSFunctions() {
 // 页面加载完成后执行检查
 $(document).ready(function() {
     console.log('=== 调试页面加载完成 ===');
-    
+
     // 延迟执行检查，确保所有元素都已加载
     setTimeout(function() {
         checkDOMElements();
         testJSFunctions();
-        
+
         // 测试评分方式切换
         console.log('测试评分方式切换功能...');
         if (typeof switchGradeMode === 'function') {
             console.log('切换到文字评分方式');
             switchGradeMode('text');
-            
+
             setTimeout(function() {
                 console.log('切换后状态检查:');
                 console.log('- 字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
@@ -224,4 +224,4 @@ $(document).ready(function() {
     }, 500);
 });
 </script>
-{% endblock %} 
+{% endblock %}

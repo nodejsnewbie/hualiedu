@@ -61,7 +61,7 @@
         <div class="branch-list">
             <h2>选择新分支：</h2>
             {% for branch in branches %}
-            <div class="branch-item {% if branch == current_branch %}selected{% endif %}" 
+            <div class="branch-item {% if branch == current_branch %}selected{% endif %}"
                  onclick="selectBranch('{{ branch }}')">
                 {{ branch }}
             </div>
@@ -83,9 +83,9 @@ function selectBranch(branch) {
         item.classList.remove('selected');
     });
     event.target.classList.add('selected');
-    
+
     // 更新隐藏输入框的值
     document.getElementById('selected-branch').value = branch;
 }
 </script>
-{% endblock %} 
+{% endblock %}

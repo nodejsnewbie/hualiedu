@@ -60,7 +60,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- 评分区域 -->
             <div class="card mt-3">
                 <div class="card-header">
@@ -87,7 +87,7 @@
                                 文字等级
                             </button>
                         </div>
-                        
+
                         <!-- 字母等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="字母评分选项" id="letter-grade-buttons">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
@@ -96,7 +96,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="E">E</button>
                         </div>
-                        
+
                         <!-- 文字等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="文字评分选项" id="text-grade-buttons" style="display: none;">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="优秀">优秀</button>
@@ -105,7 +105,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="及格">及格</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="不及格">不及格</button>
                         </div>
-                        
+
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
                             确定
                         </button>
@@ -186,7 +186,7 @@
     // 将初始数据传递给 JavaScript
     window.initialTreeData = {{ initial_tree_data|safe }};
     console.log('Initial tree data in template:', window.initialTreeData);
-    
+
     // 设置 CSRF token
     $.ajaxSetup({
         beforeSend: function(xhr, settings) {
@@ -196,4 +196,4 @@
         }
     });
 </script>
-{% endblock %} 
+{% endblock %}

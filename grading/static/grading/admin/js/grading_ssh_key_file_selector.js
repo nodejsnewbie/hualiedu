@@ -56,4 +56,4 @@ document.addEventListener('DOMContentLoaded', function () {
       console.warn('高级文件选择器API不可用，将使用标准文件选择器');
     }
   }
-}); 
+});

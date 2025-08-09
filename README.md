@@ -15,29 +15,74 @@
 - docs/            项目文档
 
 ## 快速开始
-1. 安装依赖
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. 初始化数据库
-   ```bash
-   python manage.py migrate
-   ```
-3. 创建管理员账号
-   ```bash
-   python manage.py createsuperuser
-   ```
-4. 启动开发服务器
-   ```bash
-   python manage.py runserver
-   ```
-5. 访问 http://localhost:8000/
+
+### 1. 环境变量配置
+本项目使用环境变量保护敏感信息，请先配置环境变量：
+
+```bash
+# 方法1：使用自动设置脚本
+python scripts/setup_env.py
+
+# 方法2：手动复制并编辑
+cp env.example .env
+# 然后编辑 .env 文件，填入实际的配置值
+```
+
+**重要配置项：**
+- `SECRET_KEY`: Django 密钥
+- `VOLCENGINE_API_KEY`: 火山引擎 AI API 密钥
+- `DEBUG`: 调试模式 (True/False)
+
+### 2. 验证配置
+```bash
+python scripts/verify_env.py
+```
+
+### 3. 安装依赖
+```bash
+pip install -r requirements.txt
+```
+
+### 4. 初始化数据库
+```bash
+python manage.py migrate
+```
+
+### 5. 创建管理员账号
+```bash
+python manage.py createsuperuser
+```
+
+### 6. 启动开发服务器
+```bash
+python manage.py runserver
+```
+
+### 7. 访问应用
+访问 http://localhost:8000/
+
+**文档索引与环境说明请查看 `docs/`：**
+- 文档索引: `docs/README.md`
+- 环境与配置: `docs/environment.md`
+- AI 密钥排查: `docs/ai-key.md`
+- 优化与技术改进: `docs/optimization.md`
 
 ## 测试
 - 所有测试用例位于 `tests/` 目录
 - 运行全部测试：
   ```bash
   python -m unittest discover tests
+  ```
+
+## 开发规范
+
+- 代码格式化与检查：使用 black + isort + flake8，并通过 pre-commit 自动校验。
+- 安装开发依赖与安装钩子：
+  ```bash
+  pip install -r requirements-dev.txt
+  pre-commit install
+  # 首次可对全库执行一遍
+  pre-commit run --all-files
   ```
 
 ## 部署
@@ -57,4 +102,4 @@
 
 ## 其它
 - 日志文件默认输出到 logs/ 目录
-- 所有依赖请用 `pip freeze > requirements.txt` 定期更新 
+- 所有依赖请用 `pip freeze > requirements.txt` 定期更新

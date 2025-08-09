@@ -10,8 +10,9 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
+
 import dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -23,13 +24,18 @@ dotenv.load_dotenv(os.path.join(BASE_DIR, ".env"))
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("SECRET_KEY")
+SECRET_KEY = os.environ.get("SECRET_KEY", "django-insecure-default-key-change-in-production")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.environ.get("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# 文件上传设置
+MAX_UPLOAD_SIZE = int(os.environ.get("MAX_UPLOAD_SIZE", "10485760"))  # 默认10MB
+ALLOWED_EXTENSIONS = set(
+    os.environ.get("ALLOWED_EXTENSIONS", "txt,pdf,png,jpg,jpeg,gif,doc,docx").split(",")
+)
 
 # Application definition
 
@@ -129,10 +135,9 @@ STATICFILES_DIRS = [
 STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 # 添加静态文件的CORS设置
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
+CORS_ALLOWED_ORIGINS = os.environ.get(
+    "CORS_ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+).split(",")
 
 CORS_ALLOW_METHODS = [
     "DELETE",
@@ -165,13 +170,17 @@ MEDIA_ROOT = os.path.join(BASE_DIR, "media")
 # 确保 grades 目录存在
 os.makedirs(os.path.join(MEDIA_ROOT, "grades"), exist_ok=True)
 
-# 允许上传的文件类型
-ALLOWED_EXTENSIONS = {"txt", "pdf", "png", "jpg", "jpeg", "gif", "doc", "docx"}
-
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# 日志设置
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+LOG_FILE = os.environ.get("LOG_FILE", os.path.join(BASE_DIR, "logs", "app.log"))
+
+# 确保日志目录存在
+os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
 
 # 日志配置
 LOGGING = {
@@ -182,31 +191,46 @@ LOGGING = {
             "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
             "style": "{",
         },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
     },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
+            "level": LOG_LEVEL,
         },
         "file": {
             "class": "logging.FileHandler",
-            "filename": os.path.join(BASE_DIR, "debug.log"),
+            "filename": LOG_FILE,
             "formatter": "verbose",
-            "mode": "a",  # 追加模式
+            "mode": "a",
+            "level": LOG_LEVEL,
         },
     },
     "loggers": {
+        "django": {
+            "handlers": ["console", "file"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
         "grading": {
             "handlers": ["console", "file"],
-            "level": "DEBUG",
-            "propagate": True,
+            "level": LOG_LEVEL,
+            "propagate": False,
         },
+    },
+    "root": {
+        "handlers": ["console", "file"],
+        "level": LOG_LEVEL,
     },
 }
 
 # CORS 设置
 CORS_ALLOW_ALL_ORIGINS = True  # 允许所有来源的跨域请求
-CORS_ALLOW_CREDENTIALS = True  # 允许携带认证信息
+CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "True").lower() == "true"
 
 # Jazzmin Settings
 JAZZMIN_SETTINGS = {
@@ -245,13 +269,14 @@ LOGIN_REDIRECT_URL = "/grading/"
 LOGOUT_REDIRECT_URL = "/admin/login/"
 
 # 会话设置
-SESSION_COOKIE_AGE = 86400  # 24小时
-SESSION_EXPIRE_AT_BROWSER_CLOSE = False
+SESSION_COOKIE_AGE = int(os.environ.get("SESSION_COOKIE_AGE", "86400"))
+SESSION_EXPIRE_AT_BROWSER_CLOSE = (
+    os.environ.get("SESSION_EXPIRE_AT_BROWSER_CLOSE", "False").lower() == "true"
+)
 
-# CSRF设置
-CSRF_COOKIE_SECURE = False
+# CSRF 设置
+CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "False").lower() == "true"
 CSRF_COOKIE_HTTPONLY = False
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
+CSRF_TRUSTED_ORIGINS = os.environ.get(
+    "CSRF_TRUSTED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+).split(",")

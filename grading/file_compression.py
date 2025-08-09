@@ -1,6 +1,6 @@
 import os
-from pathlib import Path
 import zipfile
+from pathlib import Path
 from typing import List, Union
 
 
@@ -30,9 +30,7 @@ class FileCompression:
             except Exception as e:
                 print(f"删除文件失败 {file}: {e}")
 
-    def compress_directory(
-        self, source_dir: Union[str, Path], output_name: str = None
-    ) -> Path:
+    def compress_directory(self, source_dir: Union[str, Path], output_name: str = None) -> Path:
         """
         压缩整个目录，如果超过大小限制会自动分割
 
@@ -103,9 +101,7 @@ class FileCompression:
                         total_size += file_path.stat().st_size
         return total_size
 
-    def _compress_to_zip(
-        self, source: Union[Path, List[Path]], output_path: Path
-    ) -> None:
+    def _compress_to_zip(self, source: Union[Path, List[Path]], output_path: Path) -> None:
         """压缩到单个zip文件"""
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zipf:
             if isinstance(source, list):

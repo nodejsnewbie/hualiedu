@@ -1,6 +1,7 @@
+from pathlib import Path
+
 from django import forms
 from django.forms.widgets import FileInput
-from pathlib import Path
 
 
 class SSHKeyFileInput(FileInput):
@@ -34,8 +35,6 @@ class GlobalConfigForm(forms.ModelForm):
         ssh_key_file = cleaned_data.get("ssh_key_file")
 
         if ssh_key and ssh_key_file:
-            raise forms.ValidationError(
-                "请只使用一种方式提供SSH私钥（文本输入或文件上传）"
-            )
+            raise forms.ValidationError("请只使用一种方式提供SSH私钥（文本输入或文件上传）")
 
         return cleaned_data

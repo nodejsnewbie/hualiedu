@@ -1,14 +1,14 @@
-import os
+import base64
 import logging
 import mimetypes
-import subprocess
-from django.conf import settings
-from .config import FILE_ENCODINGS
-import mammoth
-import base64
+import os
 import shutil
-from .models import GlobalConfig
-import traceback
+import subprocess
+
+import mammoth
+from django.conf import settings
+
+from .config import FILE_ENCODINGS
 
 logger = logging.getLogger(__name__)
 
@@ -93,215 +93,178 @@ class GitHandler:
             logger.error(f"获取仓库名称失败: {str(e)}")
             return os.path.basename(path)
 
+    @staticmethod
+    def clone_repo_remote(repo_name, target_path):
+        """克隆远程仓库"""
+        try:
+            result = subprocess.run(
+                ["git", "clone", repo_name, target_path], capture_output=True, text=True
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def pull_repo(repo_path):
+        """拉取仓库更新"""
+        try:
+            result = subprocess.run(["git", "pull"], cwd=repo_path, capture_output=True, text=True)
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def checkout_branch(repo_path, branch):
+        """切换分支"""
+        try:
+            result = subprocess.run(
+                ["git", "checkout", branch], cwd=repo_path, capture_output=True, text=True
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    @staticmethod
+    def get_branches(repo_path):
+        """获取分支列表"""
+        try:
+            result = subprocess.run(
+                ["git", "branch", "-r"], cwd=repo_path, capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                return [line.strip() for line in result.stdout.split("\n") if line.strip()]
+            return []
+        except Exception:
+            return []
+
+    @staticmethod
+    def is_git_repository(path):
+        """检查是否为Git仓库"""
+        return os.path.exists(os.path.join(path, ".git"))
+
+    @staticmethod
+    def get_current_branch(path):
+        """获取当前分支"""
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=path,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return None
+        except Exception:
+            return None
+
 
 class FileHandler:
     @staticmethod
     def is_safe_path(path):
         """检查路径是否在允许的范围内"""
-        # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
-            return False
+        # 检查路径是否在媒体目录内
+        media_root = getattr(settings, "MEDIA_ROOT", "")
+        if media_root:
+            try:
+                real_path = os.path.realpath(path)
+                real_media_root = os.path.realpath(media_root)
+                return real_path.startswith(real_media_root)
+            except (OSError, ValueError):
+                return False
 
-        # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
-        return os.path.abspath(path).startswith(os.path.abspath(base_dir))
+        # 如果没有设置MEDIA_ROOT，使用基本检查
+        return not path.startswith("/") and ".." not in path
 
     @staticmethod
     def get_mime_type(file_path):
-        """获取文件的 MIME 类型"""
+        """获取文件的MIME类型"""
         try:
-            logger.info(f"开始获取文件类型: {file_path}")
-
-            # 检查文件是否存在
-            if not os.path.exists(file_path):
-                logger.error(f"文件不存在: {file_path}")
-                return None
-
-            # 检查文件是否可读
-            if not os.access(file_path, os.R_OK):
-                logger.error(f"文件不可读: {file_path}")
-                return None
-
-            # 初始化 mimetypes 模块
-            mimetypes.init()
-            logger.info("mimetypes 模块已初始化")
-
-            # 首先尝试使用 mimetypes 模块
             mime_type, _ = mimetypes.guess_type(file_path)
-            if mime_type:
-                logger.info(
-                    f"使用 mimetypes 模块识别文件类型: {file_path} -> {mime_type}"
-                )
-                return mime_type
-
-            # 如果 mimetypes 无法识别，根据文件扩展名判断
-            ext = os.path.splitext(file_path)[1].lower()
-            logger.info(f"文件扩展名: {ext}")
-
-            if ext in [".txt", ".md", ".py", ".js", ".html", ".css", ".json", ".xml"]:
-                logger.info(f"使用扩展名识别文本文件: {file_path} -> text/plain")
-                return "text/plain"
-            elif ext in [".docx"]:
-                logger.info(
-                    f"使用扩展名识别 Word 文件: {file_path} -> application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
-                return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            elif ext in [".pdf"]:
-                logger.info(f"使用扩展名识别 PDF 文件: {file_path} -> application/pdf")
-                return "application/pdf"
-
-            logger.warning(f"无法识别文件类型: {file_path}")
+            return mime_type
+        except Exception:
             return None
-        except Exception as e:
-            logger.error(f"获取文件类型失败: {str(e)}\n{traceback.format_exc()}")
-            return None
+
+    @staticmethod
+    def get_file_size(file_path):
+        """获取文件大小"""
+        try:
+            return os.path.getsize(file_path)
+        except OSError:
+            return 0
+
+    @staticmethod
+    def create_directory_if_not_exists(path):
+        """创建目录（如果不存在）"""
+        os.makedirs(path, exist_ok=True)
+
+    @staticmethod
+    def validate_file_extension(file_path):
+        """验证文件扩展名"""
+        allowed_extensions = {".txt", ".pdf", ".docx", ".doc"}
+        ext = os.path.splitext(file_path)[1].lower()
+        return ext in allowed_extensions
 
     @staticmethod
     def is_allowed_file(file_path):
-        """检查文件是否允许上传"""
-        try:
-            mime_type = FileHandler.get_mime_type(file_path)
-            if not mime_type:
-                return False
-
-            # 检查文件类型是否在允许列表中
-            allowed_types = [
-                "text/plain",
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                "application/pdf",
-            ]
-            return mime_type in allowed_types
-        except Exception as e:
-            logger.error(f"检查文件类型失败: {str(e)}")
+        """检查文件是否允许访问"""
+        # 检查文件扩展名
+        allowed_extensions = {".txt", ".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg", ".gif"}
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext not in allowed_extensions:
             return False
+
+        # 检查文件大小
+        max_size = getattr(settings, "MAX_UPLOAD_SIZE", 10 * 1024 * 1024)  # 10MB
+        try:
+            if os.path.getsize(file_path) > max_size:
+                return False
+        except OSError:
+            return False
+
+        return True
 
     @staticmethod
     def read_text_file(file_path):
-        """读取文本文件，尝试不同编码"""
-        content = None
-        for encoding in FILE_ENCODINGS:
-            try:
-                with open(file_path, "r", encoding=encoding) as f:
-                    content = f.read()
-                break
-            except UnicodeDecodeError:
-                continue
-        return content
+        """读取文本文件"""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except UnicodeDecodeError:
+            # 尝试其他编码
+            for encoding in FILE_ENCODINGS:
+                try:
+                    with open(file_path, "r", encoding=encoding) as f:
+                        return f.read()
+                except UnicodeDecodeError:
+                    continue
+            raise
 
     @staticmethod
     def handle_docx(file_path):
-        """处理Word文档"""
+        """处理DOCX文件"""
         try:
-            # 自定义样式映射
-            style_map = """
-                p[style-name='Title'] => h1:fresh
-                p[style-name='Heading 1'] => h2:fresh
-                p[style-name='Heading 2'] => h3:fresh
-                p[style-name='Heading 3'] => h4:fresh
-                p[style-name='Normal'] => p:fresh
-                r[style-name='Strong'] => strong
-                r[style-name='Emphasis'] => em
-                table => table.word-table
-                tr => tr
-                td => td
-                p[style-name='List Paragraph'] => li:fresh
-            """
-
-            def handle_image(image):
-                try:
-                    with image.open() as image_bytes:
-                        encoded_image = base64.b64encode(image_bytes.read()).decode(
-                            "utf-8"
-                        )
-                        image_type = image.content_type or "image/png"
-                        return {
-                            "src": f"data:{image_type};base64,{encoded_image}",
-                            "class": "word-image",
-                        }
-                except Exception as e:
-                    logger.error(f"图片处理失败: {str(e)}")
-                    return {"src": "", "alt": "图片加载失败"}
-
+            # 使用mammoth转换DOCX为HTML
             with open(file_path, "rb") as docx_file:
-                # 使用自定义样式映射转换文档
-                result = mammoth.convert_to_html(
-                    docx_file,
-                    style_map=style_map,
-                    convert_image=mammoth.images.img_element(handle_image),
-                )
+                result = mammoth.convert_to_html(docx_file)
+                html_content = result.value
 
-                # 添加警告信息到日志
-                if result.messages:
-                    for message in result.messages:
-                        logger.warning(f"Word转换警告: {message}")
+            # 处理图片
+            def handle_image(image):
+                with image.open() as image_bytes:
+                    encoded = base64.b64encode(image_bytes.read()).decode()
+                    return f'<img src="data:{image.content_type};base64,{encoded}" />'
 
-                # 添加基本样式
-                html_content = f"""
-                <div class="word-document">
-                    <style>
-                        .word-document {{
-                            font-family: 'Microsoft YaHei', Arial, sans-serif;
-                            line-height: 1.6;
-                            color: #333;
-                            max-width: 100%;
-                            margin: 0 auto;
-                            padding: 20px;
-                        }}
-                        .word-document h1 {{ font-size: 24px; margin: 20px 0; color: #2c3e50; }}
-                        .word-document h2 {{ font-size: 20px; margin: 18px 0; color: #34495e; }}
-                        .word-document h3 {{ font-size: 18px; margin: 16px 0; color: #2c3e50; }}
-                        .word-document h4 {{ font-size: 16px; margin: 14px 0; color: #34495e; }}
-                        .word-document p {{ margin: 12px 0; text-align: justify; }}
-                        .word-document .word-image {{
-                            max-width: 100%;
-                            height: auto;
-                            margin: 15px auto;
-                            display: block;
-                            border-radius: 4px;
-                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                        }}
-                        .word-document .word-table {{
-                            width: 100%;
-                            border-collapse: collapse;
-                            margin: 15px 0;
-                            background: #fff;
-                        }}
-                        .word-document .word-table td,
-                        .word-document .word-table th {{
-                            border: 1px solid #ddd;
-                            padding: 12px;
-                            text-align: left;
-                        }}
-                        .word-document .word-table tr:nth-child(even) {{
-                            background-color: #f8f9fa;
-                        }}
-                        .word-document ul,
-                        .word-document ol {{
-                            margin: 12px 0;
-                            padding-left: 24px;
-                        }}
-                        .word-document li {{
-                            margin: 6px 0;
-                        }}
-                    </style>
-                    {result.value}
-                </div>
-                """
-                return html_content
+            # 转换包含图片的DOCX
+            with open(file_path, "rb") as docx_file:
+                result = mammoth.convert_to_html(docx_file, convert_image=handle_image)
+                html_content = result.value
 
-        except FileNotFoundError:
-            logger.error(f"Word文档不存在: {file_path}")
-            return None
-        except mammoth.DocumentHasZeroPages:
-            logger.error(f"Word文档为空: {file_path}")
-            return None
-        except mammoth.InvalidFileFormat:
-            logger.error(f"无效的Word文档格式: {file_path}")
-            return None
+            return html_content
+
         except Exception as e:
-            logger.error(f"Word文档处理失败: {str(e)}")
-            return None
+            logger.error(f"处理DOCX文件失败: {str(e)}")
+            return f"<p>无法读取文件: {str(e)}</p>"
 
 
 class DirectoryHandler:
@@ -313,104 +276,102 @@ class DirectoryHandler:
     @staticmethod
     def get_directory_structure(root_dir):
         """获取目录结构"""
+        structure = []
+
         try:
-            name = os.path.basename(root_dir)
-            # 获取相对于 BASE_DIR 的路径
-            rel_path = os.path.relpath(root_dir, settings.BASE_DIR)
-            structure = {
-                "text": name,
-                "children": [],
-                "type": "folder",
-                "id": rel_path,  # 使用相对路径
-            }
+            for root, dirs, files in os.walk(root_dir):
+                # 计算相对路径
+                rel_path = os.path.relpath(root, root_dir)
+                if rel_path == ".":
+                    rel_path = ""
 
-            if not os.path.exists(root_dir):
-                logger.warning(f"目录不存在: {root_dir}")
-                return structure
-
-            # 过滤掉隐藏文件和目录
-            items = [
-                item
-                for item in sorted(os.listdir(root_dir))
-                if not item.startswith(".")
-            ]
-
-            for item in items:
-                abs_path = os.path.join(root_dir, item)
-                rel_item_path = os.path.relpath(abs_path, settings.BASE_DIR)
-
-                if os.path.isdir(abs_path):
-                    child_structure = DirectoryHandler.get_directory_structure(abs_path)
-                    # 确保子目录的 id 也是相对路径
-                    child_structure["id"] = rel_item_path
-                    structure["children"].append(child_structure)
-                else:
-                    structure["children"].append(
-                        {
-                            "text": item,
-                            "type": "file",
-                            "icon": "jstree-file",
-                            "id": rel_item_path,
-                        }
+                # 添加目录
+                for dir_name in sorted(dirs):
+                    dir_path = os.path.join(rel_path, dir_name) if rel_path else dir_name
+                    structure.append(
+                        {"name": dir_name, "path": dir_path, "type": "directory", "size": None}
                     )
-            return structure
+
+                # 添加文件
+                for file_name in sorted(files):
+                    file_path = os.path.join(rel_path, file_name) if rel_path else file_name
+                    full_path = os.path.join(root, file_name)
+
+                    try:
+                        size = os.path.getsize(full_path)
+                    except OSError:
+                        size = 0
+
+                    structure.append(
+                        {"name": file_name, "path": file_path, "type": "file", "size": size}
+                    )
+
         except Exception as e:
             logger.error(f"获取目录结构失败: {str(e)}")
-            return structure
+
+        return structure
 
 
 class GradeHandler:
     @staticmethod
     def validate_grade(grade):
-        """验证评分是否有效"""
-        from .config import GRADE_LEVELS
-
-        return grade in GRADE_LEVELS
+        """验证成绩格式"""
+        valid_grades = ["A", "B", "C", "D", "E"]
+        return grade.upper() in valid_grades if grade else False
 
     @staticmethod
     def get_grade_description(grade):
-        """获取评分描述"""
-        from .config import GRADE_LEVELS
-
-        return GRADE_LEVELS.get(grade, {}).get("description", "未知")
-
-
-from docx import Document
-from volcenginesdkarkruntime import Ark
+        """获取成绩描述"""
+        descriptions = {"A": "优秀", "B": "良好", "C": "中等", "D": "及格", "E": "不及格"}
+        return descriptions.get(grade.upper(), "未知")
 
 
 def read_word_file(file_path):
-    """读取 Word 文件内容"""
-    doc = Document(file_path)
-    full_text = []
-    for para in doc.paragraphs:
-        full_text.append(para.text)
-    return '\n'.join(full_text)
+    """读取Word文件内容"""
+    try:
+        from docx import Document
+
+        doc = Document(file_path)
+        return "\n".join([paragraph.text for paragraph in doc.paragraphs])
+    except Exception as e:
+        logger.error(f"读取Word文件失败: {str(e)}")
+        return ""
 
 
 def get_ai_evaluation(api_key, text):
-    """调用火山引擎 AI 获取成绩和评价"""
-    client = Ark(api_key=api_key)
-    prompt = f"请阅读以下内容并给出成绩和 50 字以内的评价：\n{text}"
+    """获取AI评价"""
     try:
-        resp = client.chat.completions.create(
+        from volcenginesdkarkruntime import Ark
+
+        client = Ark(api_key=api_key)
+        prompt = f"请阅读以下内容并给出成绩和 50 字以内的评价：\n{text}"
+
+        response = client.chat.completions.create(
             model="deepseek-r1-250528",
             messages=[{"content": prompt, "role": "user"}],
         )
-        return resp.choices[0].message.content
+
+        return response.choices[0].message.content
     except Exception as e:
+        logger.error(f"AI评价失败: {str(e)}")
         return f"请求出错：{str(e)}"
 
 
 def process_multiple_files(api_key, file_paths):
-    """处理多个 Word 文件"""
-    results = {}
+    """批量处理多个文件"""
+    results = []
+
     for file_path in file_paths:
         try:
-            text = read_word_file(file_path)
-            evaluation = get_ai_evaluation(api_key, text)
-            results[file_path] = evaluation
+            content = read_word_file(file_path)
+            if content:
+                evaluation = get_ai_evaluation(api_key, content)
+                results.append({"file": file_path, "evaluation": evaluation, "status": "success"})
+            else:
+                results.append({"file": file_path, "evaluation": "文件内容为空", "status": "error"})
         except Exception as e:
-            results[file_path] = f"处理文件出错：{str(e)}"
-    return results
+            results.append(
+                {"file": file_path, "evaluation": f"处理失败: {str(e)}", "status": "error"}
+            )
 
+    return results

@@ -1,11 +1,17 @@
-from django.db import models
-from django.core.exceptions import ValidationError
-import os
 import logging
-from urllib.parse import urlparse, urlunparse
+import os
+from urllib.parse import urlparse
+
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import models
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
+
+
+def get_default_branches():
+    return ["main"]
 
 
 class Student(models.Model):
@@ -44,12 +50,8 @@ class Submission(models.Model):
         ("failed", "未通过"),
     ]
 
-    student = models.ForeignKey(
-        Student, on_delete=models.CASCADE, related_name="submissions"
-    )
-    assignment = models.ForeignKey(
-        Assignment, on_delete=models.CASCADE, related_name="submissions"
-    )
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name="submissions")
+    assignment = models.ForeignKey(Assignment, on_delete=models.CASCADE, related_name="submissions")
     submitted_at = models.DateTimeField(auto_now_add=True)
     grade = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="pending")
@@ -89,141 +91,109 @@ class GlobalConfig(models.Model):
         verbose_name_plural = "全局配置"
 
     def __str__(self):
-        if self.updated_at:
-            return f'全局配置 ({self.updated_at.strftime("%Y-%m-%d %H:%M")})'
-        return "全局配置"
+        return f"GlobalConfig(id={self.id}, repo_base_dir={self.repo_base_dir})"
 
     @classmethod
     def get_or_create_config(cls):
         """获取或创建全局配置实例"""
         config, created = cls.objects.get_or_create(
             defaults={
-                "https_username": "",
-                "https_password": "",
-                "ssh_key": "",
                 "repo_base_dir": "~/jobs",
             }
         )
         return config
 
     def clean(self):
-        """验证模型数据"""
-        super().clean()
-        # 验证 HTTPS 认证信息
-        if bool(self.https_username) != bool(self.https_password):
-            raise ValidationError("HTTPS 用户名和密码必须同时提供或同时为空")
-
-        # 验证 SSH 密钥
-        if self.ssh_key:
-            key_content = self.ssh_key.strip()
-            if not (
-                key_content.startswith("-----BEGIN")
-                and key_content.endswith("PRIVATE KEY-----")
-            ):
-                raise ValidationError(
-                    "无效的 SSH 私钥格式，请确保上传的是有效的 SSH 私钥文件"
-                )
+        """验证配置"""
+        if self.repo_base_dir:
+            # 检查路径是否有效
+            expanded_path = os.path.expanduser(self.repo_base_dir)
+            if not os.path.exists(expanded_path):
+                try:
+                    os.makedirs(expanded_path, exist_ok=True)
+                except Exception as e:
+                    raise ValidationError(f"无法创建目录 {expanded_path}: {str(e)}")
 
     def save(self, *args, **kwargs):
-        """保存模型数据"""
-        # 确保只有一个实例
-        if not self.pk and GlobalConfig.objects.exists():
-            raise ValidationError("只能创建一个全局配置实例")
+        """保存前验证"""
+        self.clean()
         super().save(*args, **kwargs)
 
 
 class Repository(models.Model):
-    name = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=255)
     url = models.CharField(max_length=255, unique=True)
     branch = models.CharField(max_length=255, default="main")
     _branches = models.JSONField(
-        default=list, help_text="仓库的所有分支列表", db_column="branches"
+        default=get_default_branches, help_text="仓库的所有分支列表", db_column="branches"
+    )
+    owner = models.ForeignKey(
+        User, on_delete=models.CASCADE, null=True, blank=True, help_text="仓库所有者"
     )
     last_sync_time = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        unique_together = ("name", "owner")
+
     def __str__(self):
-        return self.name
+        return f"Repository(id={self.id}, name={self.name}, branch={self.branch})"
 
     @property
     def branches(self):
         """获取分支列表"""
-        return self._branches if isinstance(self._branches, list) else []
+        if self._branches is None:
+            return ["main"]
+        return self._branches
 
     @branches.setter
     def branches(self, value):
         """设置分支列表"""
-        self._branches = value if isinstance(value, list) else []
+        if isinstance(value, list):
+            self._branches = value
+        else:
+            self._branches = list(value) if value else []
 
     def get_local_path(self):
         """获取本地路径"""
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
-            return None
-
-        # 展开用户目录
+        config = GlobalConfig.get_or_create_config()
         base_dir = os.path.expanduser(config.repo_base_dir)
-
-        # 确保基础目录存在
-        if not os.path.exists(base_dir):
-            try:
-                os.makedirs(base_dir, exist_ok=True)
-            except Exception as e:
-                logger.error(f"创建基础目录失败: {str(e)}")
-                return None
-
-        # 构建完整的仓库路径
-        repo_path = os.path.join(base_dir, self.name)
-
-        # 确保路径是绝对路径
-        return os.path.abspath(repo_path)
+        return os.path.join(base_dir, self.name)
 
     def is_cloned(self):
-        """检查仓库是否已克隆"""
+        """检查是否已克隆"""
         local_path = self.get_local_path()
-        return local_path and os.path.exists(local_path)
+        return os.path.exists(local_path) and os.path.exists(os.path.join(local_path, ".git"))
 
     def is_ssh_protocol(self):
-        """检查是否使用 SSH 协议"""
+        """检查是否为SSH协议"""
         return self.url.startswith("git@") or self.url.startswith("ssh://")
 
     def get_clone_url(self):
-        """获取克隆 URL"""
-        config = GlobalConfig.objects.first()
-        if not config:
-            return self.url
-
-        if self.is_ssh_protocol():
-            return self.url
-        else:
-            # 从 URL 中提取用户名和密码
-            parsed = urlparse(self.url)
-            netloc = f"{config.https_username}:{config.https_password}@{parsed.netloc}"
-            return urlunparse(parsed._replace(netloc=netloc))
+        """获取克隆URL"""
+        # 如果有SSH密钥配置，使用SSH URL
+        config = GlobalConfig.get_or_create_config()
+        if config.ssh_key or config.ssh_key_file:
+            if self.url.startswith("https://"):
+                # 将HTTPS URL转换为SSH URL
+                parsed = urlparse(self.url)
+                return f"git@{parsed.netloc}:{parsed.path.lstrip('/')}"
+        return self.url
 
     @staticmethod
     def generate_name_from_url(url):
-        """从 URL 生成仓库名称"""
-        # 移除 .git 后缀
-        url = url.rstrip(".git")
+        """从URL生成仓库名称"""
+        parsed = urlparse(url)
+        name = os.path.splitext(os.path.basename(parsed.path))[0]
+        return name if name else "unknown"
 
-        # 如果是 SSH 格式，提取仓库名
-        if url.startswith("git@"):
-            # 获取最后一个冒号后的部分
-            repo_part = url.split(":")[-1]
-            # 获取最后一个斜杠后的部分
-            return repo_part.split("/")[-1]
-
-        # 如果是 HTTPS 格式，提取仓库名
-        elif url.startswith(("http://", "https://")):
-            # 移除协议和域名部分
-            path = url.split("://")[-1].split("/")[-1]
-            return path
-
-        return url
+    def clean(self):
+        """验证仓库配置"""
+        if not self.name:
+            self.name = self.generate_name_from_url(self.url)
 
     def save(self, *args, **kwargs):
-        if self.pk:
-            self._original_url = self.url
+        """保存前验证"""
+        self.clean()
         super().save(*args, **kwargs)

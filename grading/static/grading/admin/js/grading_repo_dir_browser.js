@@ -126,4 +126,4 @@ document.addEventListener('DOMContentLoaded', function () {
 
     document.getElementById('selectedPath').textContent = relativePath;
   });
-}); 
+});

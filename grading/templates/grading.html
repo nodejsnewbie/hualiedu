@@ -40,25 +40,7 @@
 
         <!-- 右侧内容区 -->
         <div class="col-md-9">
-            <!-- 作业上传与AI评分区域 -->
-            <div class="card mb-3">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">上传作业并自动评分</h5>
-                </div>
-                <div class="card-body">
-                    <form id="upload-homework-form" enctype="multipart/form-data">
-                        <div class="mb-3">
-                            <input type="file" class="form-control" name="file" accept=".docx" required />
-                        </div>
-                        <button type="submit" class="btn btn-primary">上传并评分</button>
-                    </form>
-                    <div id="ai-score-result" class="mt-3" style="display:none;">
-                        <h6>AI评分结果：</h6>
-                        <div id="ai-score"></div>
-                        <div id="ai-comment" class="mt-2"></div>
-                    </div>
-                </div>
-            </div>
+
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件内容</h5>
@@ -88,7 +70,7 @@
                     </div>
                 </div>
             </div>
-            
+
             <!-- 评分区域 -->
             <div class="card mt-3">
                 <div class="card-header">
@@ -115,7 +97,7 @@
                                 文字等级
                             </button>
                         </div>
-                        
+
                         <!-- 字母等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="字母评分选项" id="letter-grade-buttons">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="A">A</button>
@@ -124,7 +106,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="D">D</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="E">E</button>
                         </div>
-                        
+
                         <!-- 文字等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="文字评分选项" id="text-grade-buttons" style="display: none;">
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="优秀">优秀</button>
@@ -133,7 +115,7 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="及格">及格</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="不及格">不及格</button>
                         </div>
-                        
+
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
                             确定
                         </button>
@@ -193,7 +175,7 @@
     // 将初始数据传递给 JavaScript
     window.initialTreeData = {{ initial_tree_data|safe }};
     console.log('Initial tree data in template:', window.initialTreeData);
-    
+
     // 设置 CSRF token
     $.ajaxSetup({
         beforeSend: function(xhr, settings) {
@@ -220,15 +202,15 @@
 <script>
     // 设置 PDF.js worker 路径
     pdfjsLib.GlobalWorkerOptions.workerSrc = "{% static 'grading/vendor/pdfjs/pdf.worker.min.js' %}";
-    
+
     // 确保评分功能在页面完全加载后重新初始化
     $(document).ready(function() {
         console.log('=== 评分系统页面完全加载完成 ===');
-        
+
         // 延迟重新初始化评分功能，确保其他库加载完成
         setTimeout(function() {
             console.log('重新初始化评分功能...');
-            
+
             // 重新绑定评分方式切换按钮事件
             $(document).off('click', '.grade-mode-btn').on('click', '.grade-mode-btn', function(e) {
                 e.preventDefault();
@@ -244,7 +226,7 @@
                     console.error('switchGradeMode函数未定义');
                 }
             });
-            
+
             // 重新绑定评分按钮点击事件
             $(document).off('click', '.grade-button').on('click', '.grade-button', function(e) {
                 e.preventDefault();
@@ -257,7 +239,7 @@
                     console.error('saveGrade函数未定义');
                 }
             });
-            
+
             // 重新绑定确定按钮点击事件
             $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function(e) {
                 e.preventDefault();
@@ -269,7 +251,7 @@
                     console.error('addGradeToFile函数未定义');
                 }
             });
-            
+
             // 重新绑定撤销按钮点击事件
             $(document).off('click', '#cancel-grade').on('click', '#cancel-grade', function(e) {
                 e.preventDefault();
@@ -280,7 +262,7 @@
                     console.error('cancelGrade函数未定义');
                 }
             });
-            
+
             console.log('评分功能重新初始化完成');
         }, 1000);
     });
