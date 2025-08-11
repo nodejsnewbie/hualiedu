@@ -144,6 +144,50 @@
     </div>
 </div>
 
+<!-- AI评分提示模态框 -->
+<div class="modal fade" id="aiScoreAlertModal" tabindex="-1" aria-labelledby="aiScoreAlertModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="aiScoreAlertModalLabel">
+                    <i class="bi bi-exclamation-triangle text-warning"></i> AI评分提示
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-warning" role="alert">
+                    <h6 class="alert-heading">
+                        <i class="bi bi-info-circle"></i> 提示信息
+                    </h6>
+                    <p id="aiScoreAlertMessage" class="mb-0"></p>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6 class="mb-3">
+                            <i class="bi bi-file-text"></i> 文件内容预览
+                        </h6>
+                        <div id="fileContentPreview" class="border rounded p-3" style="max-height: 400px; overflow-y: auto; background-color: #f8f9fa; font-family: monospace; font-size: 0.9em;">
+                            <div class="text-muted">正在加载文件内容...</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="mb-3">
+                            <i class="bi bi-search"></i> 评分信息
+                        </h6>
+                        <div id="gradeInfoPreview" class="border rounded p-3" style="max-height: 400px; overflow-y: auto; background-color: #f8f9fa;">
+                            <div class="text-muted">正在检查评分信息...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                <button type="button" class="btn btn-primary" id="forceAiScore" style="display: none;">强制AI评分</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- 教师评价模态框 -->
 <div class="modal fade" id="teacherCommentModal" tabindex="-1" aria-labelledby="teacherCommentModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
@@ -155,13 +199,7 @@
             <div class="modal-body">
                 <div class="mb-3">
                     <label for="teacherCommentText" class="form-label">评价内容：</label>
-                    <textarea class="form-control" id="teacherCommentText" rows="5" placeholder="请输入教师评价内容..."></textarea>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">当前评价：</label>
-                    <div id="currentTeacherComments" class="form-control-plaintext border rounded p-3" style="min-height: 60px; background-color: #f8f9fa;">
-                        暂无评价
-                    </div>
+                    <textarea class="form-control" id="teacherCommentText" rows="8" placeholder="请输入或修改教师评价内容..."></textarea>
                 </div>
             </div>
             <div class="modal-footer">

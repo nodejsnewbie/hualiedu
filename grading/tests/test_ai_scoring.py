@@ -5,11 +5,9 @@ Django tests for AI scoring functionality.
 import json
 import os
 import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
-from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 
@@ -95,6 +93,30 @@ class AIScoringTest(TestCase):
 
         self.assertEqual(response.status_code, 302)  # Redirect to login
 
+    def test_ai_score_view_already_graded(self):
+        """Test AI scoring when file already has a grade."""
+        # Create a document with existing grade
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Test document content")
+        # Add a table with grade
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "评定分数"
+        table.cell(0, 1).text = "A"
+        doc.save(self.test_file_path)
+
+        self.client.login(username="testuser", password="testpass123")
+
+        data = {"path": "test_document.docx"}
+        response = self.client.post(reverse("grading:ai_score"), data)
+
+        self.assertEqual(response.status_code, 400)
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["status"], "error")
+        self.assertIn("已有评分", response_data["message"])
+        self.assertIn("A", response_data["message"])
+
     @patch("grading.views.volcengine_score_homework")
     def test_batch_ai_score_view_success(self, mock_ai_score):
         """Test successful batch AI scoring."""
@@ -125,6 +147,51 @@ class AIScoringTest(TestCase):
         response = self.client.post(reverse("grading:batch_ai_score"), data)
 
         self.assertEqual(response.status_code, 302)  # Redirect to login
+
+    def test_batch_ai_score_view_with_graded_files(self):
+        """Test batch AI scoring when some files already have grades."""
+        # Create test directory
+        test_dir = os.path.join(self.temp_dir, "test_directory")
+        os.makedirs(test_dir, exist_ok=True)
+
+        # Create a file with existing grade
+        graded_file_path = os.path.join(test_dir, "graded_document.docx")
+        from docx import Document
+
+        doc = Document()
+        doc.add_paragraph("Test document content")
+        # Add a table with grade
+        table = doc.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = "评定分数"
+        table.cell(0, 1).text = "B"
+        doc.save(graded_file_path)
+
+        # Create a file without grade
+        ungraded_file_path = os.path.join(test_dir, "ungraded_document.docx")
+        doc = Document()
+        doc.add_paragraph("Test document content")
+        doc.save(ungraded_file_path)
+
+        self.client.login(username="testuser", password="testpass123")
+
+        data = {"path": "test_directory"}
+        response = self.client.post(reverse("grading:batch_ai_score"), data)
+
+        self.assertEqual(response.status_code, 200)
+        response_data = json.loads(response.content)
+        self.assertEqual(response_data["status"], "success")
+
+        # Check that we have results for both files
+        self.assertEqual(len(response_data["results"]), 2)
+
+        # Find the graded file result
+        graded_result = next(
+            (r for r in response_data["results"] if r["file"] == "graded_document.docx"), None
+        )
+        self.assertIsNotNone(graded_result)
+        self.assertFalse(graded_result["success"])
+        self.assertIn("已有评分", graded_result["error"])
+        self.assertIn("B", graded_result["error"])
 
 
 class AIScoringFunctionTest(TestCase):
@@ -240,16 +307,14 @@ class AIScoringIntegrationTest(TestCase):
         doc.save(os.path.join(self.temp_dir, "test_directory", "test2.docx"))
 
     @patch("grading.views.volcengine_score_homework")
-    @patch("grading.views.save_teacher_comment_logic")
-    @patch("grading.views.add_grade_to_file_logic")
-    def test_ai_scoring_integration(self, mock_add_grade, mock_save_comment, mock_ai_score):
+    @patch("grading.views.write_grade_and_comment_to_file")
+    def test_ai_scoring_integration(self, mock_write_file, mock_ai_score):
         """Test AI scoring integration with file operations."""
         # Mock AI scoring response
         mock_ai_score.return_value = (90, "Excellent work!")
 
         # Mock file operations
-        mock_save_comment.return_value = None
-        mock_add_grade.return_value = None
+        mock_write_file.return_value = None
 
         data = {"path": "test_document.docx"}
         response = self.client.post(reverse("grading:ai_score"), data)
@@ -258,9 +323,8 @@ class AIScoringIntegrationTest(TestCase):
         response_data = json.loads(response.content)
         self.assertEqual(response_data["status"], "success")
 
-        # Verify file operations were called
-        mock_save_comment.assert_called_once()
-        mock_add_grade.assert_called_once()
+        # Verify unified file operation was called
+        mock_write_file.assert_called_once()
 
     @patch("grading.views.volcengine_score_homework")
     def test_ai_scoring_with_different_content_types(self, mock_ai_score):

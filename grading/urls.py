@@ -25,6 +25,7 @@ urlpatterns = [
     path("get_dir_file_count/", views.get_dir_file_count, name="get_dir_file_count"),
     path("save_teacher_comment/", views.save_teacher_comment, name="save_teacher_comment"),
     path("get_teacher_comment/", views.get_teacher_comment, name="get_teacher_comment"),
+    path("get_file_grade_info/", views.get_file_grade_info_api, name="get_file_grade_info"),
     path("ai_score/", views.ai_score_view, name="ai_score"),
     path("batch_ai_score/", views.batch_ai_score_view, name="batch_ai_score"),
     # 批量登分相关路由

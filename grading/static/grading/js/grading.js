@@ -900,12 +900,154 @@ function handleBatchAiScore(path) {
         },
         error: function(xhr, status, error) {
             console.error('批量AI评分请求失败:', error);
-            showError('批量AI评分请求失败: ' + (xhr.responseJSON ? xhr.responseJSON.message : '服务器错误'));
+            let errorMessage = '批量AI评分请求失败';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMessage = xhr.responseJSON.message;
+            } else if (xhr.status === 400) {
+                errorMessage = '请求参数错误';
+            } else if (xhr.status === 500) {
+                errorMessage = '服务器内部错误';
+            }
+            showError(errorMessage);
         },
         complete: function() {
             hideLoading();
         }
     });
+}
+
+// 显示AI评分提示模态框
+function showAiScoreAlertModal(message, filePath) {
+    console.log('显示AI评分提示模态框:', message, filePath);
+
+    // 设置提示信息
+    $('#aiScoreAlertMessage').text(message);
+
+    // 加载文件内容
+    loadFileContentForModal(filePath);
+
+    // 加载评分信息
+    loadGradeInfoForModal(filePath);
+
+    // 显示模态框
+    $('#aiScoreAlertModal').modal('show');
+}
+
+// 为模态框加载文件内容
+function loadFileContentForModal(filePath) {
+    if (!filePath) {
+        $('#fileContentPreview').html('<div class="text-danger">文件路径无效</div>');
+        return;
+    }
+
+    $('#fileContentPreview').html('<div class="text-muted">正在加载文件内容...</div>');
+
+    $.ajax({
+        url: '/grading/get_file_content/',
+        method: 'GET',
+        data: {
+            file_path: filePath
+        },
+        success: function(response) {
+            if (response.success) {
+                let content = response.content || '文件内容为空';
+                // 限制显示长度，避免模态框过大
+                if (content.length > 2000) {
+                    content = content.substring(0, 2000) + '\n\n... (内容过长，已截断)';
+                }
+                $('#fileContentPreview').html('<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
+                    content.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
+            } else {
+                $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + (response.message || '未知错误') + '</div>');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('加载文件内容失败:', error);
+            $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + error + '</div>');
+        }
+    });
+}
+
+// 为模态框加载评分信息
+function loadGradeInfoForModal(filePath) {
+    if (!filePath) {
+        $('#gradeInfoPreview').html('<div class="text-danger">文件路径无效</div>');
+        return;
+    }
+
+    $('#gradeInfoPreview').html('<div class="text-muted">正在检查评分信息...</div>');
+
+    // 使用专门的API来获取评分信息
+    $.ajax({
+        url: '/grading/get_file_grade_info/',
+        method: 'GET',
+        data: {
+            file_path: filePath
+        },
+        success: function(response) {
+            if (response.status === 'success') {
+                let gradeInfo = formatGradeInfoForModal(response.grade_info, response.content_preview, response.content_length);
+                $('#gradeInfoPreview').html(gradeInfo);
+            } else {
+                $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + (response.message || '未知错误') + '</div>');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('检查评分信息失败:', error);
+            $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + error + '</div>');
+        }
+    });
+}
+
+// 格式化评分信息用于模态框显示
+function formatGradeInfoForModal(gradeInfo, contentPreview, contentLength) {
+    let html = '<div class="mb-2"><strong>评分信息分析：</strong></div>';
+
+    // 显示评分状态
+    if (gradeInfo.has_grade) {
+        html += '<div class="alert alert-warning mb-2">';
+        html += '<i class="bi bi-exclamation-triangle"></i> <strong>已发现评分！</strong>';
+        html += '</div>';
+
+        // 显示具体评分信息
+        html += '<div class="card mb-2">';
+        html += '<div class="card-body p-2">';
+        html += '<div class="row">';
+        html += '<div class="col-6"><strong>评分：</strong></div>';
+        html += '<div class="col-6"><span class="badge bg-primary">' + gradeInfo.grade + '</span></div>';
+        html += '</div>';
+        html += '<div class="row">';
+        html += '<div class="col-6"><strong>评分类型：</strong></div>';
+        html += '<div class="col-6"><span class="badge bg-info">' + (gradeInfo.grade_type || '未知') + '</span></div>';
+        html += '</div>';
+        html += '<div class="row">';
+        html += '<div class="col-6"><strong>位置：</strong></div>';
+        html += '<div class="col-6"><span class="badge bg-secondary">' + (gradeInfo.in_table ? '表格中' : '段落中') + '</span></div>';
+        html += '</div>';
+        html += '</div>';
+        html += '</div>';
+
+        // 显示AI评分状态
+        html += '<div class="alert alert-danger mb-2">';
+        html += '<i class="bi bi-robot"></i> <strong>AI评分已禁用</strong><br>';
+        html += '该文件已有评分，无法进行AI评分。如需重新评分，请先删除现有评分。';
+        html += '</div>';
+    } else {
+        html += '<div class="alert alert-success mb-2">';
+        html += '<i class="bi bi-check-circle"></i> <strong>未发现评分</strong><br>';
+        html += '该文件可以进行AI评分。';
+        html += '</div>';
+    }
+
+    // 显示文件基本信息
+    html += '<hr><div class="small text-muted">';
+    html += '<div><strong>文件大小：</strong>' + (contentLength || 0) + ' 字符</div>';
+    html += '<div><strong>内容预览：</strong></div>';
+    html += '<div style="max-height: 100px; overflow-y: auto; font-size: 0.8em; background-color: #fff; padding: 5px; border: 1px solid #dee2e6;">';
+    html += contentPreview.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html += '</div></div>';
+
+    return html;
 }
 
 // 页面加载完成后初始化树
@@ -1026,7 +1168,7 @@ $(document).ready(function() {
     $(document).on('click', '#teacher-comment-btn', function() {
         console.log('教师评价按钮被点击，当前文件路径:', currentFilePath);
         if (currentFilePath) {
-            loadTeacherComment(currentFilePath);
+            // 直接显示模态框，评价内容会在模态框显示时自动加载
             $('#teacherCommentModal').modal('show');
         } else {
             alert('请先选择文件');
@@ -1078,7 +1220,20 @@ $(document).ready(function() {
             },
             error: function(xhr, status, error) {
                 console.error('AI评分请求失败:', error);
-                showError('AI评分请求失败: ' + (xhr.responseJSON ? xhr.responseJSON.message : '服务器错误'));
+                let errorMessage = 'AI评分请求失败';
+                if (xhr.responseJSON && xhr.responseJSON.message) {
+                    errorMessage = xhr.responseJSON.message;
+                    // 如果是已有评分的错误，显示弹出框
+                    if (xhr.status === 400 && errorMessage.includes('已有评分')) {
+                        showAiScoreAlertModal(errorMessage, currentFilePath);
+                        return;
+                    }
+                } else if (xhr.status === 400) {
+                    errorMessage = '请求参数错误';
+                } else if (xhr.status === 500) {
+                    errorMessage = '服务器内部错误';
+                }
+                showError(errorMessage);
             },
             complete: function() {
                 // 恢复按钮状态
@@ -1088,9 +1243,39 @@ $(document).ready(function() {
         });
     });
 
-    // 模态框显示时清空输入框
+    // 模态框显示时自动加载评价内容
     $('#teacherCommentModal').on('show.bs.modal', function() {
-        $('#teacherCommentText').val('');
+        console.log('=== 教师评价模态框显示 ===');
+        console.log('当前文件路径:', currentFilePath);
+        console.log('输入框元素:', $('#teacherCommentText').length);
+
+        if (currentFilePath) {
+            console.log('开始加载评价内容...');
+            // 自动加载当前文件的评价内容到输入框
+            loadTeacherComment(currentFilePath);
+        } else {
+            console.log('没有当前文件路径，清空输入框');
+            $('#teacherCommentText').val('');
+        }
+    });
+
+    // AI评分提示模态框事件处理
+    $('#aiScoreAlertModal').on('show.bs.modal', function() {
+        // 隐藏强制AI评分按钮（默认情况下）
+        $('#forceAiScore').hide();
+    });
+
+    // 强制AI评分按钮点击事件
+    $('#forceAiScore').on('click', function() {
+        if (currentFilePath) {
+            // 关闭模态框
+            $('#aiScoreAlertModal').modal('hide');
+
+            // 执行强制AI评分（这里可以添加一个特殊的参数来跳过检查）
+            console.log('执行强制AI评分:', currentFilePath);
+            // TODO: 实现强制AI评分功能
+            alert('强制AI评分功能正在开发中...');
+        }
     });
 });
 
@@ -1098,7 +1283,7 @@ $(document).ready(function() {
 window.loadTeacherComment = function(filePath) {
     console.log('加载教师评价，文件路径:', filePath);
     if (!filePath) {
-        $('#currentTeacherComments').text('暂无评价');
+        $('#teacherCommentText').val('');
         return;
     }
 
@@ -1117,20 +1302,31 @@ window.loadTeacherComment = function(filePath) {
 
             if (response.success) {
                 console.log('获取评价成功，准备更新显示');
-                const commentText = response.comment || '暂无评价';
+                const commentText = response.comment || '';
                 console.log('评价文本:', commentText);
-                $('#currentTeacherComments').html(commentText.replace(/\n/g, '<br>'));
-                console.log('评价显示已更新');
+                console.log('输入框元素存在:', $('#teacherCommentText').length > 0);
+
+                // 将评价内容载入到输入框中，方便直接修改
+                $('#teacherCommentText').val(commentText);
+
+                console.log('评价内容已载入到输入框');
+                console.log('输入框当前值:', $('#teacherCommentText').val());
+
+                // 如果评价内容为空或"暂无评价"，显示提示信息
+                if (!commentText || commentText === '暂无评价') {
+                    console.log('文件中没有找到评价内容，显示提示信息');
+                    $('#teacherCommentText').attr('placeholder', '文件中没有找到评价内容，请在此输入新的评价...');
+                }
             } else {
                 console.error('获取评价失败:', response.message);
-                $('#currentTeacherComments').text('获取评价失败: ' + response.message);
+                alert('获取评价失败: ' + response.message);
             }
         },
         error: function(xhr, status, error) {
             console.error('获取教师评价失败:', error);
             console.error('XHR状态:', xhr.status);
             console.error('XHR响应:', xhr.responseText);
-            $('#currentTeacherComments').text('获取评价失败');
+            alert('获取评价失败: ' + error);
         }
     });
 }
@@ -1167,7 +1363,6 @@ window.saveTeacherComment = function() {
 
             if (response.success) {
                 console.log('保存成功，准备刷新评价显示');
-                $('#teacherCommentText').val('');
 
                 // 延迟一点时间再加载评价，确保文件写入完成
                 setTimeout(function() {
