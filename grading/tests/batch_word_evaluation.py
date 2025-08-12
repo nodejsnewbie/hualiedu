@@ -43,9 +43,9 @@ def process_multiple_files(api_key, file_paths):
 if __name__ == "__main__":
     # 从环境变量获取 API Key
     api_key = os.environ.get("ARK_API_KEY")
-    api_key = "TWpOaFlUZ3lNemsxTURNd05EUmxOVGswWlRZelptUXpNakJqT1RCa05HRQ=="
     if not api_key:
         print("请设置 ARK_API_KEY 环境变量")
+        print("示例: export ARK_API_KEY=your_api_key_here")
     else:
         # 请替换为你的 Word 文件路径列表
         file_paths = [

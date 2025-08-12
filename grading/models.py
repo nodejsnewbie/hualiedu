@@ -197,3 +197,47 @@ class Repository(models.Model):
         """保存前验证"""
         self.clean()
         super().save(*args, **kwargs)
+
+
+class GradeTypeConfig(models.Model):
+    """评分类型配置模型"""
+
+    GRADE_TYPE_CHOICES = [
+        ("letter", "字母等级 (A/B/C/D/E)"),
+        ("text", "文本等级 (优秀/良好/中等/及格/不及格)"),
+        ("numeric", "数字等级 (90-100/80-89/70-79/60-69/0-59)"),
+    ]
+
+    # 班级标识（可以是班级名称或路径）
+    class_identifier = models.CharField(
+        max_length=255, unique=True, help_text="班级标识，如班级名称或路径"
+    )
+
+    # 评分类型
+    grade_type = models.CharField(
+        max_length=20, choices=GRADE_TYPE_CHOICES, default="letter", help_text="评分类型"
+    )
+
+    # 是否已锁定（第一次评分后锁定）
+    is_locked = models.BooleanField(default=False, help_text="是否已锁定评分类型")
+
+    # 创建和更新时间
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_grade_type_config"
+        verbose_name = "评分类型配置"
+        verbose_name_plural = "评分类型配置"
+
+    def __str__(self):
+        return f"{self.class_identifier} - {self.get_grade_type_display()}"
+
+    def lock_grade_type(self):
+        """锁定评分类型"""
+        self.is_locked = True
+        self.save()
+
+    def can_change_grade_type(self):
+        """检查是否可以更改评分类型"""
+        return not self.is_locked

@@ -1,0 +1,749 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}批量AI评分 - 评分系统{% endblock %}
+
+{% block extra_css %}
+<style>
+    .repository-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .repository-card:hover {
+        border-color: #007bff;
+        box-shadow: 0 2px 8px rgba(0,123,255,0.2);
+    }
+
+    .repository-card.selected {
+        border-color: #007bff;
+        background-color: #f8f9fa;
+    }
+
+    .class-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .class-card:hover {
+        border-color: #28a745;
+        box-shadow: 0 2px 8px rgba(40,167,69,0.2);
+    }
+
+    .class-card.selected {
+        border-color: #28a745;
+        background-color: #f8fff9;
+    }
+
+    .homework-card {
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .homework-card:hover {
+        border-color: #ffc107;
+        box-shadow: 0 2px 8px rgba(255,193,7,0.2);
+    }
+
+    .homework-card.selected {
+        border-color: #ffc107;
+        background-color: #fffdf8;
+    }
+
+    .loading {
+        display: none;
+    }
+
+    .result-message {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 5px;
+    }
+
+    .result-success {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+    }
+
+    .result-error {
+        background-color: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+    }
+
+    .step-indicator {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 30px;
+        padding: 20px 0;
+        border-bottom: 2px solid #eee;
+    }
+
+    .step {
+        flex: 1;
+        text-align: center;
+        position: relative;
+    }
+
+    .step.active {
+        color: #007bff;
+        font-weight: bold;
+    }
+
+    .step.completed {
+        color: #28a745;
+    }
+
+    .step-number {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        background-color: #ddd;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 10px;
+        font-weight: bold;
+    }
+
+    .step.active .step-number {
+        background-color: #007bff;
+    }
+
+    .step.completed .step-number {
+        background-color: #28a745;
+    }
+
+    .selection-section {
+        display: none;
+    }
+
+    .selection-section.active {
+        display: block;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+{% csrf_token %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4 class="mb-0">
+                        <i class="fas fa-robot"></i> 批量AI评分
+                    </h4>
+                </div>
+                <div class="card-body">
+                    <!-- 步骤指示器 -->
+                    <div class="step-indicator">
+                        <div class="step active" id="step-1">
+                            <div class="step-number">1</div>
+                            <div class="step-title">选择评分范围</div>
+                        </div>
+                        <div class="step" id="step-2">
+                            <div class="step-number">2</div>
+                            <div class="step-title">选择仓库</div>
+                        </div>
+                        <div class="step" id="step-3">
+                            <div class="step-number">3</div>
+                            <div class="step-title">选择班级/作业</div>
+                        </div>
+                        <div class="step" id="step-4">
+                            <div class="step-number">4</div>
+                            <div class="step-title">开始评分</div>
+                        </div>
+                    </div>
+
+                    <!-- 步骤说明 -->
+                    <div class="alert alert-info">
+                        <h5><i class="fas fa-info-circle"></i> 使用说明</h5>
+                        <ol>
+                            <li><strong>选择评分范围</strong>：选择是对整个仓库、某个班级还是某次作业进行AI评分</li>
+                            <li><strong>选择仓库</strong>：选择包含作业文件的仓库</li>
+                            <li><strong>选择班级/作业</strong>：根据第一步的选择，选择具体的班级或作业</li>
+                            <li><strong>开始评分</strong>：系统将自动对选中的作业进行AI评分</li>
+                        </ol>
+                    </div>
+
+                    <!-- 第一步：选择评分范围 -->
+                    <div class="selection-section active" id="scoring-type-section">
+                        <h5>第一步：选择评分范围</h5>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="card scoring-type-card" data-type="repository">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-folder fa-3x text-primary mb-3"></i>
+                                        <h5>整个仓库</h5>
+                                        <p class="text-muted">对仓库中的所有作业进行AI评分</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card scoring-type-card" data-type="class">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-users fa-3x text-success mb-3"></i>
+                                        <h5>某个班级</h5>
+                                        <p class="text-muted">对指定班级的所有作业进行AI评分</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="card scoring-type-card" data-type="homework">
+                                    <div class="card-body text-center">
+                                        <i class="fas fa-file-alt fa-3x text-warning mb-3"></i>
+                                        <h5>某次作业</h5>
+                                        <p class="text-muted">对指定班级的某次作业进行AI评分</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="button" id="next-step-1" class="btn btn-primary" disabled>
+                                下一步 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 第二步：选择仓库 -->
+                    <div class="selection-section" id="repository-section">
+                        <h5>第二步：选择仓库</h5>
+                        <div id="repository-list">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="sr-only">加载中...</span>
+                                </div>
+                                <p class="mt-2">正在加载仓库列表...</p>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="button" id="prev-step-2" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> 上一步
+                            </button>
+                            <button type="button" id="next-step-2" class="btn btn-primary" disabled>
+                                下一步 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 第三步：选择班级/作业 -->
+                    <div class="selection-section" id="class-homework-section">
+                        <h5>第三步：选择班级/作业</h5>
+                        <div id="class-homework-list">
+                            <div class="text-center">
+                                <div class="spinner-border text-primary" role="status">
+                                    <span class="sr-only">加载中...</span>
+                                </div>
+                                <p class="mt-2">正在加载列表...</p>
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="button" id="prev-step-3" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> 上一步
+                            </button>
+                            <button type="button" id="next-step-3" class="btn btn-primary" disabled>
+                                下一步 <i class="fas fa-arrow-right"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 第四步：开始评分 -->
+                    <div class="selection-section" id="scoring-section">
+                        <h5>第四步：开始评分</h5>
+                        <div class="alert alert-warning">
+                            <h6><i class="fas fa-exclamation-triangle"></i> 确认信息</h6>
+                            <div id="scoring-summary">
+                                <!-- 评分摘要将在这里显示 -->
+                            </div>
+                        </div>
+                        <div class="mt-3">
+                            <button type="button" id="prev-step-4" class="btn btn-secondary">
+                                <i class="fas fa-arrow-left"></i> 上一步
+                            </button>
+                            <button type="button" id="start-scoring-btn" class="btn btn-success btn-lg">
+                                <i class="fas fa-play"></i> 开始AI评分
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 操作按钮 -->
+                    <div class="form-group mt-4">
+                        <button type="button" id="refresh-btn" class="btn btn-secondary btn-lg">
+                            <i class="fas fa-sync-alt"></i> 刷新列表
+                        </button>
+                    </div>
+
+                    <!-- 结果显示 -->
+                    <div id="result-container" class="mt-4" style="display: none;">
+                        <h5>评分结果</h5>
+                        <div id="result-message" class="result-message"></div>
+                        <div id="result-details" class="mt-3">
+                            <h6>详细结果：</h6>
+                            <div id="result-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+let currentStep = 1;
+let selectedScoringType = null;
+let selectedRepository = null;
+let selectedClass = null;
+let selectedHomework = null;
+
+// 初始化页面
+$(document).ready(function() {
+    loadRepositoryList();
+
+    // 绑定事件
+    bindEvents();
+});
+
+function bindEvents() {
+    // 评分类型选择
+    $('.scoring-type-card').click(function() {
+        $('.scoring-type-card').removeClass('border-primary');
+        $(this).addClass('border-primary');
+        selectedScoringType = $(this).data('type');
+        $('#next-step-1').prop('disabled', false);
+    });
+
+    // 步骤导航
+    $('#next-step-1').click(() => goToStep(2));
+    $('#next-step-2').click(() => goToStep(3));
+    $('#next-step-3').click(() => goToStep(4));
+    $('#prev-step-2').click(() => goToStep(1));
+    $('#prev-step-3').click(() => goToStep(2));
+    $('#prev-step-4').click(() => goToStep(3));
+
+    // 开始评分
+    $('#start-scoring-btn').click(startBatchAIScoring);
+
+    // 刷新按钮
+    $('#refresh-btn').click(function() {
+        if (currentStep === 2) {
+            loadRepositoryList();
+        } else if (currentStep === 3) {
+            loadClassHomeworkList();
+        }
+    });
+}
+
+function goToStep(step) {
+    // 隐藏所有步骤
+    $('.selection-section').removeClass('active');
+
+    // 显示当前步骤
+    if (step === 1) {
+        $('#scoring-type-section').addClass('active');
+    } else if (step === 2) {
+        $('#repository-section').addClass('active');
+        loadRepositoryList();
+    } else if (step === 3) {
+        $('#class-homework-section').addClass('active');
+        loadClassHomeworkList();
+    } else if (step === 4) {
+        $('#scoring-section').addClass('active');
+        updateScoringSummary();
+    }
+
+    // 更新步骤指示器
+    updateStepIndicator(step);
+    currentStep = step;
+}
+
+function updateStepIndicator(step) {
+    $('.step').removeClass('active completed');
+    for (let i = 1; i <= 4; i++) {
+        if (i < step) {
+            $(`#step-${i}`).addClass('completed');
+        } else if (i === step) {
+            $(`#step-${i}`).addClass('active');
+        }
+    }
+}
+
+function loadRepositoryList() {
+    $('#repository-list').html(`
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="sr-only">加载中...</span>
+            </div>
+            <p class="mt-2">正在加载仓库列表...</p>
+        </div>
+    `);
+
+    $.get('{% url "grading:batch_ai_score_advanced" %}')
+        .done(function(response) {
+            if (response.status === 'success') {
+                displayRepositoryList(response.repositories);
+            } else {
+                $('#repository-list').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> ${response.message}
+                    </div>
+                `);
+            }
+        })
+        .fail(function() {
+            $('#repository-list').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> 加载仓库列表失败
+                </div>
+            `);
+        });
+}
+
+function displayRepositoryList(repositories) {
+    if (repositories.length === 0) {
+        $('#repository-list').html(`
+            <div class="alert alert-warning">
+                <i class="fas fa-info-circle"></i> 未找到包含成绩登记表的仓库
+            </div>
+        `);
+        return;
+    }
+
+    let html = '';
+    repositories.forEach(function(repo) {
+        html += `
+            <div class="repository-card" data-repo="${repo.name}">
+                <h6><i class="fas fa-folder"></i> ${repo.name}</h6>
+                <p class="text-muted mb-1">包含 ${repo.excel_count} 个成绩登记表</p>
+                <div class="excel-files">
+                    <small>成绩登记表：${repo.excel_files.join(', ')}</small>
+                </div>
+            </div>
+        `;
+    });
+
+    $('#repository-list').html(html);
+
+    // 绑定仓库选择事件
+    $('.repository-card').click(function() {
+        $('.repository-card').removeClass('selected');
+        $(this).addClass('selected');
+        selectedRepository = $(this).data('repo');
+        $('#next-step-2').prop('disabled', false);
+    });
+}
+
+function loadClassHomeworkList() {
+    $('#class-homework-list').html(`
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="sr-only">加载中...</span>
+            </div>
+            <p class="mt-2">正在加载列表...</p>
+        </div>
+    `);
+
+    if (selectedScoringType === 'repository') {
+        // 对整个仓库评分，不需要选择班级或作业
+        $('#class-homework-list').html(`
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle"></i> 将对整个仓库 "${selectedRepository}" 进行AI评分
+            </div>
+        `);
+        $('#next-step-3').prop('disabled', false);
+        return;
+    }
+
+    if (selectedScoringType === 'class') {
+        // 加载班级列表
+        $.get('{% url "grading:get_class_list" %}', { repository: selectedRepository })
+            .done(function(response) {
+                if (response.status === 'success') {
+                    displayClassList(response.classes);
+                } else {
+                    $('#class-homework-list').html(`
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-triangle"></i> ${response.message}
+                        </div>
+                    `);
+                }
+            })
+            .fail(function() {
+                $('#class-homework-list').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> 加载班级列表失败
+                    </div>
+                `);
+            });
+    } else if (selectedScoringType === 'homework') {
+        // 先加载班级列表，然后选择作业
+        $.get('{% url "grading:get_class_list" %}', { repository: selectedRepository })
+            .done(function(response) {
+                if (response.status === 'success') {
+                    displayClassListForHomework(response.classes);
+                } else {
+                    $('#class-homework-list').html(`
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-triangle"></i> ${response.message}
+                        </div>
+                    `);
+                }
+            })
+            .fail(function() {
+                $('#class-homework-list').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> 加载班级列表失败
+                    </div>
+                `);
+            });
+    }
+}
+
+function displayClassList(classes) {
+    if (classes.length === 0) {
+        $('#class-homework-list').html(`
+            <div class="alert alert-warning">
+                <i class="fas fa-info-circle"></i> 未找到班级目录
+            </div>
+        `);
+        return;
+    }
+
+    let html = '<h6>选择班级：</h6>';
+    classes.forEach(function(cls) {
+        let classType = cls.is_single_class ? '单班级仓库' : '班级';
+        html += `
+            <div class="class-card" data-class="${cls.name}">
+                <h6><i class="fas fa-users"></i> ${cls.name}</h6>
+                <p class="text-muted mb-0">${classType}，包含 ${cls.homework_count} 次作业</p>
+            </div>
+        `;
+    });
+
+    $('#class-homework-list').html(html);
+
+    // 绑定班级选择事件
+    $('.class-card').click(function() {
+        $('.class-card').removeClass('selected');
+        $(this).addClass('selected');
+        selectedClass = $(this).data('class');
+        $('#next-step-3').prop('disabled', false);
+    });
+}
+
+function displayClassListForHomework(classes) {
+    if (classes.length === 0) {
+        $('#class-homework-list').html(`
+            <div class="alert alert-warning">
+                <i class="fas fa-info-circle"></i> 未找到班级目录
+            </div>
+        `);
+        return;
+    }
+
+    let html = '<h6>选择班级：</h6>';
+    classes.forEach(function(cls) {
+        let classType = cls.is_single_class ? '单班级仓库' : '班级';
+        html += `
+            <div class="class-card" data-class="${cls.name}">
+                <h6><i class="fas fa-users"></i> ${cls.name}</h6>
+                <p class="text-muted mb-0">${classType}，包含 ${cls.homework_count} 次作业</p>
+            </div>
+        `;
+    });
+
+    $('#class-homework-list').html(html);
+
+    // 绑定班级选择事件
+    $('.class-card').click(function() {
+        $('.class-card').removeClass('selected');
+        $(this).addClass('selected');
+        selectedClass = $(this).data('class');
+        loadHomeworkList();
+    });
+}
+
+function loadHomeworkList() {
+    $('#class-homework-list').append(`
+        <div class="mt-4">
+            <h6>选择作业：</h6>
+            <div id="homework-list" class="text-center">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="sr-only">加载中...</span>
+                </div>
+                <p class="mt-2">正在加载作业列表...</p>
+            </div>
+        </div>
+    `);
+
+    $.get('{% url "grading:get_homework_list" %}', {
+        repository: selectedRepository,
+        class: selectedClass
+    })
+        .done(function(response) {
+            if (response.status === 'success') {
+                displayHomeworkList(response.homework_list);
+            } else {
+                $('#homework-list').html(`
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-triangle"></i> ${response.message}
+                    </div>
+                `);
+            }
+        })
+        .fail(function() {
+            $('#homework-list').html(`
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-triangle"></i> 加载作业列表失败
+                </div>
+            `);
+        });
+}
+
+function displayHomeworkList(homeworkList) {
+    if (homeworkList.length === 0) {
+        $('#homework-list').html(`
+            <div class="alert alert-warning">
+                <i class="fas fa-info-circle"></i> 未找到作业目录
+            </div>
+        `);
+        return;
+    }
+
+    let html = '';
+    homeworkList.forEach(function(hw) {
+        html += `
+            <div class="homework-card" data-homework="${hw.name}">
+                <h6><i class="fas fa-file-alt"></i> ${hw.name}</h6>
+                <p class="text-muted mb-0">包含 ${hw.file_count} 个文件</p>
+            </div>
+        `;
+    });
+
+    $('#homework-list').html(html);
+
+    // 绑定作业选择事件
+    $('.homework-card').click(function() {
+        $('.homework-card').removeClass('selected');
+        $(this).addClass('selected');
+        selectedHomework = $(this).data('homework');
+        $('#next-step-3').prop('disabled', false);
+    });
+}
+
+function updateScoringSummary() {
+    let summary = '';
+
+    if (selectedScoringType === 'repository') {
+        summary = `将对整个仓库 <strong>${selectedRepository}</strong> 进行AI评分`;
+    } else if (selectedScoringType === 'class') {
+        summary = `将对班级 <strong>${selectedClass}</strong> 的所有作业进行AI评分`;
+    } else if (selectedScoringType === 'homework') {
+        summary = `将对班级 <strong>${selectedClass}</strong> 的作业 <strong>${selectedHomework}</strong> 进行AI评分`;
+    }
+
+    $('#scoring-summary').html(summary);
+}
+
+function startBatchAIScoring() {
+    $('#start-scoring-btn').prop('disabled', true).html(`
+        <div class="spinner-border spinner-border-sm" role="status">
+            <span class="sr-only">评分中...</span>
+        </div> 评分中...
+    `);
+
+    let data = {
+        scoring_type: selectedScoringType,
+        repository: selectedRepository
+    };
+
+    if (selectedClass) {
+        data.class = selectedClass;
+    }
+
+    if (selectedHomework) {
+        data.homework = selectedHomework;
+    }
+
+    $.ajax({
+        url: '{% url "grading:batch_ai_score_advanced" %}',
+        method: 'POST',
+        data: data,
+        headers: {
+            'X-CSRFToken': $('[name=csrfmiddlewaretoken]').val()
+        }
+    })
+    .done(function(response) {
+        displayScoringResult(response);
+    })
+    .fail(function(xhr) {
+        let errorMessage = '评分失败';
+        if (xhr.responseJSON && xhr.responseJSON.message) {
+            errorMessage = xhr.responseJSON.message;
+        }
+        displayScoringResult({
+            status: 'error',
+            message: errorMessage
+        });
+    })
+    .always(function() {
+        $('#start-scoring-btn').prop('disabled', false).html(`
+            <i class="fas fa-play"></i> 开始AI评分
+        `);
+    });
+}
+
+function displayScoringResult(response) {
+    $('#result-container').show();
+
+    if (response.status === 'success') {
+        $('#result-message').removeClass('result-error').addClass('result-success')
+            .html(`<i class="fas fa-check-circle"></i> ${response.message}`);
+
+        if (response.results && response.results.length > 0) {
+            let detailsHtml = '<div class="table-responsive"><table class="table table-sm">';
+            detailsHtml += '<thead><tr><th>文件</th><th>状态</th><th>结果</th></tr></thead><tbody>';
+
+            response.results.forEach(function(result) {
+                let statusClass = result.success ? 'text-success' : 'text-danger';
+                let statusIcon = result.success ? 'fas fa-check' : 'fas fa-times';
+                let resultText = result.success ?
+                    `评分：${result.grade || 'N/A'}` :
+                    result.error || '失败';
+
+                detailsHtml += `
+                    <tr>
+                        <td>${result.file}</td>
+                        <td><i class="${statusIcon} ${statusClass}"></i></td>
+                        <td>${resultText}</td>
+                    </tr>
+                `;
+            });
+
+            detailsHtml += '</tbody></table></div>';
+            $('#result-list').html(detailsHtml);
+        }
+    } else {
+        $('#result-message').removeClass('result-success').addClass('result-error')
+            .html(`<i class="fas fa-exclamation-triangle"></i> ${response.message}`);
+        $('#result-list').html('');
+    }
+}
+</script>
+{% endblock %}

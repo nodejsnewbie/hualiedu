@@ -35,4 +35,13 @@ urlpatterns = [
         views.batch_grade_registration,
         name="batch_grade_registration",
     ),
+    # 高级批量AI评分相关路由
+    path("batch-ai-score/", views.batch_ai_score_advanced_view, name="batch_ai_score_advanced"),
+    path("batch-ai-score/get-classes/", views._get_class_list, name="get_class_list"),
+    path("batch-ai-score/get-homework/", views._get_homework_list, name="get_homework_list"),
+    path("batch-ai-score-page/", views.batch_ai_score_page, name="batch_ai_score_page"),
+    # 评分类型管理
+    path("grade-type-management/", views.grade_type_management_view, name="grade_type_management"),
+    path("change-grade-type/", views.change_grade_type_view, name="change_grade_type"),
+    path("get-grade-type-config/", views.get_grade_type_config_view, name="get_grade_type_config"),
 ]

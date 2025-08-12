@@ -4,8 +4,12 @@ import json
 import logging
 import mimetypes
 import os
+import threading
+import time
 import traceback
+from collections import deque
 from pathlib import Path
+from queue import Queue
 
 import mammoth
 import pandas as pd
@@ -21,7 +25,7 @@ from django.views.decorators.http import require_http_methods
 from docx import Document
 from volcenginesdkarkruntime import Ark
 
-from .models import GlobalConfig, Repository
+from .models import GlobalConfig, GradeTypeConfig, Repository
 from .utils import FileHandler, GitHandler
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,16 @@ logger = logging.getLogger(__name__)
 
 # 在文件开头添加缓存字典
 directory_file_count_cache = {}
+
+# 全局请求队列和限流配置
+API_REQUEST_QUEUE = Queue()
+API_RATE_LIMIT = 2  # 每秒最多2个请求
+API_REQUEST_INTERVAL = 1.0 / API_RATE_LIMIT  # 请求间隔
+LAST_REQUEST_TIME = 0
+REQUEST_LOCK = threading.Lock()
+
+# 请求历史记录（用于限流）
+REQUEST_HISTORY = deque(maxlen=10)
 
 
 def get_base_directory():
@@ -1480,41 +1494,22 @@ def save_grade(request):
         _, ext = os.path.splitext(full_path)
         ext = ext.lower()
 
-        # 根据文件类型处理
-        if ext == ".docx":
-            # 对于 Word 文档，使用 python-docx 添加评分
-            try:
-                doc = Document(full_path)
-                # 添加一个空段落
-                doc.add_paragraph()
-                # 添加评分段落
-                doc.add_paragraph(f"老师评分：{grade}")
-                # 保存文档
-                doc.save(full_path)
-                logger.info(f"成功添加评分到 Word 文档: {full_path}")
-                return JsonResponse(
-                    {"status": "success", "message": "评分已保存", "file_type": "docx"}
-                )
-            except Exception as e:
-                logger.error(f"添加评分到 Word 文档失败: {str(e)}")
-                return JsonResponse(
-                    {
-                        "status": "error",
-                        "message": f"添加评分到 Word 文档失败: {str(e)}",
-                    }
-                )
-        else:
-            # 对于其他文件，尝试以文本方式添加
-            try:
-                with open(full_path, "a", encoding="utf-8") as f:
-                    f.write(f"\n老师评分：{grade}\n")
-                logger.info(f"成功添加评分到文件: {full_path}")
-                return JsonResponse(
-                    {"status": "success", "message": "评分已保存", "file_type": "text"}
-                )
-            except Exception as e:
-                logger.error(f"添加评分到文件失败: {str(e)}")
-                return JsonResponse({"status": "error", "message": f"添加评分到文件失败: {str(e)}"})
+        # 使用统一函数添加评分
+        try:
+            base_dir = get_base_directory()
+            write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir)
+            logger.info(f"成功添加评分: {full_path}")
+            return JsonResponse(
+                {"status": "success", "message": "评分已保存", "file_type": ext[1:]}
+            )
+        except Exception as e:
+            logger.error(f"添加评分失败: {str(e)}")
+            return JsonResponse(
+                {
+                    "status": "error",
+                    "message": f"添加评分失败: {str(e)}",
+                }
+            )
 
     except Exception as e:
         logger.error(f"保存评分失败: {str(e)}\n{traceback.format_exc()}")
@@ -1936,6 +1931,132 @@ def _get_repository_list(request):
         return JsonResponse({"status": "error", "message": f"获取仓库列表失败: {str(e)}"})
 
 
+def _get_class_list(request):
+    """获取班级列表"""
+    try:
+        repository_name = request.GET.get("repository")
+        if not repository_name:
+            return JsonResponse({"status": "error", "message": "未提供仓库名称"})
+
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
+
+        base_dir = os.path.expanduser(config.repo_base_dir)
+        repository_path = os.path.join(base_dir, repository_name)
+
+        if not os.path.exists(repository_path):
+            return JsonResponse(
+                {"status": "error", "message": f"仓库路径不存在: {repository_path}"}
+            )
+
+        # 首先检查仓库本身是否包含作业目录（单班级仓库）
+        homework_dirs_in_repo = [
+            d
+            for d in os.listdir(repository_path)
+            if os.path.isdir(os.path.join(repository_path, d)) and ("作业" in d or "第" in d)
+        ]
+
+        classes = []
+
+        if homework_dirs_in_repo:
+            # 这是单班级仓库，仓库本身就是班级
+            classes.append(
+                {
+                    "name": repository_name,
+                    "path": repository_name,
+                    "homework_count": len(homework_dirs_in_repo),
+                    "is_single_class": True,
+                }
+            )
+            logger.info(
+                f"仓库 {repository_name} 是单班级仓库，包含 {len(homework_dirs_in_repo)} 次作业"
+            )
+        else:
+            # 这是多班级仓库，查找子目录中的班级
+            for item in os.listdir(repository_path):
+                item_path = os.path.join(repository_path, item)
+                if os.path.isdir(item_path):
+                    # 检查是否是班级目录（包含作业目录）
+                    homework_dirs = [
+                        d
+                        for d in os.listdir(item_path)
+                        if os.path.isdir(os.path.join(item_path, d)) and ("作业" in d or "第" in d)
+                    ]
+                    if homework_dirs:
+                        classes.append(
+                            {
+                                "name": item,
+                                "path": f"{repository_name}/{item}",
+                                "homework_count": len(homework_dirs),
+                                "is_single_class": False,
+                            }
+                        )
+
+        logger.info(f"仓库 {repository_name} 中找到 {len(classes)} 个班级")
+        return JsonResponse({"status": "success", "classes": classes})
+
+    except Exception as e:
+        logger.error(f"获取班级列表失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取班级列表失败: {str(e)}"})
+
+
+def _get_homework_list(request):
+    """获取作业列表"""
+    try:
+        repository_name = request.GET.get("repository")
+        class_name = request.GET.get("class")
+
+        if not repository_name:
+            return JsonResponse({"status": "error", "message": "未提供仓库名称"})
+
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
+
+        base_dir = os.path.expanduser(config.repo_base_dir)
+
+        if class_name:
+            # 检查是否是单班级仓库（class_name 等于 repository_name）
+            if class_name == repository_name:
+                homework_path = os.path.join(base_dir, repository_name)
+            else:
+                homework_path = os.path.join(base_dir, repository_name, class_name)
+        else:
+            # 获取整个仓库的作业列表（单班级仓库）
+            homework_path = os.path.join(base_dir, repository_name)
+
+        if not os.path.exists(homework_path):
+            return JsonResponse({"status": "error", "message": f"路径不存在: {homework_path}"})
+
+        # 获取作业目录
+        homework_list = []
+        for item in os.listdir(homework_path):
+            item_path = os.path.join(homework_path, item)
+            if os.path.isdir(item_path) and ("作业" in item or "第" in item):
+                # 统计该作业目录下的文件数量
+                docx_files = glob.glob(os.path.join(item_path, "*.docx"))
+                txt_files = glob.glob(os.path.join(item_path, "*.txt"))
+                total_files = len(docx_files) + len(txt_files)
+
+                # 构建作业路径，考虑单班级仓库的情况
+                if class_name and class_name != repository_name:
+                    path = f"{repository_name}/{class_name}/{item}"
+                else:
+                    path = f"{repository_name}/{item}"
+
+                homework_list.append({"name": item, "path": path, "file_count": total_files})
+
+        logger.info(f"找到 {len(homework_list)} 个作业目录")
+        return JsonResponse({"status": "success", "homework_list": homework_list})
+
+    except Exception as e:
+        logger.error(f"获取作业列表失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取作业列表失败: {str(e)}"})
+
+
 def _execute_batch_grade_registration(request):
     """执行批量登分"""
     try:
@@ -2006,20 +2127,82 @@ def batch_grade_page(request):
         return HttpResponseServerError("页面加载失败".encode("utf-8"))
 
 
-def convert_score_to_grade(score):
+def batch_ai_score_page(request):
+    """批量AI评分页面"""
+    try:
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            return HttpResponseForbidden("请先登录")
+
+        if not request.user.is_staff:
+            return HttpResponseForbidden("无权限访问")
+
+        # 获取全局配置
+        config = GlobalConfig.objects.first()
+        if not config:
+            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
+
+        return render(
+            request,
+            "batch_ai_score.html",
+            {"config": config, "base_dir": os.path.expanduser(config.repo_base_dir)},
+        )
+
+    except Exception as e:
+        logger.error(f"批量AI评分页面加载失败: {str(e)}")
+        return HttpResponseServerError("页面加载失败".encode("utf-8"))
+
+
+def convert_score_to_grade(score, grade_type="letter"):
     """将百分制分数转换为等级"""
     if score is None:
         return "N/A"
-    if score >= 90:
-        return "A"
-    elif score >= 80:
-        return "B"
-    elif score >= 70:
-        return "C"
-    elif score >= 60:
-        return "D"
+
+    if grade_type == "letter":
+        if score >= 90:
+            return "A"
+        elif score >= 80:
+            return "B"
+        elif score >= 70:
+            return "C"
+        elif score >= 60:
+            return "D"
+        else:
+            return "E"
+    elif grade_type == "text":
+        if score >= 90:
+            return "优秀"
+        elif score >= 80:
+            return "良好"
+        elif score >= 70:
+            return "中等"
+        elif score >= 60:
+            return "及格"
+        else:
+            return "不及格"
+    elif grade_type == "numeric":
+        if score >= 90:
+            return "90-100"
+        elif score >= 80:
+            return "80-89"
+        elif score >= 70:
+            return "70-79"
+        elif score >= 60:
+            return "60-69"
+        else:
+            return "0-59"
     else:
-        return "E"
+        # 默认使用字母等级
+        if score >= 90:
+            return "A"
+        elif score >= 80:
+            return "B"
+        elif score >= 70:
+            return "C"
+        elif score >= 60:
+            return "D"
+        else:
+            return "E"
 
 
 def _perform_ai_scoring_for_file(full_path, base_dir):
@@ -2055,7 +2238,15 @@ def _perform_ai_scoring_for_file(full_path, base_dir):
                         logger.info(f"从HTML中提取文本，长度: {len(content)}")
             except Exception as e:
                 logger.error(f"读取Word文件失败: {e}")
-                raise ValueError(f"无法读取Word文件内容: {e}")
+                # 检查文件是否存在且可读
+                if not os.path.exists(full_path):
+                    raise ValueError(f"文件不存在: {full_path}")
+                elif not os.access(full_path, os.R_OK):
+                    raise ValueError(f"文件无读取权限: {full_path}")
+                else:
+                    # 文件存在但无法读取，可能是损坏的Word文件
+                    logger.warning(f"Word文件可能已损坏: {full_path}")
+                    raise ValueError(f"Word文件已损坏或格式不正确: {e}")
         else:
             try:
                 logger.info("尝试读取文本文件内容...")
@@ -2075,13 +2266,29 @@ def _perform_ai_scoring_for_file(full_path, base_dir):
         score, comment = volcengine_score_homework(content)
         logger.info(f"AI评分结果 - 分数: {score}, 评语长度: {len(comment) if comment else 0}")
 
-        grade = convert_score_to_grade(score)
-        logger.info(f"转换后的等级: {grade}")
+        # 获取班级的评分类型配置
+        from .grade_type_manager import (
+            get_class_identifier_from_path,
+            get_or_create_grade_type_config,
+            lock_grade_type_for_class,
+        )
+
+        class_identifier = get_class_identifier_from_path(full_path, base_dir)
+        grade_config = get_or_create_grade_type_config(class_identifier)
+
+        # 使用班级配置的评分类型转换分数
+        grade = convert_score_to_grade(score, grade_config.grade_type)
+        logger.info(f"转换后的等级: {grade} (评分类型: {grade_config.grade_type})")
 
         logger.info("开始写入AI评价和评分到文件...")
         # 使用统一函数写入AI评价和评分
         write_grade_and_comment_to_file(full_path, grade=grade, comment=comment, base_dir=base_dir)
         logger.info("AI评价和评分已写入文件")
+
+        # 如果是第一次评分，锁定评分类型
+        if not grade_config.is_locked:
+            lock_grade_type_for_class(class_identifier)
+            logger.info(f"已锁定班级 {class_identifier} 的评分类型: {grade_config.grade_type}")
 
         logger.info("AI评分流程完成")
         return {"success": True, "score": score, "grade": grade, "comment": comment}
@@ -2231,14 +2438,248 @@ def batch_ai_score_view(request):
         return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
 
 
+@login_required
+@require_http_methods(["GET", "POST"])
+def batch_ai_score_advanced_view(request):
+    """高级批量AI评分功能"""
+    try:
+        logger.info("开始处理高级批量AI评分请求")
+
+        # 检查用户权限
+        if not request.user.is_authenticated:
+            logger.error("用户未认证")
+            return JsonResponse({"status": "error", "message": "请先登录"}, status=403)
+
+        if not request.user.is_staff:
+            logger.error("用户无权限")
+            return JsonResponse({"status": "error", "message": "无权限访问"}, status=403)
+
+        if request.method == "GET":
+            # 获取仓库列表
+            return _get_repository_list(request)
+        elif request.method == "POST":
+            # 执行批量AI评分
+            return _execute_batch_ai_scoring(request)
+
+    except Exception as e:
+        logger.error(f"高级批量AI评分处理失败: {str(e)}")
+        return JsonResponse(
+            {"status": "error", "message": f"高级批量AI评分处理失败: {str(e)}"},
+            status=500,
+        )
+
+
+def _execute_batch_ai_scoring(request):
+    """执行批量AI评分"""
+    try:
+        scoring_type = request.POST.get("scoring_type")  # repository, class, homework
+        repository_name = request.POST.get("repository")
+        class_name = request.POST.get("class")
+        homework_name = request.POST.get("homework")
+
+        if not scoring_type or not repository_name:
+            return JsonResponse({"status": "error", "message": "缺少必要参数"})
+
+        # 从全局配置获取仓库基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
+
+        base_dir = os.path.expanduser(config.repo_base_dir)
+
+        # 根据评分类型确定目标路径
+        if scoring_type == "repository":
+            target_path = os.path.join(base_dir, repository_name)
+        elif scoring_type == "class":
+            if not class_name:
+                return JsonResponse({"status": "error", "message": "未选择班级"})
+            # 检查是否是单班级仓库（class_name 等于 repository_name）
+            if class_name == repository_name:
+                target_path = os.path.join(base_dir, repository_name)
+            else:
+                target_path = os.path.join(base_dir, repository_name, class_name)
+        elif scoring_type == "homework":
+            if not class_name or not homework_name:
+                return JsonResponse({"status": "error", "message": "未选择班级或作业"})
+            # 检查是否是单班级仓库（class_name 等于 repository_name）
+            if class_name == repository_name:
+                target_path = os.path.join(base_dir, repository_name, homework_name)
+            else:
+                target_path = os.path.join(base_dir, repository_name, class_name, homework_name)
+        else:
+            return JsonResponse({"status": "error", "message": "无效的评分类型"})
+
+        if not os.path.exists(target_path):
+            return JsonResponse({"status": "error", "message": f"目标路径不存在: {target_path}"})
+
+        logger.info(f"开始批量AI评分，目标路径: {target_path}")
+
+        # 收集需要处理的文件列表
+        file_list = []
+        if scoring_type == "homework":
+            # 对单个作业目录进行评分
+            for filename in os.listdir(target_path):
+                file_path = os.path.join(target_path, filename)
+                if os.path.isfile(file_path) and (
+                    filename.endswith(".docx") or filename.endswith(".txt")
+                ):
+                    file_list.append(file_path)
+        else:
+            # 对仓库或班级进行递归评分
+            for root, dirs, files in os.walk(target_path):
+                for filename in files:
+                    if filename.endswith((".docx", ".txt")):
+                        file_path = os.path.join(root, filename)
+                        file_list.append(file_path)
+
+        logger.info(f"找到 {len(file_list)} 个文件需要处理")
+
+        # 使用队列处理批量AI评分
+        results = process_batch_ai_scoring_with_queue(file_list, base_dir)
+        success_count = results["success"]
+        error_count = results["failed"]
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "message": f"批量AI评分完成，成功 {success_count} 个，失败 {error_count} 个。",
+                "results": results,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"执行批量AI评分失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"执行批量AI评分失败: {str(e)}"})
+
+
+def process_batch_ai_scoring_with_queue(file_list, base_dir):
+    """使用队列处理批量AI评分"""
+    logger.info(f"=== 开始批量AI评分，共 {len(file_list)} 个文件 ===")
+
+    results = {"total": len(file_list), "success": 0, "failed": 0, "skipped": 0, "results": []}
+
+    for i, file_path in enumerate(file_list, 1):
+        filename = os.path.basename(file_path)
+        logger.info(f"处理进度: {i}/{len(file_list)} - {filename}")
+
+        try:
+            # 检查是否已有评分
+            grade_info = get_file_grade_info(file_path)
+            if grade_info["has_grade"]:
+                logger.info(f"文件 {filename} 已有评分: {grade_info['grade']}，跳过AI评分")
+                results["skipped"] += 1
+                results["results"].append(
+                    {
+                        "file": filename,
+                        "status": "skipped",
+                        "reason": f"已有评分: {grade_info['grade']}",
+                    }
+                )
+                continue
+
+            # 处理单个文件
+            result = _process_single_file_for_ai_scoring(file_path, base_dir, filename)
+
+            if result["success"]:
+                results["success"] += 1
+                results["results"].append({"file": filename, "status": "success"})
+            else:
+                results["failed"] += 1
+                results["results"].append(
+                    {"file": filename, "status": "failed", "error": result.get("error", "未知错误")}
+                )
+
+            # 添加进度日志
+            if i % 5 == 0 or i == len(file_list):
+                logger.info(
+                    f"批量AI评分进度: {i}/{len(file_list)} (成功: {results['success']}, 失败: {results['failed']}, 跳过: {results['skipped']})"
+                )
+
+        except Exception as e:
+            logger.error(f"处理文件 {filename} 时发生异常: {str(e)}")
+            results["failed"] += 1
+            results["results"].append({"file": filename, "status": "failed", "error": str(e)})
+
+    logger.info("=== 批量AI评分完成 ===")
+    logger.info(
+        f"总计: {results['total']}, 成功: {results['success']}, 失败: {results['failed']}, 跳过: {results['skipped']}"
+    )
+
+    return results
+
+
+def _process_single_file_for_ai_scoring(file_path, base_dir, filename):
+    """处理单个文件进行AI评分"""
+    try:
+        # 检查文件是否已有评分
+        grade_info = get_file_grade_info(file_path)
+        if grade_info["has_grade"]:
+            logger.info(f"文件 {filename} 已有评分: {grade_info['grade']}，跳过AI评分")
+            return {
+                "file": filename,
+                "success": False,
+                "error": f"该作业已有评分：{grade_info['grade']}，无需重复评分",
+            }
+        else:
+            result = _perform_ai_scoring_for_file(file_path, base_dir)
+            return {"file": filename, **result}
+    except Exception as e:
+        logger.error(f"处理文件 {filename} 失败: {str(e)}")
+        return {
+            "file": filename,
+            "success": False,
+            "error": f"处理失败: {str(e)}",
+        }
+
+
+def _process_directory_recursively_for_ai_scoring(directory_path, base_dir):
+    """递归处理目录进行AI评分"""
+    results = []
+    success_count = 0
+    error_count = 0
+
+    try:
+        for root, dirs, files in os.walk(directory_path):
+            for filename in files:
+                if filename.endswith((".docx", ".txt")):
+                    file_path = os.path.join(root, filename)
+                    # 计算相对路径用于显示
+                    rel_path = os.path.relpath(file_path, base_dir)
+
+                    result = _process_single_file_for_ai_scoring(file_path, base_dir, rel_path)
+                    if result["success"]:
+                        success_count += 1
+                    else:
+                        error_count += 1
+                    results.append(result)
+
+    except Exception as e:
+        logger.error(f"递归处理目录失败: {str(e)}")
+        results.append(
+            {
+                "file": "目录处理",
+                "success": False,
+                "error": f"目录处理失败: {str(e)}",
+            }
+        )
+        error_count += 1
+
+    return results, success_count, error_count
+
+
 def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_dir=None):
     """
     统一的函数：向文件写入评分和评价
     支持AI评分和人工评分，使用相同的逻辑
+    确保每个文件只有一个评分和一个评价
+
+    规则：
+    - 评分是必须的（经过评分的作业必须有评分）
+    - 评价是可选的（可以有也可以没有）
 
     Args:
         full_path: 文件完整路径
-        grade: 评分（可选）
+        grade: 评分（必须提供，如果为None则不写入评分）
         comment: 评价内容（可选）
         base_dir: 基础目录（用于Excel登记，可选）
     """
@@ -2248,42 +2689,33 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         # Word文档处理
         doc = Document(full_path)
 
-        # 写入评价（如果有）
+        # 首先删除所有现有的评分和评价段落
+        paragraphs_to_remove = []
+        for i, paragraph in enumerate(doc.paragraphs):
+            text = paragraph.text.strip()
+            # 删除以评分关键词开头的段落
+            if text.startswith(("老师评分：", "评定分数：")):
+                paragraphs_to_remove.append(i)
+            # 删除以评价关键词开头的段落
+            elif text.startswith(("教师评价：", "AI评价：", "评价：")):
+                paragraphs_to_remove.append(i)
+            # 删除包含评价关键词的段落
+            elif any(keyword in text for keyword in ["评价", "评语", "AI评价", "教师评价"]):
+                paragraphs_to_remove.append(i)
+            # 删除看起来像分隔符的段落
+            elif text.startswith("=") or text.startswith("-") or text.startswith("*"):
+                paragraphs_to_remove.append(i)
+
+        # 从后往前删除，避免索引变化
+        for i in reversed(paragraphs_to_remove):
+            doc._body._body.remove(doc.paragraphs[i]._p)
+
+        # 添加新的评价（如果有）
         if comment:
-            # 删除所有现有的评价段落
-            paragraphs_to_remove = []
-            for i, paragraph in enumerate(doc.paragraphs):
-                text = paragraph.text.strip()
-                # 删除以评价关键词开头的段落
-                if text.startswith(("教师评价：", "AI评价：", "评价：")):
-                    paragraphs_to_remove.append(i)
-                # 删除包含评价关键词的段落（如==================================================）
-                elif any(keyword in text for keyword in ["评价", "评语", "AI评价", "教师评价"]):
-                    paragraphs_to_remove.append(i)
-                # 删除看起来像分隔符或评价内容的段落
-                elif text.startswith("=") or text.startswith("-") or text.startswith("*"):
-                    paragraphs_to_remove.append(i)
-
-            # 从后往前删除，避免索引变化
-            for i in reversed(paragraphs_to_remove):
-                doc._body._body.remove(doc.paragraphs[i]._p)
-
-            # 添加评价
             doc.add_paragraph(f"评价：{comment}")
 
-        # 写入评分（如果有）
+        # 添加新的评分（如果有）
         if grade:
-            # 删除所有现有的评分段落
-            paragraphs_to_remove = []
-            for i, paragraph in enumerate(doc.paragraphs):
-                if paragraph.text.startswith(("老师评分：", "评定分数：")):
-                    paragraphs_to_remove.append(i)
-
-            # 从后往前删除，避免索引变化
-            for i in reversed(paragraphs_to_remove):
-                doc._body._body.remove(doc.paragraphs[i]._p)
-
-            # 添加评分
             doc.add_paragraph(f"老师评分：{grade}")
 
         doc.save(full_path)
@@ -2294,7 +2726,7 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         with open(full_path, "r+", encoding="utf-8") as f:
             lines = f.readlines()
 
-            # 过滤掉现有的评分和评价行
+            # 过滤掉所有现有的评分和评价行
             filtered_lines = []
             for line in lines:
                 line_text = line.strip()
@@ -2321,7 +2753,7 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
             # 写入过滤后的内容
             f.writelines(filtered_lines)
 
-            # 添加新的评价和评分
+            # 添加新的评价和评分（确保只有一个）
             if comment:
                 f.write(f"\n评价：{comment}\n")
             if grade:
@@ -2332,29 +2764,38 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
     # 登记到Excel（如果有评分和基础目录）
     if grade and base_dir:
         try:
-            from huali_edu.grade_registration import GradeRegistration
+            # 尝试导入Excel登记模块
+            try:
+                from huali_edu.grade_registration import GradeRegistration
 
-            grader = GradeRegistration()
-            rel_path = os.path.relpath(full_path, base_dir)
-            path_parts = rel_path.split(os.sep)
-            if len(path_parts) >= 3:
-                repo_dir = path_parts[0]
-                homework_dir = path_parts[1]
-                file_name = path_parts[2]
-                student_name = os.path.splitext(file_name)[0]
-                repo_abs_path = os.path.join(base_dir, repo_dir)
-                excel_files = list(Path(repo_abs_path).glob("平时成绩登记表-*.xlsx"))
-                if excel_files:
-                    excel_path = str(excel_files[0])
-                    grader.write_grade_to_excel(
-                        excel_path=excel_path,
-                        student_name=student_name,
-                        homework_dir_name=homework_dir,
-                        grade=grade,
-                    )
-                    logger.info(f"评分已登记到Excel: {excel_path}")
-                else:
-                    logger.warning(f"未找到对应的Excel成绩登记表: {repo_abs_path}")
+                excel_registration_available = True
+            except ImportError:
+                logger.warning("Excel登记模块不可用，跳过Excel登记")
+                excel_registration_available = False
+                return
+
+            if excel_registration_available:
+                grader = GradeRegistration()
+                rel_path = os.path.relpath(full_path, base_dir)
+                path_parts = rel_path.split(os.sep)
+                if len(path_parts) >= 3:
+                    repo_dir = path_parts[0]
+                    homework_dir = path_parts[1]
+                    file_name = path_parts[2]
+                    student_name = os.path.splitext(file_name)[0]
+                    repo_abs_path = os.path.join(base_dir, repo_dir)
+                    excel_files = list(Path(repo_abs_path).glob("平时成绩登记表-*.xlsx"))
+                    if excel_files:
+                        excel_path = str(excel_files[0])
+                        grader.write_grade_to_excel(
+                            excel_path=excel_path,
+                            student_name=student_name,
+                            homework_dir_name=homework_dir,
+                            grade=grade,
+                        )
+                        logger.info(f"评分已登记到Excel: {excel_path}")
+                    else:
+                        logger.warning(f"未找到对应的Excel成绩登记表: {repo_abs_path}")
         except Exception as e:
             logger.error(f"登记评分到Excel失败: {e}")
             # 即使登记失败，也应该认为评分本身是成功的，所以不抛出异常
@@ -2370,10 +2811,36 @@ def add_grade_to_file_logic(full_path, grade, base_dir):
     write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir)
 
 
+def rate_limit_api_request():
+    """API请求限流函数"""
+    global LAST_REQUEST_TIME, REQUEST_HISTORY
+
+    with REQUEST_LOCK:
+        current_time = time.time()
+
+        # 检查是否需要等待
+        if current_time - LAST_REQUEST_TIME < API_REQUEST_INTERVAL:
+            wait_time = API_REQUEST_INTERVAL - (current_time - LAST_REQUEST_TIME)
+            logger.info(f"API限流：等待 {wait_time:.2f} 秒")
+            time.sleep(wait_time)
+
+        # 更新最后请求时间
+        LAST_REQUEST_TIME = time.time()
+        REQUEST_HISTORY.append(current_time)
+
+        # 记录请求频率
+        if len(REQUEST_HISTORY) >= 5:
+            recent_requests = [t for t in REQUEST_HISTORY if current_time - t <= 5.0]
+            logger.info(f"最近5秒内API请求次数: {len(recent_requests)}")
+
+
 def volcengine_score_homework(content):
     logger.info("=== 开始调用火山引擎AI评分 ===")
     logger.info(f"输入内容长度: {len(content)}")
     logger.info(f"输入内容前100字符: {content[:100]}...")
+
+    # 应用API限流
+    rate_limit_api_request()
 
     # 从环境变量获取 Ark API 密钥（与 tests 中保持一致）
     api_key = os.environ.get("ARK_API_KEY")
@@ -2381,17 +2848,38 @@ def volcengine_score_homework(content):
         logger.error("未设置ARK_API_KEY环境变量")
         return None, "API密钥未配置"
 
-    # 尝试解码base64编码的API密钥
-    try:
-        import base64
+    # API密钥格式验证（火山引擎API密钥通常是UUID格式）
+    import re
 
-        decoded_key = base64.b64decode(api_key).decode("utf-8")
-        logger.info("成功解码base64编码的API密钥")
-        api_key = decoded_key
-    except Exception as e:
-        logger.info(f"API密钥不是base64编码，使用原始密钥: {str(e)}")
+    uuid_pattern = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
-    client = Ark(api_key=api_key)
+    if re.match(uuid_pattern, api_key):
+        logger.info("API密钥格式正确（UUID格式）")
+    else:
+        logger.warning("API密钥格式可能不正确，请检查是否为有效的火山引擎API密钥")
+
+    # 创建客户端时设置更长的超时时间和重试配置
+    import ssl
+
+    import httpx
+
+    # 创建自定义SSL上下文
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
+    # 创建自定义传输层
+    transport = httpx.HTTPTransport(verify=False, retries=3)  # 禁用SSL验证
+
+    # 创建自定义客户端
+    http_client = httpx.Client(transport=transport, timeout=60.0)
+
+    client = Ark(
+        api_key=api_key,
+        timeout=60.0,  # 增加超时时间到60秒
+        max_retries=3,  # 增加重试次数
+        http_client=http_client,
+    )
 
     # 提示词：强制模型以固定的两行格式返回，便于稳定解析
     prompt = (
@@ -2410,8 +2898,41 @@ def volcengine_score_homework(content):
     try:
         logger.info("正在调用火山引擎API...")
 
+        # 添加网络诊断信息
+        import socket
+
+        dns_ok = False
+        try:
+            # 测试DNS解析（使用正确的API域名）
+            ip = socket.gethostbyname("ark.cn-beijing.volces.com")
+            logger.info(f"DNS解析正常: ark.cn-beijing.volces.com -> {ip}")
+            dns_ok = True
+        except Exception as dns_error:
+            logger.warning(f"主DNS解析失败: {dns_error}")
+            # 尝试备用域名
+            try:
+                ip = socket.gethostbyname("api.volcengineapi.com")
+                logger.info(f"备用DNS解析正常: api.volcengineapi.com -> {ip}")
+                dns_ok = True
+            except Exception as backup_dns_error:
+                logger.warning(f"备用DNS解析也失败: {backup_dns_error}")
+
+        if not dns_ok:
+            logger.warning("DNS解析失败，但继续尝试API调用")
+
         # 模型名称，允许通过环境变量覆盖，默认 deepseek-r1-250528
         model_name = os.environ.get("ARK_MODEL", "deepseek-r1-250528")
+        logger.info(f"使用模型: {model_name}")
+
+        # 在调试模式下测试网络连接
+        if os.environ.get("DEBUG", "False").lower() == "true":
+            try:
+                import requests
+
+                response = requests.get("https://ark.cn-beijing.volces.com", timeout=5)
+                logger.info(f"网络连接测试: 状态码 {response.status_code}")
+            except Exception as conn_error:
+                logger.debug(f"网络连接测试失败: {conn_error}")
 
         resp = client.chat.completions.create(
             model=model_name,
@@ -2456,3 +2977,100 @@ def volcengine_score_homework(content):
 
     comment = result
     return score, comment
+
+
+@login_required
+@require_http_methods(["GET"])
+@require_staff_user
+def grade_type_management_view(request):
+    """评分类型管理页面"""
+    try:
+
+        # 获取所有班级的评分类型配置
+        configs = GradeTypeConfig.objects.all().order_by("class_identifier")
+
+        # 获取评分类型选项
+        grade_type_choices = GradeTypeConfig.GRADE_TYPE_CHOICES
+
+        context = {
+            "configs": configs,
+            "grade_type_choices": grade_type_choices,
+        }
+
+        return render(request, "grade_type_management.html", context)
+
+    except Exception as e:
+        logger.error(f"评分类型管理页面异常: {str(e)}")
+        return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+@require_staff_user
+def change_grade_type_view(request):
+    """更改班级评分类型"""
+    try:
+        class_identifier = request.POST.get("class_identifier")
+        new_grade_type = request.POST.get("new_grade_type")
+
+        if not class_identifier or not new_grade_type:
+            return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
+
+        # 获取基础目录
+        config = GlobalConfig.objects.first()
+        if not config or not config.repo_base_dir:
+            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
+
+        base_dir = os.path.expanduser(config.repo_base_dir)
+
+        # 更改评分类型
+        from .grade_type_manager import change_grade_type_for_class
+
+        success, message, converted_count = change_grade_type_for_class(
+            class_identifier, new_grade_type, base_dir
+        )
+
+        if success:
+            return JsonResponse(
+                {"status": "success", "message": message, "converted_count": converted_count}
+            )
+        else:
+            return JsonResponse({"status": "error", "message": message}, status=400)
+
+    except Exception as e:
+        logger.error(f"更改评分类型异常: {str(e)}")
+        return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+@require_staff_user
+def get_grade_type_config_view(request):
+    """获取班级评分类型配置"""
+    try:
+        class_identifier = request.GET.get("class_identifier")
+
+        if not class_identifier:
+            return JsonResponse({"status": "error", "message": "缺少班级标识"}, status=400)
+
+        from .grade_type_manager import get_or_create_grade_type_config
+
+        config = get_or_create_grade_type_config(class_identifier)
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "data": {
+                    "class_identifier": config.class_identifier,
+                    "grade_type": config.grade_type,
+                    "grade_type_display": config.get_grade_type_display(),
+                    "is_locked": config.is_locked,
+                    "created_at": config.created_at.isoformat(),
+                    "updated_at": config.updated_at.isoformat(),
+                },
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取评分类型配置异常: {str(e)}")
+        return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)

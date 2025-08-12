@@ -20,6 +20,14 @@
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件目录</h5>
+                    <div class="mt-2">
+                        <a href="{% url 'grading:batch_grade_page' %}" class="btn btn-success btn-sm me-2">
+                            <i class="bi bi-tasks"></i> 批量登分
+                        </a>
+                        <a href="{% url 'grading:batch_ai_score_page' %}" class="btn btn-warning btn-sm">
+                            <i class="bi bi-robot"></i> 批量AI评分
+                        </a>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div id="directory-tree">
@@ -87,6 +95,8 @@
                                 文字等级
                             </button>
                         </div>
+
+
 
                         <!-- 字母等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="字母评分选项" id="letter-grade-buttons">
