@@ -1,6 +1,6 @@
 from django.urls import path
 
-from . import views
+from . import tenant_views, views
 from .admin import admin_site
 
 app_name = "grading"
@@ -44,4 +44,31 @@ urlpatterns = [
     path("grade-type-management/", views.grade_type_management_view, name="grade_type_management"),
     path("change-grade-type/", views.change_grade_type_view, name="change_grade_type"),
     path("get-grade-type-config/", views.get_grade_type_config_view, name="get_grade_type_config"),
+    # 多租户管理
+    path("super-admin/", tenant_views.super_admin_dashboard, name="super_admin_dashboard"),
+    path("super-admin/tenants/", tenant_views.tenant_management, name="tenant_management"),
+    path("super-admin/tenants/create/", tenant_views.create_tenant, name="create_tenant"),
+    path("super-admin/tenants/update/", tenant_views.update_tenant, name="update_tenant"),
+    # 租户管理员
+    path("tenant-admin/", tenant_views.tenant_admin_dashboard, name="tenant_admin_dashboard"),
+    path("tenant-admin/users/", tenant_views.tenant_user_management, name="tenant_user_management"),
+    path("tenant-admin/users/add/", tenant_views.add_user_to_tenant, name="add_user_to_tenant"),
+    path(
+        "tenant-admin/users/update/", tenant_views.update_user_profile, name="update_user_profile"
+    ),
+    path(
+        "tenant-admin/users/remove/",
+        tenant_views.remove_user_from_tenant,
+        name="remove_user_from_tenant",
+    ),
+    path(
+        "tenant-admin/config/",
+        tenant_views.tenant_config_management,
+        name="tenant_config_management",
+    ),
+    path(
+        "tenant-admin/config/update/",
+        tenant_views.update_tenant_config,
+        name="update_tenant_config",
+    ),
 ]

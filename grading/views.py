@@ -46,22 +46,27 @@ REQUEST_LOCK = threading.Lock()
 REQUEST_HISTORY = deque(maxlen=10)
 
 
-def get_base_directory():
+def get_base_directory(request=None):
     """获取基础目录路径"""
-    config = GlobalConfig.objects.first()
-    if not config or not config.repo_base_dir:
-        logger.error("未配置仓库基础目录")
-        return None
-    return os.path.expanduser(config.repo_base_dir)
+    # 如果提供了request，优先使用用户的租户配置
+    if request and hasattr(request, "user_profile"):
+        user_dir = request.user_profile.get_repo_base_dir()
+        if user_dir:
+            return os.path.expanduser(user_dir)
+
+    # 否则使用全局配置
+    config = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+    return os.path.expanduser(config)
 
 
-def validate_file_path(file_path, base_dir=None):
+def validate_file_path(file_path, base_dir=None, request=None):
     """
     验证文件路径的有效性和安全性
 
     Args:
         file_path: 相对文件路径
         base_dir: 基础目录，如果为None则自动获取
+        request: 请求对象，用于获取用户租户配置
 
     Returns:
         tuple: (is_valid, full_path, error_message)
@@ -70,7 +75,7 @@ def validate_file_path(file_path, base_dir=None):
         return False, None, "未提供文件路径"
 
     if base_dir is None:
-        base_dir = get_base_directory()
+        base_dir = get_base_directory(request)
         if base_dir is None:
             return False, None, "未配置仓库基础目录"
 
@@ -2274,7 +2279,9 @@ def _perform_ai_scoring_for_file(full_path, base_dir):
         )
 
         class_identifier = get_class_identifier_from_path(full_path, base_dir)
-        grade_config = get_or_create_grade_type_config(class_identifier)
+        # 获取用户的租户
+        tenant = None
+        grade_config = get_or_create_grade_type_config(class_identifier, tenant)
 
         # 使用班级配置的评分类型转换分数
         grade = convert_score_to_grade(score, grade_config.grade_type)
@@ -2287,7 +2294,7 @@ def _perform_ai_scoring_for_file(full_path, base_dir):
 
         # 如果是第一次评分，锁定评分类型
         if not grade_config.is_locked:
-            lock_grade_type_for_class(class_identifier)
+            lock_grade_type_for_class(class_identifier, tenant)
             logger.info(f"已锁定班级 {class_identifier} 的评分类型: {grade_config.grade_type}")
 
         logger.info("AI评分流程完成")
@@ -2986,8 +2993,16 @@ def grade_type_management_view(request):
     """评分类型管理页面"""
     try:
 
-        # 获取所有班级的评分类型配置
-        configs = GradeTypeConfig.objects.all().order_by("class_identifier")
+        # 获取当前用户的租户
+        tenant = getattr(request, "tenant", None)
+
+        # 根据用户权限获取评分类型配置
+        if request.user.is_superuser:
+            # 超级管理员可以看到所有配置
+            configs = GradeTypeConfig.objects.all().order_by("class_identifier")
+        else:
+            # 普通用户只能看到自己租户的配置
+            configs = GradeTypeConfig.objects.filter(tenant=tenant).order_by("class_identifier")
 
         # 获取评分类型选项
         grade_type_choices = GradeTypeConfig.GRADE_TYPE_CHOICES
@@ -2995,6 +3010,7 @@ def grade_type_management_view(request):
         context = {
             "configs": configs,
             "grade_type_choices": grade_type_choices,
+            "tenant": tenant,
         }
 
         return render(request, "grade_type_management.html", context)
@@ -3017,17 +3033,16 @@ def change_grade_type_view(request):
             return JsonResponse({"status": "error", "message": "缺少必要参数"}, status=400)
 
         # 获取基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
-            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
+        base_dir = get_base_directory(request)
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        # 获取用户的租户
+        tenant = getattr(request, "tenant", None)
 
         # 更改评分类型
         from .grade_type_manager import change_grade_type_for_class
 
         success, message, converted_count = change_grade_type_for_class(
-            class_identifier, new_grade_type, base_dir
+            class_identifier, new_grade_type, base_dir, tenant
         )
 
         if success:
@@ -3055,7 +3070,9 @@ def get_grade_type_config_view(request):
 
         from .grade_type_manager import get_or_create_grade_type_config
 
-        config = get_or_create_grade_type_config(class_identifier)
+        # 获取用户的租户
+        tenant = getattr(request, "tenant", None)
+        config = get_or_create_grade_type_config(class_identifier, tenant)
 
         return JsonResponse(
             {

@@ -45,20 +45,26 @@ def get_class_identifier_from_path(file_path: str, base_dir: str) -> str:
         return "default"
 
 
-def get_or_create_grade_type_config(class_identifier: str) -> GradeTypeConfig:
+def get_or_create_grade_type_config(class_identifier: str, tenant=None) -> GradeTypeConfig:
     """获取或创建班级的评分类型配置"""
     try:
+        if tenant is None:
+            logger.error("租户不能为空")
+            return None
+
         config, created = GradeTypeConfig.objects.get_or_create(
-            class_identifier=class_identifier, defaults={"grade_type": "letter", "is_locked": False}
+            tenant=tenant,
+            class_identifier=class_identifier,
+            defaults={"grade_type": "letter", "is_locked": False},
         )
         if created:
-            logger.info(f"为班级 {class_identifier} 创建新的评分类型配置: {config.grade_type}")
+            logger.info(
+                f"为租户 {tenant.name} 的班级 {class_identifier} 创建新的评分类型配置: {config.grade_type}"
+            )
         return config
     except Exception as e:
         logger.error(f"获取评分类型配置失败: {e}")
-        return GradeTypeConfig(
-            class_identifier=class_identifier, grade_type="letter", is_locked=False
-        )
+        return None
 
 
 def convert_grade(grade: str, from_type: str, to_type: str) -> str:
@@ -75,10 +81,14 @@ def convert_grade(grade: str, from_type: str, to_type: str) -> str:
         return grade
 
 
-def validate_grade_type_consistency(class_identifier: str, new_grade_type: str) -> Tuple[bool, str]:
+def validate_grade_type_consistency(
+    class_identifier: str, new_grade_type: str, tenant=None
+) -> Tuple[bool, str]:
     """验证评分类型一致性"""
     try:
-        config = get_or_create_grade_type_config(class_identifier)
+        config = get_or_create_grade_type_config(class_identifier, tenant)
+        if config is None:
+            return False, "无法获取评分类型配置"
         if config.is_locked and config.grade_type != new_grade_type:
             return (
                 False,
@@ -90,12 +100,16 @@ def validate_grade_type_consistency(class_identifier: str, new_grade_type: str) 
         return False, f"验证失败: {str(e)}"
 
 
-def lock_grade_type_for_class(class_identifier: str) -> bool:
+def lock_grade_type_for_class(class_identifier: str, tenant=None) -> bool:
     """锁定班级的评分类型"""
     try:
-        config = get_or_create_grade_type_config(class_identifier)
+        config = get_or_create_grade_type_config(class_identifier, tenant)
+        if config is None:
+            return False
         config.lock_grade_type()
-        logger.info(f"已锁定班级 {class_identifier} 的评分类型: {config.grade_type}")
+        logger.info(
+            f"已锁定租户 {tenant.name} 的班级 {class_identifier} 的评分类型: {config.grade_type}"
+        )
         return True
     except Exception as e:
         logger.error(f"锁定评分类型失败: {e}")
@@ -103,11 +117,13 @@ def lock_grade_type_for_class(class_identifier: str) -> bool:
 
 
 def change_grade_type_for_class(
-    class_identifier: str, new_grade_type: str, base_dir: str
+    class_identifier: str, new_grade_type: str, base_dir: str, tenant=None
 ) -> Tuple[bool, str, int]:
     """更改班级的评分类型并转换所有相关评分"""
     try:
-        config = get_or_create_grade_type_config(class_identifier)
+        config = get_or_create_grade_type_config(class_identifier, tenant)
+        if config is None:
+            return False, "无法获取评分类型配置", 0
 
         if not config.can_change_grade_type():
             return False, f"班级 {class_identifier} 的评分类型已锁定，无法更改", 0
@@ -122,7 +138,7 @@ def change_grade_type_for_class(
         converted_count = convert_all_grades_in_class(
             class_identifier, old_grade_type, new_grade_type, base_dir
         )
-        message = f"成功将班级 {class_identifier} 的评分类型从 {old_grade_type} 更改为 {new_grade_type}，转换了 {converted_count} 个文件"
+        message = f"成功将租户 {tenant.name} 的班级 {class_identifier} 的评分类型从 {old_grade_type} 更改为 {new_grade_type}，转换了 {converted_count} 个文件"
         logger.info(message)
 
         return True, message, converted_count
