@@ -855,204 +855,8 @@ window.initTree = function() {
     });
 }
 
-// 新增：处理批量AI评分
-function handleBatchAiScore(path) {
-    if (!confirm(`确定要对目录 "${path}" 下的所有作业进行批量AI评分吗？\n这个过程可能需要一些时间。`)) {
-        return;
-    }
-
-    console.log('开始批量AI评分，目录路径:', path);
-    showLoading();
-
-    $.ajax({
-        url: '/grading/batch_ai_score/',
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': getCSRFToken()
-        },
-        data: {
-            path: path
-        },
-        success: function(response) {
-            if (response.status === 'success') {
-                // 构建结果显示的HTML
-                let resultsHtml = '<ul class="list-group">';
-                response.results.forEach(function(result) {
-                    if (result.success) {
-                        resultsHtml += `<li class="list-group-item list-group-item-success">${result.file}: 成功 (分数: ${result.score}, 等级: ${result.grade})</li>`;
-                    } else {
-                        resultsHtml += `<li class="list-group-item list-group-item-danger">${result.file}: 失败 (${result.error})</li>`;
-                    }
-                });
-                resultsHtml += '</ul>';
-
-                // 使用一个模态框来显示详细结果
-                $('#batch-score-results-body').html(resultsHtml);
-                $('#batch-score-summary').text(response.message);
-                $('#batchScoreResultModal').modal('show');
-
-                // 刷新文件树以更新状态
-                $('#directory-tree').jstree(true).refresh();
-
-            } else {
-                showError('批量AI评分失败: ' + response.message);
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('批量AI评分请求失败:', error);
-            let errorMessage = '批量AI评分请求失败';
-            if (xhr.responseJSON && xhr.responseJSON.message) {
-                errorMessage = xhr.responseJSON.message;
-            } else if (xhr.status === 400) {
-                errorMessage = '请求参数错误';
-            } else if (xhr.status === 500) {
-                errorMessage = '服务器内部错误';
-            }
-            showError(errorMessage);
-        },
-        complete: function() {
-            hideLoading();
-        }
-    });
-}
-
-// 显示AI评分提示模态框
-function showAiScoreAlertModal(message, filePath) {
-    console.log('显示AI评分提示模态框:', message, filePath);
-
-    // 设置提示信息
-    $('#aiScoreAlertMessage').text(message);
-
-    // 加载文件内容
-    loadFileContentForModal(filePath);
-
-    // 加载评分信息
-    loadGradeInfoForModal(filePath);
-
-    // 显示模态框
-    $('#aiScoreAlertModal').modal('show');
-}
-
-// 为模态框加载文件内容
-function loadFileContentForModal(filePath) {
-    if (!filePath) {
-        $('#fileContentPreview').html('<div class="text-danger">文件路径无效</div>');
-        return;
-    }
-
-    $('#fileContentPreview').html('<div class="text-muted">正在加载文件内容...</div>');
-
-    $.ajax({
-        url: '/grading/get_file_content/',
-        method: 'GET',
-        data: {
-            file_path: filePath
-        },
-        success: function(response) {
-            if (response.success) {
-                let content = response.content || '文件内容为空';
-                // 限制显示长度，避免模态框过大
-                if (content.length > 2000) {
-                    content = content.substring(0, 2000) + '\n\n... (内容过长，已截断)';
-                }
-                $('#fileContentPreview').html('<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
-                    content.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
-            } else {
-                $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + (response.message || '未知错误') + '</div>');
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('加载文件内容失败:', error);
-            $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + error + '</div>');
-        }
-    });
-}
-
-// 为模态框加载评分信息
-function loadGradeInfoForModal(filePath) {
-    if (!filePath) {
-        $('#gradeInfoPreview').html('<div class="text-danger">文件路径无效</div>');
-        return;
-    }
-
-    $('#gradeInfoPreview').html('<div class="text-muted">正在检查评分信息...</div>');
-
-    // 使用专门的API来获取评分信息
-    $.ajax({
-        url: '/grading/get_file_grade_info/',
-        method: 'GET',
-        data: {
-            file_path: filePath
-        },
-        success: function(response) {
-            if (response.status === 'success') {
-                let gradeInfo = formatGradeInfoForModal(response.grade_info, response.content_preview, response.content_length);
-                $('#gradeInfoPreview').html(gradeInfo);
-            } else {
-                $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + (response.message || '未知错误') + '</div>');
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('检查评分信息失败:', error);
-            $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + error + '</div>');
-        }
-    });
-}
-
-// 格式化评分信息用于模态框显示
-function formatGradeInfoForModal(gradeInfo, contentPreview, contentLength) {
-    let html = '<div class="mb-2"><strong>评分信息分析：</strong></div>';
-
-    // 显示评分状态
-    if (gradeInfo.has_grade) {
-        html += '<div class="alert alert-warning mb-2">';
-        html += '<i class="bi bi-exclamation-triangle"></i> <strong>已发现评分！</strong>';
-        html += '</div>';
-
-        // 显示具体评分信息
-        html += '<div class="card mb-2">';
-        html += '<div class="card-body p-2">';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>评分：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-primary">' + gradeInfo.grade + '</span></div>';
-        html += '</div>';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>评分类型：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-info">' + (gradeInfo.grade_type || '未知') + '</span></div>';
-        html += '</div>';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>位置：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-secondary">' + (gradeInfo.in_table ? '表格中' : '段落中') + '</span></div>';
-        html += '</div>';
-        html += '</div>';
-        html += '</div>';
-
-        // 显示AI评分状态
-        html += '<div class="alert alert-danger mb-2">';
-        html += '<i class="bi bi-robot"></i> <strong>AI评分已禁用</strong><br>';
-        html += '该文件已有评分，无法进行AI评分。如需重新评分，请先删除现有评分。';
-        html += '</div>';
-    } else {
-        html += '<div class="alert alert-success mb-2">';
-        html += '<i class="bi bi-check-circle"></i> <strong>未发现评分</strong><br>';
-        html += '该文件可以进行AI评分。';
-        html += '</div>';
-    }
-
-    // 显示文件基本信息
-    html += '<hr><div class="small text-muted">';
-    html += '<div><strong>文件大小：</strong>' + (contentLength || 0) + ' 字符</div>';
-    html += '<div><strong>内容预览：</strong></div>';
-    html += '<div style="max-height: 100px; overflow-y: auto; font-size: 0.8em; background-color: #fff; padding: 5px; border: 1px solid #dee2e6;">';
-    html += contentPreview.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    html += '</div></div>';
-
-    return html;
-}
-
-// 页面加载完成后初始化树
-$(document).ready(function() {
-    console.log('=== 页面加载开始 ===');
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
     console.log('Document ready, initializing tree...');
 
     // 基本检查
@@ -1139,8 +943,31 @@ $(document).ready(function() {
     // 绑定评分按钮点击事件
     $(document).on('click', '.grade-button', function() {
         const grade = $(this).data('grade');
-        console.log('Grade button clicked:', grade);
-        saveGrade(grade);
+        // 更新按钮状态
+        $('.grade-button').removeClass('active');
+        $(this).addClass('active');
+        selectedGrade = grade;
+        // 立即保存评分并转到下一个文件
+        addGradeToFile(grade);
+    });
+
+    // 绑定确定按钮点击事件
+    $('#add-grade-to-file').click(function() {
+        if (!currentFilePath) {
+            showError('请先选择要评分的文件');
+            return;
+        }
+
+        // 获取当前选中的评分
+        const activeButton = $('.grade-button.active');
+        if (activeButton.length === 0) {
+            showError('请先选择评分');
+            return;
+        }
+
+        const grade = activeButton.data('grade');
+        // 保存评分并转到下一个文件
+        addGradeToFile(grade);
     });
 
     // 绑定确定按钮点击事件
