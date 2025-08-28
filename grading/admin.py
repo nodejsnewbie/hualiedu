@@ -16,9 +16,13 @@ from django.utils.html import format_html
 
 from .models import (
     Assignment,
+    Course,
+    CourseSchedule,
+    CourseWeekSchedule,
     GlobalConfig,
     GradeTypeConfig,
     Repository,
+    Semester,
     Student,
     Submission,
     Tenant,
@@ -460,8 +464,8 @@ class RepositoryAdmin(admin.ModelAdmin):
                 (
                     None,
                     {
-                        "fields": ("name", "url"),
-                        "description": "输入仓库的 URL，系统会自动提取仓库名称并使用默认分支。",
+                        "fields": ("name", "path", "description"),
+                        "description": "输入仓库信息，包括名称、路径和描述。",
                     },
                 ),
             )
@@ -1068,3 +1072,98 @@ admin_site.register(Assignment, AssignmentAdmin)
 admin_site.register(Submission, SubmissionAdmin)
 admin_site.register(Repository, RepositoryAdmin)
 admin_site.register(GlobalConfig, GlobalConfigAdmin)
+
+
+class SemesterAdmin(admin.ModelAdmin):
+    """学期管理界面"""
+
+    list_display = ("name", "start_date", "end_date", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name",)
+    ordering = ("-start_date",)
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("name", "start_date", "end_date", "is_active", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        """保存时确保只有一个活跃学期"""
+        if obj.is_active:
+            # 将其他学期设为非活跃
+            Semester.objects.exclude(pk=obj.pk).update(is_active=False)
+        super().save_model(request, obj, form, change)
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        """自定义编辑视图"""
+        try:
+            return super().change_view(request, object_id, form_url, extra_context)
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"学期编辑页面错误: {str(e)}")
+            # 返回一个简单的错误页面
+            from django.http import HttpResponse
+
+            return HttpResponse(f"编辑页面加载失败: {str(e)}", status=500)
+
+
+class CourseScheduleInline(admin.TabularInline):
+    """课程安排内联编辑"""
+
+    model = CourseSchedule
+    extra = 1
+    fields = ("weekday", "period", "start_week", "end_week")
+
+
+class CourseAdmin(admin.ModelAdmin):
+    """课程管理界面"""
+
+    list_display = ("name", "semester", "teacher", "class_name", "location", "created_at")
+    list_filter = ("semester", "teacher", "created_at")
+    search_fields = ("name", "description", "location", "class_name")
+    ordering = ("semester", "name")
+    readonly_fields = ("created_at", "updated_at")
+    inlines = [CourseScheduleInline]
+
+    def get_queryset(self, request):
+        """只显示当前用户的课程"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(teacher=request.user)
+        return qs
+
+
+class CourseScheduleAdmin(admin.ModelAdmin):
+    """课程安排管理界面"""
+
+    list_display = (
+        "course",
+        "weekday",
+        "period",
+        "start_week",
+        "end_week",
+        "get_week_schedule_text",
+    )
+    list_filter = ("weekday", "period", "course__semester")
+    search_fields = ("course__name",)
+    ordering = ("weekday", "period")
+
+    def get_week_schedule_text(self, obj):
+        return obj.get_week_schedule_text()
+
+    get_week_schedule_text.short_description = "周次安排"
+
+
+class CourseWeekScheduleAdmin(admin.ModelAdmin):
+    """课程周次安排管理界面"""
+
+    list_display = ("course_schedule", "week_number", "is_active", "created_at")
+    list_filter = ("is_active", "course_schedule__course__semester")
+    search_fields = ("course_schedule__course__name",)
+    ordering = ("course_schedule", "week_number")
+
+
+# 注册校历相关模型
+admin_site.register(Semester, SemesterAdmin)
+admin_site.register(Course, CourseAdmin)
+admin_site.register(CourseSchedule, CourseScheduleAdmin)
+admin_site.register(CourseWeekSchedule, CourseWeekScheduleAdmin)

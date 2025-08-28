@@ -71,4 +71,16 @@ urlpatterns = [
         tenant_views.update_tenant_config,
         name="update_tenant_config",
     ),
+    # 校历功能相关路由
+    path("calendar/", views.calendar_view, name="calendar"),
+    path("course-management/", views.course_management_view, name="course_management"),
+    path("semester-management/", views.semester_management_view, name="semester_management"),
+    path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
+    path("semester-add/", views.semester_add_view, name="semester_add"),
+    path("add-course/", views.add_course_view, name="add_course"),
+    path("add-schedule/", views.add_schedule_view, name="add_schedule"),
+    path(
+        "get-schedule-weeks/<int:schedule_id>/", views.get_schedule_weeks, name="get_schedule_weeks"
+    ),
+    path("get-schedule-data/", views.get_schedule_data, name="get_schedule_data"),
 ]

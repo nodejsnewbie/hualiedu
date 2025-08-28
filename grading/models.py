@@ -257,7 +257,8 @@ class GradeTypeConfig(models.Model):
         unique_together = ["tenant", "class_identifier"]
 
     def __str__(self):
-        return f"{self.tenant.name} - {self.class_identifier} - {self.get_grade_type_display()}"
+        tenant_name = self.tenant.name if self.tenant else "无租户"
+        return f"{tenant_name} - {self.class_identifier} - {self.get_grade_type_display()}"
 
     def lock_grade_type(self):
         """锁定评分类型"""
@@ -267,3 +268,189 @@ class GradeTypeConfig(models.Model):
     def can_change_grade_type(self):
         """检查是否可以更改评分类型"""
         return not self.is_locked
+
+
+class Semester(models.Model):
+    """学期模型"""
+
+    name = models.CharField(max_length=100, help_text="学期名称，如：2024年春季学期")
+    start_date = models.DateField(help_text="学期第一周第一天上课日期")
+    end_date = models.DateField(help_text="学期结束日期")
+    is_active = models.BooleanField(default=True, help_text="是否为当前学期")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_semester"
+        verbose_name = "学期"
+        verbose_name_plural = "学期"
+        ordering = ["-start_date"]
+
+    def __str__(self):
+        return self.name
+
+    def get_week_count(self):
+        """获取学期总周数"""
+        delta = self.end_date - self.start_date
+        return (delta.days // 7) + 1
+
+    def get_week_dates(self, week_number):
+        """获取指定周的开始和结束日期"""
+        from datetime import timedelta
+
+        start = self.start_date + timedelta(days=(week_number - 1) * 7)
+        end = start + timedelta(days=6)
+        return start, end
+
+
+class Course(models.Model):
+    """课程模型"""
+
+    semester = models.ForeignKey(
+        Semester, on_delete=models.CASCADE, related_name="courses", help_text="所属学期"
+    )
+    teacher = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, related_name="courses", help_text="授课教师"
+    )
+    name = models.CharField(max_length=200, help_text="课程名称")
+    description = models.TextField(blank=True, help_text="课程描述")
+    location = models.CharField(max_length=100, help_text="上课地点")
+    class_name = models.CharField(
+        max_length=100, blank=True, help_text="班级名称，如：计算机科学1班"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_course"
+        verbose_name = "课程"
+        verbose_name_plural = "课程"
+        ordering = ["semester", "name"]
+
+    def __str__(self):
+        class_info = f" - {self.class_name}" if self.class_name else ""
+        return f"{self.semester.name} - {self.name}{class_info}"
+
+
+class CourseSchedule(models.Model):
+    """课程安排模型"""
+
+    WEEKDAY_CHOICES = [
+        (1, "周一"),
+        (2, "周二"),
+        (3, "周三"),
+        (4, "周四"),
+        (5, "周五"),
+        (6, "周六"),
+        (7, "周日"),
+    ]
+
+    PERIOD_CHOICES = [
+        (1, "第一大节 (8:00-9:40)"),
+        (2, "第二大节 (10:00-11:40)"),
+        (3, "第三大节 (14:00-15:40)"),
+        (4, "第四大节 (16:00-17:40)"),
+        (5, "第五大节 (19:00-20:40)"),
+    ]
+
+    course = models.ForeignKey(
+        Course, on_delete=models.CASCADE, related_name="schedules", help_text="课程"
+    )
+    weekday = models.IntegerField(choices=WEEKDAY_CHOICES, help_text="星期几")
+    period = models.IntegerField(choices=PERIOD_CHOICES, help_text="第几大节")
+    start_week = models.IntegerField(help_text="开始周次")
+    end_week = models.IntegerField(help_text="结束周次")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_course_schedule"
+        verbose_name = "课程安排"
+        verbose_name_plural = "课程安排"
+        ordering = ["weekday", "period"]
+        unique_together = ["course", "weekday", "period"]
+
+    def __str__(self):
+        return f"{self.course.name} - {self.get_weekday_display()} {self.get_period_display()}"
+
+    def is_in_week(self, week_number):
+        """检查是否在指定周次上课"""
+        # 首先检查是否在基本周次范围内
+        if not (self.start_week <= week_number <= self.end_week):
+            return False
+
+        # 检查是否有具体的周次安排
+        week_schedule = self.week_schedules.filter(week_number=week_number).first()
+        if week_schedule:
+            return week_schedule.is_active
+
+        # 如果没有具体安排，检查是否有任何周次安排记录
+        if self.week_schedules.exists():
+            # 如果有周次安排记录但当前周次没有记录，说明被设置为不上课
+            return False
+        else:
+            # 如果没有任何周次安排记录，默认在基本范围内都上课
+            return True
+
+    def get_week_schedule_text(self):
+        """获取周次安排文本描述"""
+        if self.week_schedules.exists():
+            active_weeks = [ws.week_number for ws in self.week_schedules.filter(is_active=True)]
+            inactive_weeks = [ws.week_number for ws in self.week_schedules.filter(is_active=False)]
+
+            if active_weeks and inactive_weeks:
+                # 检查活跃周次是否连续
+                active_weeks.sort()
+                continuous_ranges = []
+                start = active_weeks[0]
+                end = active_weeks[0]
+
+                for i in range(1, len(active_weeks)):
+                    if active_weeks[i] == end + 1:
+                        end = active_weeks[i]
+                    else:
+                        if start == end:
+                            continuous_ranges.append(str(start))
+                        else:
+                            continuous_ranges.append(f"{start}-{end}")
+                        start = end = active_weeks[i]
+
+                # 处理最后一个范围
+                if start == end:
+                    continuous_ranges.append(str(start))
+                else:
+                    continuous_ranges.append(f"{start}-{end}")
+
+                return f"第{', '.join(continuous_ranges)}周（跳过：{', '.join(map(str, inactive_weeks))}周）"
+            elif active_weeks:
+                return f"第{min(active_weeks)}-{max(active_weeks)}周"
+            else:
+                return f"第{self.start_week}-{self.end_week}周（无具体安排）"
+        else:
+            return f"第{self.start_week}-{self.end_week}周"
+
+
+class CourseWeekSchedule(models.Model):
+    """课程周次安排模型 - 支持不连续的周次"""
+
+    course_schedule = models.ForeignKey(
+        CourseSchedule,
+        on_delete=models.CASCADE,
+        related_name="week_schedules",
+        help_text="课程安排",
+    )
+    week_number = models.IntegerField(help_text="周次")
+    is_active = models.BooleanField(default=True, help_text="是否在该周上课")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_course_week_schedule"
+        verbose_name = "课程周次安排"
+        verbose_name_plural = "课程周次安排"
+        ordering = ["week_number"]
+        unique_together = ["course_schedule", "week_number"]
+
+    def __str__(self):
+        status = "上课" if self.is_active else "不上课"
+        return f"{self.course_schedule} - 第{self.week_number}周({status})"

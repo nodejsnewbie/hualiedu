@@ -17,7 +17,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseServerError, JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.decorators import method_decorator  # noqa: F401
 from django.views import View  # noqa: F401
 from django.views.decorators.csrf import csrf_exempt
@@ -25,7 +25,15 @@ from django.views.decorators.http import require_http_methods
 from docx import Document
 from volcenginesdkarkruntime import Ark
 
-from .models import GlobalConfig, GradeTypeConfig, Repository
+from .models import (
+    Course,
+    CourseSchedule,
+    CourseWeekSchedule,
+    GlobalConfig,
+    GradeTypeConfig,
+    Repository,
+    Semester,
+)
 from .utils import FileHandler, GitHandler
 
 logger = logging.getLogger(__name__)
@@ -299,7 +307,36 @@ def clear_directory_file_count_cache():
 
 
 def index(request):
-    return render(request, "index.html")
+    """首页视图 - 包含校历功能"""
+    try:
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+
+        # 获取当前用户的课程
+        user_courses = []
+        if request.user.is_authenticated:
+            user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+
+        # 获取当前周次
+        current_week = 1
+        if current_semester:
+            from datetime import date
+
+            today = date.today()
+            if current_semester.start_date <= today <= current_semester.end_date:
+                delta = today - current_semester.start_date
+                current_week = (delta.days // 7) + 1
+
+        context = {
+            "current_semester": current_semester,
+            "user_courses": user_courses,
+            "current_week": current_week,
+        }
+
+        return render(request, "index.html", context)
+    except Exception as e:
+        logger.error(f"首页加载失败: {str(e)}")
+        return render(request, "index.html", {})
 
 
 def test_js(request):
@@ -331,11 +368,8 @@ def grading_simple(request):
             return HttpResponseForbidden("无权限访问")
 
         # 获取全局配置
-        config = GlobalConfig.objects.first()
-        if not config:
-            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
-
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+        base_dir = os.path.expanduser(repo_base_dir)
 
         # 检查目录权限
         if not os.path.exists(base_dir):
@@ -356,7 +390,7 @@ def grading_simple(request):
                 {
                     "files": [],
                     "error": f"获取目录树失败: {str(e)}",
-                    "config": config,
+                    "config": None,
                     "base_dir": base_dir,
                     "initial_tree_data": "[]",
                 },
@@ -368,7 +402,7 @@ def grading_simple(request):
             {
                 "files": [],
                 "error": None,
-                "config": config,
+                "config": None,
                 "base_dir": base_dir,
                 "initial_tree_data": json.dumps(initial_tree_data, ensure_ascii=False),
             },
@@ -382,7 +416,7 @@ def grading_simple(request):
             {
                 "files": [],
                 "error": f"处理请求失败: {str(e)}",
-                "config": config if "config" in locals() else None,
+                "config": None,
                 "base_dir": base_dir if "base_dir" in locals() else None,
                 "initial_tree_data": "[]",
             },
@@ -436,11 +470,8 @@ def grading_page(request):
             return HttpResponseForbidden("无权限访问")
 
         # 获取全局配置
-        config = GlobalConfig.objects.first()
-        if not config:
-            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
-
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+        base_dir = os.path.expanduser(repo_base_dir)
 
         # 检查目录权限
         if not os.path.exists(base_dir):
@@ -461,7 +492,7 @@ def grading_page(request):
                 {
                     "files": [],
                     "error": f"获取目录树失败: {str(e)}",
-                    "config": config,
+                    "config": None,
                     "base_dir": base_dir,
                     "initial_tree_data": "[]",
                 },
@@ -473,7 +504,7 @@ def grading_page(request):
             {
                 "files": [],
                 "error": None,
-                "config": config,
+                "config": None,
                 "base_dir": base_dir,
                 "initial_tree_data": json.dumps(initial_tree_data, ensure_ascii=False),
             },
@@ -487,7 +518,7 @@ def grading_page(request):
             {
                 "files": [],
                 "error": f"处理请求失败: {str(e)}",
-                "config": config if "config" in locals() else None,
+                "config": None,
                 "base_dir": base_dir if "base_dir" in locals() else None,
                 "initial_tree_data": "[]",
             },
@@ -628,13 +659,13 @@ def grading_view(request):
             logger.info(f"请求获取文件内容，路径: {path}")
             try:
                 # 从全局配置获取仓库基础目录
-                config = GlobalConfig.objects.first()
-                if not config or not config.repo_base_dir:
+                repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+                if not repo_base_dir:
                     logger.error("未配置仓库基础目录")
                     return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
                 # 展开路径中的用户目录符号（~）
-                base_dir = os.path.expanduser(config.repo_base_dir)
+                base_dir = os.path.expanduser(repo_base_dir)
                 full_path = os.path.join(base_dir, path)
 
                 logger.info(f"尝试读取文件: {full_path}")
@@ -670,8 +701,8 @@ def grading_view(request):
         logger.info("处理 GET 请求，准备显示评分页面")
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             logger.error("未配置仓库基础目录")
             return render(
                 request,
@@ -679,13 +710,13 @@ def grading_view(request):
                 {
                     "files": [],
                     "error": "未配置仓库基础目录",
-                    "config": config,
+                    "config": None,
                     "base_dir": None,
                 },
             )
 
         # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         logger.info(f"使用仓库基础目录: {base_dir}")
 
         # 如果目录不存在，尝试创建它
@@ -701,7 +732,7 @@ def grading_view(request):
                     {
                         "files": [],
                         "error": f"无法创建目录: {str(e)}",
-                        "config": config,
+                        "config": None,
                         "base_dir": base_dir,
                     },
                 )
@@ -761,7 +792,7 @@ def grading_view(request):
         return render(
             request,
             "grading.html",
-            {"files": files, "error": None, "config": config, "base_dir": base_dir},
+            {"files": files, "error": None, "config": None, "base_dir": base_dir},
         )
 
     except Exception as e:
@@ -772,7 +803,7 @@ def grading_view(request):
             {
                 "files": [],
                 "error": f"获取文件列表失败: {str(e)}",
-                "config": config if "config" in locals() else None,
+                "config": None,
                 "base_dir": base_dir if "base_dir" in locals() else None,
             },
         )
@@ -781,12 +812,8 @@ def grading_view(request):
 def get_directory_tree(file_path=""):
     """获取目录树结构（返回Python对象列表）"""
     try:
-        config = GlobalConfig.objects.first()
-        if not config:
-            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
-            logger.info("Created new GlobalConfig with default repo_base_dir")
-
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+        base_dir = os.path.expanduser(repo_base_dir)
         logger.info(f"Base directory: {base_dir}")
 
         if not os.path.exists(base_dir):
@@ -1087,13 +1114,13 @@ def get_file_content(request):
                 return JsonResponse({"status": "error", "message": "未提供文件路径"})
 
             # 从全局配置获取仓库基础目录
-            config = GlobalConfig.objects.first()
-            if not config or not config.repo_base_dir:
+            repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+            if not repo_base_dir:
                 logger.error("未配置仓库基础目录")
                 return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
             # 展开路径中的用户目录符号（~）
-            base_dir = os.path.expanduser(config.repo_base_dir)
+            base_dir = os.path.expanduser(repo_base_dir)
             full_path = os.path.join(base_dir, path)
 
             # 检查文件是否存在
@@ -1474,13 +1501,13 @@ def save_grade(request):
         logger.info(f"请求保存评分，路径: {path}, 评分: {grade}")
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             logger.error("未配置仓库基础目录")
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
         # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         full_path = os.path.join(base_dir, path)
 
         logger.info(f"尝试修改文件: {full_path}")
@@ -1546,13 +1573,13 @@ def remove_grade(request):
         logger.info(f"请求删除评分，路径: {path}")
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             logger.error("未配置仓库基础目录")
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
         # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         full_path = os.path.join(base_dir, path)
 
         logger.info(f"尝试修改文件: {full_path}")
@@ -1899,13 +1926,13 @@ def _get_repository_list(request):
     """获取仓库列表"""
     try:
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             logger.error("未配置仓库基础目录")
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
         # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
 
         if not os.path.exists(base_dir):
             logger.error(f"仓库基础目录不存在: {base_dir}")
@@ -1944,11 +1971,11 @@ def _get_class_list(request):
             return JsonResponse({"status": "error", "message": "未提供仓库名称"})
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         repository_path = os.path.join(base_dir, repository_name)
 
         if not os.path.exists(repository_path):
@@ -2017,11 +2044,11 @@ def _get_homework_list(request):
             return JsonResponse({"status": "error", "message": "未提供仓库名称"})
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
 
         if class_name:
             # 检查是否是单班级仓库（class_name 等于 repository_name）
@@ -2070,12 +2097,12 @@ def _execute_batch_grade_registration(request):
             return JsonResponse({"status": "error", "message": "未选择仓库"})
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
         # 构建完整的仓库路径
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         repository_path = os.path.join(base_dir, repository_name)
 
         if not os.path.exists(repository_path):
@@ -2117,14 +2144,13 @@ def batch_grade_page(request):
             return HttpResponseForbidden("无权限访问")
 
         # 获取全局配置
-        config = GlobalConfig.objects.first()
-        if not config:
-            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+        base_dir = os.path.expanduser(repo_base_dir)
 
         return render(
             request,
             "batch_grade.html",
-            {"config": config, "base_dir": os.path.expanduser(config.repo_base_dir)},
+            {"config": None, "base_dir": base_dir},
         )
 
     except Exception as e:
@@ -2143,14 +2169,13 @@ def batch_ai_score_page(request):
             return HttpResponseForbidden("无权限访问")
 
         # 获取全局配置
-        config = GlobalConfig.objects.first()
-        if not config:
-            config = GlobalConfig.objects.create(repo_base_dir="~/jobs")
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+        base_dir = os.path.expanduser(repo_base_dir)
 
         return render(
             request,
             "batch_ai_score.html",
-            {"config": config, "base_dir": os.path.expanduser(config.repo_base_dir)},
+            {"config": None, "base_dir": base_dir},
         )
 
     except Exception as e:
@@ -2320,12 +2345,12 @@ def ai_score_view(request):
             logger.error("未提供文件路径")
             return JsonResponse({"status": "error", "message": "未提供文件路径"}, status=400)
 
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             logger.error("未配置仓库基础目录")
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         full_path = os.path.join(base_dir, path)
 
         logger.info(f"基础目录: {base_dir}")
@@ -2384,11 +2409,11 @@ def batch_ai_score_view(request):
         if not path:
             return JsonResponse({"status": "error", "message": "未提供目录路径"}, status=400)
 
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
         full_path = os.path.join(base_dir, path)
 
         if not os.path.isdir(full_path):
@@ -2488,11 +2513,11 @@ def _execute_batch_ai_scoring(request):
             return JsonResponse({"status": "error", "message": "缺少必要参数"})
 
         # 从全局配置获取仓库基础目录
-        config = GlobalConfig.objects.first()
-        if not config or not config.repo_base_dir:
+        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+        if not repo_base_dir:
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
-        base_dir = os.path.expanduser(config.repo_base_dir)
+        base_dir = os.path.expanduser(repo_base_dir)
 
         # 根据评分类型确定目标路径
         if scoring_type == "repository":
@@ -3091,3 +3116,485 @@ def get_grade_type_config_view(request):
     except Exception as e:
         logger.error(f"获取评分类型配置异常: {str(e)}")
         return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
+
+
+# 校历功能相关视图
+@login_required
+def calendar_view(request):
+    """校历视图"""
+    try:
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+        if not current_semester:
+            messages.warning(request, "请先设置当前学期")
+            return redirect("admin:grading_semester_add")
+
+        # 获取指定周次，默认为当前周
+        week_number = request.GET.get("week", None)
+        if week_number:
+            try:
+                week_number = int(week_number)
+            except ValueError:
+                week_number = 1
+        else:
+            # 计算当前周次
+            from datetime import date
+
+            today = date.today()
+            if current_semester.start_date <= today <= current_semester.end_date:
+                delta = today - current_semester.start_date
+                week_number = (delta.days // 7) + 1
+            else:
+                week_number = 1
+
+        # 获取当前用户的课程安排
+        user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+
+        # 构建课程表数据
+        schedule_data = []
+        for course in user_courses:
+            for schedule in course.schedules.all():
+                if schedule.is_in_week(week_number):
+                    schedule_data.append(
+                        {
+                            "course": course,
+                            "schedule": schedule,
+                            "weekday": schedule.weekday,
+                            "period": schedule.period,
+                        }
+                    )
+
+        # 获取该周的开始和结束日期
+        week_start, week_end = current_semester.get_week_dates(week_number)
+
+        context = {
+            "current_semester": current_semester,
+            "week_number": week_number,
+            "week_start": week_start,
+            "week_end": week_end,
+            "schedule_data": schedule_data,
+            "weekday_choices": CourseSchedule.WEEKDAY_CHOICES,
+            "period_choices": CourseSchedule.PERIOD_CHOICES,
+        }
+
+        return render(request, "calendar.html", context)
+
+    except Exception as e:
+        logger.error(f"校历页面加载失败: {str(e)}")
+        messages.error(request, f"校历页面加载失败: {str(e)}")
+        return redirect("grading:index")
+
+
+@login_required
+def course_management_view(request):
+    """课程管理视图"""
+    try:
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+        if not current_semester:
+            messages.warning(request, "请先设置当前学期")
+            return redirect("admin:grading_semester_add")
+
+        # 获取当前用户的课程
+        user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+
+        context = {
+            "current_semester": current_semester,
+            "user_courses": user_courses,
+        }
+
+        return render(request, "course_management.html", context)
+
+    except Exception as e:
+        logger.error(f"课程管理页面加载失败: {str(e)}")
+        messages.error(request, f"课程管理页面加载失败: {str(e)}")
+        return redirect("grading:index")
+
+
+@login_required
+def semester_management_view(request):
+    """学期管理视图"""
+    try:
+        # 检查用户权限（只有超级用户或管理员可以管理学期）
+        if not request.user.is_superuser and not request.user.is_staff:
+            messages.error(request, "您没有权限管理学期信息")
+            return redirect("grading:index")
+
+        # 获取所有学期
+        semesters = Semester.objects.all().order_by("-start_date")
+
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+
+        context = {
+            "semesters": semesters,
+            "current_semester": current_semester,
+        }
+
+        return render(request, "semester_management.html", context)
+
+    except Exception as e:
+        logger.error(f"学期管理页面加载失败: {str(e)}")
+        messages.error(request, f"学期管理页面加载失败: {str(e)}")
+        return redirect("grading:index")
+
+
+@login_required
+def semester_edit_view(request, semester_id):
+    """学期编辑视图"""
+    try:
+        # 检查用户权限
+        if not request.user.is_superuser and not request.user.is_staff:
+            messages.error(request, "您没有权限编辑学期信息")
+            return redirect("grading:semester_management")
+
+        # 获取学期对象
+        semester = get_object_or_404(Semester, id=semester_id)
+
+        if request.method == "POST":
+            # 处理表单提交
+            name = request.POST.get("name")
+            start_date = request.POST.get("start_date")
+            end_date = request.POST.get("end_date")
+            is_active = request.POST.get("is_active") == "on"
+
+            if name and start_date and end_date:
+                semester.name = name
+                semester.start_date = start_date
+                semester.end_date = end_date
+                semester.is_active = is_active
+                semester.save()
+
+                # 如果设置为活跃学期，将其他学期设为非活跃
+                if is_active:
+                    Semester.objects.exclude(pk=semester.pk).update(is_active=False)
+
+                messages.success(request, "学期信息更新成功")
+                return redirect("grading:semester_management")
+            else:
+                messages.error(request, "请填写完整的学期信息")
+
+        context = {
+            "semester": semester,
+        }
+
+        return render(request, "semester_edit.html", context)
+
+    except Exception as e:
+        logger.error(f"学期编辑页面加载失败: {str(e)}")
+        messages.error(request, f"学期编辑页面加载失败: {str(e)}")
+        return redirect("grading:semester_management")
+
+
+@login_required
+def semester_add_view(request):
+    """学期添加视图"""
+    try:
+        # 检查用户权限
+        if not request.user.is_superuser and not request.user.is_staff:
+            messages.error(request, "您没有权限添加学期信息")
+            return redirect("grading:semester_management")
+
+        if request.method == "POST":
+            # 处理表单提交
+            name = request.POST.get("name")
+            start_date = request.POST.get("start_date")
+            end_date = request.POST.get("end_date")
+            is_active = request.POST.get("is_active") == "on"
+
+            if name and start_date and end_date:
+                # 创建新学期
+                semester = Semester.objects.create(
+                    name=name, start_date=start_date, end_date=end_date, is_active=is_active
+                )
+
+                # 如果设置为活跃学期，将其他学期设为非活跃
+                if is_active:
+                    Semester.objects.exclude(pk=semester.pk).update(is_active=False)
+
+                messages.success(request, "学期添加成功")
+                return redirect("grading:semester_management")
+            else:
+                messages.error(request, "请填写完整的学期信息")
+
+        context = {}
+        return render(request, "semester_add.html", context)
+
+    except Exception as e:
+        logger.error(f"学期添加页面加载失败: {str(e)}")
+        messages.error(request, f"学期添加页面加载失败: {str(e)}")
+        return redirect("grading:semester_management")
+
+
+@login_required
+@require_http_methods(["POST"])
+def add_course_view(request):
+    """添加课程视图"""
+    try:
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+        if not current_semester:
+            return JsonResponse({"status": "error", "message": "请先设置当前学期"})
+
+        # 获取表单数据
+        course_name = request.POST.get("course_name")
+        class_name = request.POST.get("class_name", "")
+        description = request.POST.get("description", "")
+        location = request.POST.get("location")
+
+        if not course_name or not location:
+            return JsonResponse({"status": "error", "message": "请填写课程名称和上课地点"})
+
+        # 创建课程
+        course = Course.objects.create(
+            semester=current_semester,
+            teacher=request.user,
+            name=course_name,
+            class_name=class_name,
+            description=description,
+            location=location,
+        )
+
+        return JsonResponse(
+            {"status": "success", "message": "课程添加成功", "course_id": course.id}
+        )
+
+    except Exception as e:
+        logger.error(f"添加课程失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"添加课程失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def add_schedule_view(request):
+    """添加课程安排视图"""
+    try:
+        course_id = request.POST.get("course_id")
+        weekday = request.POST.get("weekday")
+        period = request.POST.get("period")
+        start_week = request.POST.get("start_week")
+        end_week = request.POST.get("end_week")
+        check_only = request.POST.get("check_only") == "true"
+
+        # 验证基本数据
+        if not all([course_id, weekday, period]):
+            return JsonResponse({"status": "error", "message": "请选择星期和时间段"})
+
+        # 如果是仅检查模式，不需要验证周次范围
+        if not check_only and not all([start_week, end_week]):
+            return JsonResponse({"status": "error", "message": "请填写完整的课程安排信息"})
+
+        # 验证课程是否属于当前用户
+        try:
+            course = Course.objects.get(id=course_id, teacher=request.user)
+        except Course.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "课程不存在或无权限"})
+
+        # 检查是否要更新现有安排
+        schedule_id = request.POST.get("schedule_id")
+        if schedule_id:
+            try:
+                schedule = CourseSchedule.objects.get(id=schedule_id, course=course)
+                # 更新现有安排
+                schedule.start_week = int(start_week)
+                schedule.end_week = int(end_week)
+                schedule.save()
+
+                # 获取现有的周次安排
+                existing_weeks = set()
+                for week_schedule in schedule.week_schedules.all():
+                    if week_schedule.is_active:
+                        existing_weeks.add(week_schedule.week_number)
+
+                # 获取用户新选择的周次
+                selected_weeks = set()
+                for key, value in request.POST.items():
+                    if key.startswith("week_") and value:
+                        selected_weeks.add(int(value))
+
+                # 合并周次（取并集）
+                merged_weeks = existing_weeks.union(selected_weeks)
+
+                # 调试：打印接收到的周次数据
+                logger.info(f"合并安排 - 安排ID: {schedule_id}")
+                logger.info(f"合并安排 - 现有周次: {sorted(existing_weeks)}")
+                logger.info(f"合并安排 - 新选择周次: {sorted(selected_weeks)}")
+                logger.info(f"合并安排 - 合并后周次: {sorted(merged_weeks)}")
+
+                # 更新周次范围
+                if merged_weeks:
+                    schedule.start_week = min(merged_weeks)
+                    schedule.end_week = max(merged_weeks)
+                    schedule.save()
+
+                # 删除现有的周次安排
+                schedule.week_schedules.all().delete()
+
+                # 创建合并后的周次安排
+                for week_num in range(schedule.start_week, schedule.end_week + 1):
+                    is_active = week_num in merged_weeks
+                    CourseWeekSchedule.objects.create(
+                        course_schedule=schedule, week_number=week_num, is_active=is_active
+                    )
+
+                return JsonResponse(
+                    {"status": "success", "message": "课程安排更新成功", "schedule_id": schedule.id}
+                )
+
+            except CourseSchedule.DoesNotExist:
+                return JsonResponse({"status": "error", "message": "要更新的安排不存在"})
+
+        # 检查是否已存在相同的课程安排（相同的星期和时间段）
+        logger.info(f"检查冲突 - 课程: {course.name}, 星期: {weekday}, 时间段: {period}")
+        existing_schedule = CourseSchedule.objects.filter(
+            course=course, weekday=int(weekday), period=int(period)
+        ).first()
+
+        if existing_schedule:
+            logger.info(f"发现冲突 - 现有安排ID: {existing_schedule.id}")
+            # 如果存在相同安排，返回现有安排的信息，让前端显示
+            # 获取现有安排的周次状态
+            week_status = {}
+            if existing_schedule.week_schedules.exists():
+                for week_schedule in existing_schedule.week_schedules.all():
+                    week_status[week_schedule.week_number] = week_schedule.is_active
+            else:
+                # 如果没有具体的周次安排，默认所有周次都上课
+                for week_num in range(existing_schedule.start_week, existing_schedule.end_week + 1):
+                    week_status[week_num] = True
+
+            response_data = {
+                "status": "conflict",
+                "message": f"该课程在{existing_schedule.get_weekday_display()}{existing_schedule.get_period_display()}已有安排",
+                "schedule_id": existing_schedule.id,
+                "week_status": week_status,
+                "start_week": existing_schedule.start_week,
+                "end_week": existing_schedule.end_week,
+                "weekday": existing_schedule.weekday,
+                "period": existing_schedule.period,
+            }
+
+            # 如果是仅检查模式，直接返回冲突信息
+            if check_only:
+                return JsonResponse(response_data)
+
+            # 如果不是仅检查模式，返回冲突信息让前端处理
+            return JsonResponse(response_data)
+
+        # 创建新的课程安排
+        schedule = CourseSchedule.objects.create(
+            course=course,
+            weekday=int(weekday),
+            period=int(period),
+            start_week=int(start_week),
+            end_week=int(end_week),
+        )
+
+        # 处理周次选择
+        selected_weeks = set()
+        for key, value in request.POST.items():
+            if key.startswith("week_") and value:
+                selected_weeks.add(int(value))
+
+        # 创建周次安排
+        # 如果用户选择了具体周次，按选择创建；否则默认所有周次都上课
+        for week_num in range(int(start_week), int(end_week) + 1):
+            if selected_weeks:  # 用户选择了具体周次
+                is_active = week_num in selected_weeks
+            else:  # 用户没有选择具体周次，默认都上课
+                is_active = True
+
+            CourseWeekSchedule.objects.create(
+                course_schedule=schedule, week_number=week_num, is_active=is_active
+            )
+
+        return JsonResponse(
+            {"status": "success", "message": "课程安排添加成功", "schedule_id": schedule.id}
+        )
+
+    except Exception as e:
+        logger.error(f"添加课程安排失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"添加课程安排失败: {str(e)}"})
+
+
+@login_required
+def get_schedule_weeks(request, schedule_id):
+    """获取课程安排的周次信息"""
+    try:
+        schedule = get_object_or_404(CourseSchedule, id=schedule_id)
+
+        # 验证权限
+        if schedule.course.teacher != request.user and not request.user.is_superuser:
+            return JsonResponse({"status": "error", "message": "无权限访问此安排"})
+
+        # 获取所有周次的状态
+        week_status = {}
+
+        if schedule.week_schedules.exists():
+            # 如果有具体的周次安排，获取每个周次的状态
+            for week_schedule in schedule.week_schedules.all():
+                week_status[week_schedule.week_number] = week_schedule.is_active
+        else:
+            # 如果没有具体的周次安排，默认所有周次都上课
+            for week_num in range(schedule.start_week, schedule.end_week + 1):
+                week_status[week_num] = True
+
+        # 为了向后兼容，也返回活跃的周次列表
+        active_weeks = [week_num for week_num, is_active in week_status.items() if is_active]
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "weeks": active_weeks,  # 向后兼容
+                "week_status": week_status,  # 新的完整状态信息
+                "schedule_id": schedule_id,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取安排周次信息失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取安排周次信息失败: {str(e)}"})
+
+
+@login_required
+def get_schedule_data(request):
+    """获取课程表数据"""
+    try:
+        week_number = request.GET.get("week", 1)
+        try:
+            week_number = int(week_number)
+        except ValueError:
+            week_number = 1
+
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+        if not current_semester:
+            return JsonResponse({"status": "error", "message": "请先设置当前学期"})
+
+        # 获取当前用户的课程安排
+        user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+
+        # 构建课程表数据
+        schedule_data = {}
+        for course in user_courses:
+            for schedule in course.schedules.all():
+                if schedule.is_in_week(week_number):
+                    key = f"{schedule.weekday}_{schedule.period}"
+                    if key not in schedule_data:
+                        schedule_data[key] = []
+                    schedule_data[key].append(
+                        {
+                            "course_name": course.name,
+                            "location": course.location,
+                            "start_week": schedule.start_week,
+                            "end_week": schedule.end_week,
+                        }
+                    )
+
+        return JsonResponse(
+            {"status": "success", "schedule_data": schedule_data, "week_number": week_number}
+        )
+
+    except Exception as e:
+        logger.error(f"获取课程表数据失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取课程表数据失败: {str(e)}"})

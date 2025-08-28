@@ -75,9 +75,36 @@
         <h1>作业评分系统</h1>
         <div class="menu">
             <a href="{% url 'grading:grading' %}" class="menu-item">开始评分</a>
+            <a href="{% url 'grading:calendar' %}" class="menu-item">校历课程表</a>
+            <a href="{% url 'grading:course_management' %}" class="menu-item">课程管理</a>
+            {% if user.is_staff or user.is_superuser %}
+            <a href="{% url 'grading:semester_management' %}" class="menu-item">学期管理</a>
+            {% endif %}
             <a href="{% url 'admin:index' %}" class="menu-item">管理后台</a>
         </div>
+        {% if current_semester %}
+        <div class="semester-info" style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #2e7d32;">当前学期：{{ current_semester.name }}</h3>
+            <p style="margin-bottom: 5px;"><strong>学期时间：</strong>{{ current_semester.start_date|date:"Y年m月d日" }} - {{ current_semester.end_date|date:"Y年m月d日" }}</p>
+            <p style="margin-bottom: 5px;"><strong>当前周次：</strong>第{{ current_week }}周</p>
+            {% if user_courses %}
+            <p style="margin-bottom: 0;"><strong>我的课程：</strong>{{ user_courses.count }}门</p>
+            {% else %}
+            <p style="margin-bottom: 0;"><strong>我的课程：</strong>暂无课程，请先添加课程</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="semester-info" style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #856404;">提示</h3>
+            <p style="margin-bottom: 0;">请先在管理后台设置当前学期信息</p>
+        </div>
+        {% endif %}
+
         <div class="features">
+            <div class="feature">
+                <h3>校历管理</h3>
+                <p>管理学期信息，设置课程安排和查看课程表</p>
+            </div>
             <div class="feature">
                 <h3>作业管理</h3>
                 <p>创建和管理作业，设置截止日期和评分标准</p>

@@ -1,0 +1,237 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>学期管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .back-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #666;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .back-btn:hover {
+            background-color: #555;
+        }
+
+        .semester-list {
+            margin-top: 30px;
+        }
+
+        .semester-item {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        .semester-item.active {
+            background-color: #e8f5e8;
+            border-color: #4CAF50;
+        }
+
+        .semester-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .semester-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .semester-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .semester-status.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .semester-status.inactive {
+            background-color: #666;
+            color: white;
+        }
+
+        .semester-details {
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .semester-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn-primary {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #45a049;
+        }
+
+        .btn-secondary {
+            background-color: #666;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #555;
+        }
+
+        .btn-warning {
+            background-color: #ff9800;
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background-color: #e68900;
+        }
+
+        .add-semester-section {
+            background-color: #f0f8ff;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .message {
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .empty-state {
+            text-align: center;
+            color: #666;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{% url 'grading:index' %}" class="back-btn">← 返回首页</a>
+
+        <h1>学期管理</h1>
+
+        <div class="add-semester-section">
+            <h3>添加新学期</h3>
+            <p style="color: #666; margin-bottom: 20px;">点击下方按钮添加新学期信息</p>
+            <a href="{% url 'grading:semester_add' %}" class="btn btn-primary">添加学期</a>
+        </div>
+
+        <div class="semester-list">
+            <h3>学期列表</h3>
+            {% if semesters %}
+                {% for semester in semesters %}
+                <div class="semester-item {% if semester.is_active %}active{% endif %}">
+                    <div class="semester-header">
+                        <div class="semester-name">{{ semester.name }}</div>
+                        <span class="semester-status {% if semester.is_active %}active{% else %}inactive{% endif %}">
+                            {% if semester.is_active %}当前学期{% else %}非活跃{% endif %}
+                        </span>
+                    </div>
+                    <div class="semester-details">
+                        <p><strong>学期时间：</strong>{{ semester.start_date|date:"Y年m月d日" }} - {{ semester.end_date|date:"Y年m月d日" }}</p>
+                        <p><strong>总周数：</strong>{{ semester.get_week_count }}周</p>
+                        <p><strong>创建时间：</strong>{{ semester.created_at|date:"Y年m月d日 H:i" }}</p>
+                    </div>
+                    <div class="semester-actions">
+                        <a href="{% url 'grading:semester_edit' semester.id %}" class="btn btn-secondary">编辑</a>
+                        {% if not semester.is_active %}
+                        <a href="{% url 'grading:semester_edit' semester.id %}" class="btn btn-warning">设为当前学期</a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <h3>暂无学期信息</h3>
+                    <p>请先添加学期信息</p>
+                    <a href="{% url 'grading:semester_add' %}" class="btn btn-primary">添加学期</a>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
