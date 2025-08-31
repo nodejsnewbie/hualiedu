@@ -78,6 +78,7 @@ urlpatterns = [
     path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
     path("semester-add/", views.semester_add_view, name="semester_add"),
     path("add-course/", views.add_course_view, name="add_course"),
+    path("delete-course/", views.delete_course_view, name="delete_course"),
     path("add-schedule/", views.add_schedule_view, name="add_schedule"),
     path(
         "get-schedule-weeks/<int:schedule_id>/", views.get_schedule_weeks, name="get_schedule_weeks"

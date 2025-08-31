@@ -77,6 +77,7 @@
             <a href="{% url 'grading:grading' %}" class="menu-item">开始评分</a>
             <a href="{% url 'grading:calendar' %}" class="menu-item">校历课程表</a>
             <a href="{% url 'grading:course_management' %}" class="menu-item">课程管理</a>
+            <a href="{% url 'toolbox:index' %}" class="menu-item">工具箱</a>
             {% if user.is_staff or user.is_superuser %}
             <a href="{% url 'grading:semester_management' %}" class="menu-item">学期管理</a>
             {% endif %}

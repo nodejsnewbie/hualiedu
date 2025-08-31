@@ -1,0 +1,260 @@
+{% extends 'base.html' %}
+
+{% block title %}任务详情 - 工具箱{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'toolbox:index' %}">工具箱</a></li>
+                    <li class="breadcrumb-item"><a href="{% url 'toolbox:task_list' %}">任务列表</a></li>
+                    <li class="breadcrumb-item active">任务详情</li>
+                </ol>
+            </nav>
+
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1>
+                    <i class="fas fa-info-circle text-info"></i>
+                    任务详情
+                </h1>
+                <div>
+                    <a href="{% url 'toolbox:task_list' %}" class="btn btn-outline-secondary">
+                        <i class="fas fa-arrow-left"></i>
+                        返回列表
+                    </a>
+                    <form method="post" action="{% url 'toolbox:delete_task' task.id %}" style="display: inline;">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger"
+                                onclick="return confirm('确定要删除这个任务吗？')">
+                            <i class="fas fa-trash"></i>
+                            删除任务
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <!-- 任务基本信息 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">📋 任务信息</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>任务类型：</strong> {{ task.get_task_type_display }}</p>
+                            <p><strong>任务状态：</strong>
+                                <span class="badge badge-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                    {{ task.get_status_display }}
+                                </span>
+                            </p>
+                            <p><strong>创建时间：</strong> {{ task.created_at|date:"Y-m-d H:i:s" }}</p>
+                            <p><strong>更新时间：</strong> {{ task.updated_at|date:"Y-m-d H:i:s" }}</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>源目录：</strong> <code>{{ task.source_directory }}</code></p>
+                            <p><strong>输出目录：</strong> <code>{{ task.output_directory }}</code></p>
+                            <p><strong>总文件数：</strong> {{ task.total_files }}</p>
+                            <p><strong>已处理：</strong> {{ task.processed_files }}</p>
+                        </div>
+                    </div>
+
+                    {% if task.error_message %}
+                    <div class="alert alert-danger mt-3">
+                        <h6><i class="fas fa-exclamation-triangle"></i> 错误信息</h6>
+                        <p class="mb-0">{{ task.error_message }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 进度信息 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">📊 转换进度</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row text-center">
+                        <div class="col-md-4">
+                            <div class="border rounded p-3">
+                                <h3 class="text-primary">{{ task.total_files }}</h3>
+                                <p class="mb-0">总文件数</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded p-3">
+                                <h3 class="text-success">{{ task.success_files }}</h3>
+                                <p class="mb-0">成功转换</p>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="border rounded p-3">
+                                <h3 class="text-danger">{{ task.failed_files }}</h3>
+                                <p class="mb-0">转换失败</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>总体进度</span>
+                            <span>{{ task.progress_percentage }}%</span>
+                        </div>
+                        <div class="progress" style="height: 25px;">
+                            <div class="progress-bar" role="progressbar"
+                                 style="width: {{ task.progress_percentage }}%"
+                                 aria-valuenow="{{ task.progress_percentage }}"
+                                 aria-valuemin="0" aria-valuemax="100">
+                                {{ task.progress_percentage }}%
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 转换日志 -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">📝 转换日志</h5>
+                </div>
+                <div class="card-body">
+                    {% if logs %}
+                        <div class="table-responsive">
+                            <table class="table table-sm">
+                                <thead>
+                                    <tr>
+                                        <th>文件名</th>
+                                        <th>状态</th>
+                                        <th>时间</th>
+                                        <th>错误信息</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for log in logs %}
+                                    <tr>
+                                        <td>{{ log.file_name }}</td>
+                                        <td>
+                                            <span class="badge badge-{% if log.status == 'completed' %}success{% elif log.status == 'failed' %}danger{% elif log.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                                {{ log.get_status_display }}
+                                            </span>
+                                        </td>
+                                        <td>{{ log.created_at|date:"H:i:s" }}</td>
+                                        <td>
+                                            {% if log.error_message %}
+                                                <small class="text-danger">{{ log.error_message }}</small>
+                                            {% else %}
+                                                <small class="text-muted">-</small>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center">暂无转换日志</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <!-- 实时状态更新 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0">🔄 实时状态</h5>
+                </div>
+                <div class="card-body">
+                    <div id="task-status">
+                        <p><strong>当前状态：</strong>
+                            <span id="current-status" class="badge badge-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                {{ task.get_status_display }}
+                            </span>
+                        </p>
+                        <p><strong>进度：</strong> <span id="current-progress">{{ task.progress_percentage }}%</span></p>
+                        <p><strong>已处理：</strong> <span id="current-processed">{{ task.processed_files }}/{{ task.total_files }}</span></p>
+                    </div>
+
+                    {% if task.status == 'processing' %}
+                    <div class="text-center mt-3">
+                        <button class="btn btn-outline-primary" onclick="refreshStatus()">
+                            <i class="fas fa-sync-alt"></i>
+                            刷新状态
+                        </button>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- 操作指南 -->
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">💡 操作指南</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success"></i>
+                            转换完成后，PDF文件将保存在输出目录中
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-info-circle text-info"></i>
+                            可以随时查看转换日志了解详细进度
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-exclamation-triangle text-warning"></i>
+                            如果转换失败，请检查LibreOffice是否正确安装
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-trash text-danger"></i>
+                            删除任务不会影响已转换的文件
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 自动刷新状态（如果任务正在处理中）
+{% if task.status == 'processing' %}
+let statusInterval;
+
+function refreshStatus() {
+    fetch('{% url "toolbox:task_status_api" task.id %}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const taskData = data.data;
+
+                // 更新状态显示
+                document.getElementById('current-status').textContent = taskData.status === 'completed' ? '已完成' :
+                                                                      taskData.status === 'failed' ? '失败' :
+                                                                      taskData.status === 'processing' ? '处理中' : '等待中';
+
+                document.getElementById('current-progress').textContent = taskData.progress_percentage + '%';
+                document.getElementById('current-processed').textContent = taskData.processed_files + '/' + taskData.total_files;
+
+                // 如果任务完成，停止自动刷新
+                if (taskData.status === 'completed' || taskData.status === 'failed') {
+                    clearInterval(statusInterval);
+                    location.reload(); // 刷新页面显示最终状态
+                }
+            }
+        })
+        .catch(error => {
+            console.error('获取状态失败:', error);
+        });
+}
+
+// 每5秒自动刷新一次状态
+statusInterval = setInterval(refreshStatus, 5000);
+{% endif %}
+</script>
+{% endblock %}

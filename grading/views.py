@@ -3367,7 +3367,7 @@ def add_course_view(request):
 @login_required
 @require_http_methods(["POST"])
 def add_schedule_view(request):
-    """添加课程安排视图"""
+    """添加课程安排视图 - 简化版本"""
     try:
         course_id = request.POST.get("course_id")
         weekday = request.POST.get("weekday")
@@ -3390,69 +3390,95 @@ def add_schedule_view(request):
         except Course.DoesNotExist:
             return JsonResponse({"status": "error", "message": "课程不存在或无权限"})
 
+        # 获取用户选择的周次
+        selected_weeks = set()
+        for key, value in request.POST.items():
+            if key.startswith("week_") and value:
+                selected_weeks.add(int(value))
+
         # 检查是否要更新现有安排
         schedule_id = request.POST.get("schedule_id")
         if schedule_id:
             try:
                 schedule = CourseSchedule.objects.get(id=schedule_id, course=course)
-                # 更新现有安排
-                schedule.start_week = int(start_week)
-                schedule.end_week = int(end_week)
-                schedule.save()
 
-                # 获取现有的周次安排
-                existing_weeks = set()
-                for week_schedule in schedule.week_schedules.all():
-                    if week_schedule.is_active:
-                        existing_weeks.add(week_schedule.week_number)
+                # 检查星期或时间段是否发生变化
+                weekday_changed = schedule.weekday != int(weekday)
+                period_changed = schedule.period != int(period)
 
-                # 获取用户新选择的周次
-                selected_weeks = set()
-                for key, value in request.POST.items():
-                    if key.startswith("week_") and value:
-                        selected_weeks.add(int(value))
+                if weekday_changed or period_changed:
+                    # 星期或时间段发生变化，删除原安排
+                    logger.info(f"星期或时间段发生变化 - 删除原安排ID: {schedule_id}")
+                    schedule.delete()
 
-                # 合并周次（取并集）
-                merged_weeks = existing_weeks.union(selected_weeks)
+                    # 检查新时间是否已有安排，如果有则删除
+                    existing_schedule = CourseSchedule.objects.filter(
+                        course=course, weekday=int(weekday), period=int(period)
+                    ).first()
 
-                # 调试：打印接收到的周次数据
-                logger.info(f"合并安排 - 安排ID: {schedule_id}")
-                logger.info(f"合并安排 - 现有周次: {sorted(existing_weeks)}")
-                logger.info(f"合并安排 - 新选择周次: {sorted(selected_weeks)}")
-                logger.info(f"合并安排 - 合并后周次: {sorted(merged_weeks)}")
+                    if existing_schedule:
+                        logger.info(f"删除冲突安排ID: {existing_schedule.id}")
+                        existing_schedule.delete()
 
-                # 更新周次范围
-                if merged_weeks:
-                    schedule.start_week = min(merged_weeks)
-                    schedule.end_week = max(merged_weeks)
+                # 更新或创建安排
+                if weekday_changed or period_changed:
+                    # 创建新安排
+                    schedule = CourseSchedule.objects.create(
+                        course=course,
+                        weekday=int(weekday),
+                        period=int(period),
+                        start_week=int(start_week),
+                        end_week=int(end_week),
+                    )
+                    logger.info(f"创建新安排ID: {schedule.id}")
+                else:
+                    # 更新现有安排
+                    schedule.start_week = int(start_week)
+                    schedule.end_week = int(end_week)
                     schedule.save()
+                    logger.info(f"更新安排ID: {schedule.id}")
 
                 # 删除现有的周次安排
                 schedule.week_schedules.all().delete()
 
-                # 创建合并后的周次安排
-                for week_num in range(schedule.start_week, schedule.end_week + 1):
-                    is_active = week_num in merged_weeks
-                    CourseWeekSchedule.objects.create(
-                        course_schedule=schedule, week_number=week_num, is_active=is_active
-                    )
+                # 根据用户选择创建周次安排
+                if selected_weeks:
+                    # 更新周次范围
+                    schedule.start_week = min(selected_weeks)
+                    schedule.end_week = max(selected_weeks)
+                    schedule.save()
 
+                    # 创建周次安排记录
+                    for week_num in range(schedule.start_week, schedule.end_week + 1):
+                        is_active = week_num in selected_weeks
+                        CourseWeekSchedule.objects.create(
+                            course_schedule=schedule, week_number=week_num, is_active=is_active
+                        )
+                else:
+                    # 用户没有选择具体周次，默认都上课
+                    for week_num in range(schedule.start_week, schedule.end_week + 1):
+                        CourseWeekSchedule.objects.create(
+                            course_schedule=schedule, week_number=week_num, is_active=True
+                        )
+
+                logger.info(f"保存完成 - 安排ID: {schedule.id}, 周次: {sorted(selected_weeks)}")
                 return JsonResponse(
-                    {"status": "success", "message": "课程安排更新成功", "schedule_id": schedule.id}
+                    {"status": "success", "message": "课程安排保存成功", "schedule_id": schedule.id}
                 )
 
             except CourseSchedule.DoesNotExist:
                 return JsonResponse({"status": "error", "message": "要更新的安排不存在"})
 
-        # 检查是否已存在相同的课程安排（相同的星期和时间段）
-        logger.info(f"检查冲突 - 课程: {course.name}, 星期: {weekday}, 时间段: {period}")
+        # 创建新的课程安排
+        # 检查是否已存在相同的课程安排
         existing_schedule = CourseSchedule.objects.filter(
             course=course, weekday=int(weekday), period=int(period)
         ).first()
 
         if existing_schedule:
+            # 如果存在冲突，返回冲突信息
             logger.info(f"发现冲突 - 现有安排ID: {existing_schedule.id}")
-            # 如果存在相同安排，返回现有安排的信息，让前端显示
+
             # 获取现有安排的周次状态
             week_status = {}
             if existing_schedule.week_schedules.exists():
@@ -3481,7 +3507,7 @@ def add_schedule_view(request):
             # 如果不是仅检查模式，返回冲突信息让前端处理
             return JsonResponse(response_data)
 
-        # 创建新的课程安排
+        # 创建新安排
         schedule = CourseSchedule.objects.create(
             course=course,
             weekday=int(weekday),
@@ -3490,24 +3516,27 @@ def add_schedule_view(request):
             end_week=int(end_week),
         )
 
-        # 处理周次选择
-        selected_weeks = set()
-        for key, value in request.POST.items():
-            if key.startswith("week_") and value:
-                selected_weeks.add(int(value))
+        # 根据用户选择创建周次安排
+        if selected_weeks:
+            # 更新周次范围
+            schedule.start_week = min(selected_weeks)
+            schedule.end_week = max(selected_weeks)
+            schedule.save()
 
-        # 创建周次安排
-        # 如果用户选择了具体周次，按选择创建；否则默认所有周次都上课
-        for week_num in range(int(start_week), int(end_week) + 1):
-            if selected_weeks:  # 用户选择了具体周次
+            # 创建周次安排记录
+            for week_num in range(schedule.start_week, schedule.end_week + 1):
                 is_active = week_num in selected_weeks
-            else:  # 用户没有选择具体周次，默认都上课
-                is_active = True
+                CourseWeekSchedule.objects.create(
+                    course_schedule=schedule, week_number=week_num, is_active=is_active
+                )
+        else:
+            # 用户没有选择具体周次，默认都上课
+            for week_num in range(schedule.start_week, schedule.end_week + 1):
+                CourseWeekSchedule.objects.create(
+                    course_schedule=schedule, week_number=week_num, is_active=True
+                )
 
-            CourseWeekSchedule.objects.create(
-                course_schedule=schedule, week_number=week_num, is_active=is_active
-            )
-
+        logger.info(f"创建完成 - 安排ID: {schedule.id}, 周次: {sorted(selected_weeks)}")
         return JsonResponse(
             {"status": "success", "message": "课程安排添加成功", "schedule_id": schedule.id}
         )
@@ -3598,3 +3627,40 @@ def get_schedule_data(request):
     except Exception as e:
         logger.error(f"获取课程表数据失败: {str(e)}")
         return JsonResponse({"status": "error", "message": f"获取课程表数据失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_course_view(request):
+    """删除课程视图"""
+    try:
+        course_id = request.POST.get("course_id")
+
+        if not course_id:
+            return JsonResponse({"status": "error", "message": "请提供课程ID"})
+
+        # 获取课程对象
+        course = get_object_or_404(Course, id=course_id)
+
+        # 验证权限：只有课程的教师或超级用户可以删除
+        if course.teacher != request.user and not request.user.is_superuser:
+            return JsonResponse({"status": "error", "message": "您没有权限删除此课程"})
+
+        # 记录删除信息
+        course_name = course.name
+        course_semester = course.semester.name
+
+        # 删除课程（会级联删除相关的课程安排和周次安排）
+        course.delete()
+
+        logger.info(
+            f"用户 {request.user.username} 删除了课程: {course_name} (学期: {course_semester})"
+        )
+
+        return JsonResponse({"status": "success", "message": f"课程 '{course_name}' 删除成功"})
+
+    except Course.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "课程不存在"})
+    except Exception as e:
+        logger.error(f"删除课程失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"删除课程失败: {str(e)}"})

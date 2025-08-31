@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+
+{% block title %}PPT转PDF - 工具箱{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'toolbox:index' %}">工具箱</a></li>
+                    <li class="breadcrumb-item active">PPT转PDF</li>
+                </ol>
+            </nav>
+
+            <h1 class="mb-4">
+                <i class="fas fa-file-pdf text-danger"></i>
+                PPT转PDF
+            </h1>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-8">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">📁 批量转换设置</h5>
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+
+                        <div class="form-group">
+                            <label for="source_directory">
+                                <i class="fas fa-folder-open"></i>
+                                源目录路径
+                            </label>
+                            <input type="text" class="form-control" id="source_directory" name="source_directory"
+                                   placeholder="请输入包含PPT文件的目录路径，如: /path/to/ppt/files" required>
+                            <small class="form-text text-muted">
+                                支持 .ppt 和 .pptx 格式的文件
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="output_directory">
+                                <i class="fas fa-folder-plus"></i>
+                                输出目录路径
+                            </label>
+                            <input type="text" class="form-control" id="output_directory" name="output_directory"
+                                   placeholder="请输入PDF文件的输出目录路径" required>
+                            <small class="form-text text-muted">
+                                如果目录不存在，系统会自动创建
+                            </small>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <h6><i class="fas fa-info-circle"></i> 使用说明</h6>
+                            <ul class="mb-0">
+                                <li>系统会自动扫描源目录中的所有PPT文件（.ppt和.pptx格式）</li>
+                                <li>转换后的PDF文件将保存在指定的输出目录中</li>
+                                <li>转换过程在后台进行，您可以随时查看进度</li>
+                                <li>需要确保系统已安装LibreOffice</li>
+                            </ul>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-lg">
+                            <i class="fas fa-play"></i>
+                            开始转换
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">📋 最近任务</h5>
+                </div>
+                <div class="card-body">
+                    {% if tasks %}
+                        {% for task in tasks %}
+                        <div class="border-bottom pb-2 mb-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="badge badge-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                    {{ task.get_status_display }}
+                                </span>
+                                <small class="text-muted">{{ task.created_at|date:"m-d H:i" }}</small>
+                            </div>
+                            <div class="mt-1">
+                                <small class="text-muted">{{ task.get_task_type_display }}</small>
+                            </div>
+                            <div class="progress mt-1" style="height: 6px;">
+                                <div class="progress-bar" role="progressbar"
+                                     style="width: {{ task.progress_percentage }}%"
+                                     aria-valuenow="{{ task.progress_percentage }}"
+                                     aria-valuemin="0" aria-valuemax="100">
+                                </div>
+                            </div>
+                            <div class="mt-1">
+                                <small class="text-muted">
+                                    {{ task.processed_files }}/{{ task.total_files }} 文件
+                                </small>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        <div class="text-center mt-3">
+                            <a href="{% url 'toolbox:task_list' %}" class="btn btn-outline-primary btn-sm">
+                                查看所有任务
+                            </a>
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center">暂无任务记录</p>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h5 class="mb-0">⚙️ 系统要求</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-unstyled mb-0">
+                        <li><i class="fas fa-check text-success"></i> LibreOffice 已安装</li>
+                        <li><i class="fas fa-check text-success"></i> 足够的磁盘空间</li>
+                        <li><i class="fas fa-check text-success"></i> 目录读写权限</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 自动填充示例路径
+document.addEventListener('DOMContentLoaded', function() {
+    const sourceInput = document.getElementById('source_directory');
+    const outputInput = document.getElementById('output_directory');
+
+    // 添加示例路径提示
+    sourceInput.addEventListener('focus', function() {
+        if (!this.value) {
+            this.placeholder = '例如: /Users/username/Documents/PPT文件';
+        }
+    });
+
+    outputInput.addEventListener('focus', function() {
+        if (!this.value) {
+            this.placeholder = '例如: /Users/username/Documents/PDF输出';
+        }
+    });
+});
+</script>
+{% endblock %}
