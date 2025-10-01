@@ -20,12 +20,53 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
-                        <a class="nav-link" href="/">首页</a>
+                        <a class="nav-link" href="{% url 'grading:index' %}">首页</a>
+                    </li>
+                    {% if user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'grading:grading_page' %}">作业评分</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="/admin/">管理后台</a>
+                        <a class="nav-link" href="{% url 'grading:repository_management' %}">仓库管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'grading:calendar_view' %}">校历管理</a>
+                    </li>
+                    {% if user.is_staff %}
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown">
+                            管理功能
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{% url 'grading:grade_type_management' %}">评分类型管理</a></li>
+                            <li><a class="dropdown-item" href="{% url 'grading:batch_grade_page' %}">批量登分</a></li>
+                            <li><a class="dropdown-item" href="{% url 'grading:batch_ai_score_page' %}">批量AI评分</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="/admin/">系统管理</a></li>
+                        </ul>
+                    </li>
+                    {% endif %}
+                    {% endif %}
+                </ul>
+
+                {% if user.is_authenticated %}
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            {{ user.username }}
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="{% url 'admin:logout' %}">退出登录</a></li>
+                        </ul>
                     </li>
                 </ul>
+                {% else %}
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="{% url 'admin:login' %}">登录</a>
+                    </li>
+                </ul>
+                {% endif %}
             </div>
         </div>
     </nav>

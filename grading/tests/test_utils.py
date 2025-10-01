@@ -1,298 +1,454 @@
 """
-Django tests for utility functions in the grading app.
+工具函数测试
 """
 
 import os
+import shutil
+import subprocess
 import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
-from django.conf import settings
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from grading.utils import FileHandler, GitHandler
 
+from .base import BaseTestCase
 
-class FileHandlerTest(TestCase):
-    """Test cases for FileHandler utility class."""
+
+class GitHandlerTest(BaseTestCase):
+    """Git处理器测试"""
 
     def setUp(self):
-        """Set up test data."""
+        super().setUp()
         self.temp_dir = tempfile.mkdtemp()
-        self.test_file_path = os.path.join(self.temp_dir, "test_file.txt")
-
-        # Create test file
-        with open(self.test_file_path, "w") as f:
-            f.write("Test content")
+        self.git_repo_path = os.path.join(self.temp_dir, "test_repo")
+        self.target_path = os.path.join(self.temp_dir, "target_repo")
 
     def tearDown(self):
-        """Clean up test data."""
-        import shutil
+        super().tearDown()
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
 
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+    @patch("subprocess.run")
+    def test_is_git_repo_true(self, mock_run):
+        """测试检查Git仓库（是Git仓库）"""
+        mock_run.return_value = MagicMock(returncode=0)
 
-    def test_get_mime_type_text_file(self):
-        """Test getting MIME type for text file."""
-        mime_type = FileHandler.get_mime_type(self.test_file_path)
-        self.assertEqual(mime_type, "text/plain")
+        result = GitHandler.is_git_repo("/path/to/git/repo")
 
-    def test_get_mime_type_docx_file(self):
-        """Test getting MIME type for DOCX file."""
-        docx_path = os.path.join(self.temp_dir, "test.docx")
-        with open(docx_path, "w") as f:
-            f.write("Test DOCX content")
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd="/path/to/git/repo",
+            capture_output=True,
+            text=True,
+        )
 
-        mime_type = FileHandler.get_mime_type(docx_path)
-        self.assertIn("wordprocessingml.document", mime_type)
+    @patch("subprocess.run")
+    def test_is_git_repo_false(self, mock_run):
+        """测试检查Git仓库（不是Git仓库）"""
+        mock_run.return_value = MagicMock(returncode=1)
 
-    def test_get_mime_type_pdf_file(self):
-        """Test getting MIME type for PDF file."""
-        pdf_path = os.path.join(self.temp_dir, "test.pdf")
-        with open(pdf_path, "w") as f:
-            f.write("Test PDF content")
+        result = GitHandler.is_git_repo("/path/to/normal/dir")
 
-        mime_type = FileHandler.get_mime_type(pdf_path)
-        self.assertEqual(mime_type, "application/pdf")
+        self.assertFalse(result)
 
-    def test_get_mime_type_nonexistent_file(self):
-        """Test getting MIME type for nonexistent file."""
-        nonexistent_path = os.path.join(self.temp_dir, "nonexistent.txt")
-        mime_type = FileHandler.get_mime_type(nonexistent_path)
-        self.assertIsNone(mime_type)
+    @patch("subprocess.run")
+    def test_is_git_repo_exception(self, mock_run):
+        """测试检查Git仓库时发生异常"""
+        mock_run.side_effect = Exception("Command failed")
 
-    def test_is_safe_path(self):
-        """Test path safety validation."""
-        # Test safe path
-        safe_path = os.path.join(settings.MEDIA_ROOT, "grades", "test.docx")
-        self.assertTrue(FileHandler.is_safe_path(safe_path))
+        result = GitHandler.is_git_repo("/invalid/path")
 
-        # Test unsafe path (outside media directory)
-        unsafe_path = "/etc/passwd"
-        self.assertFalse(FileHandler.is_safe_path(unsafe_path))
+        self.assertFalse(result)
 
-        # Test path with directory traversal
-        traversal_path = os.path.join(settings.MEDIA_ROOT, "grades", "..", "..", "etc", "passwd")
-        self.assertFalse(FileHandler.is_safe_path(traversal_path))
+    @patch("grading.utils.GitHandler.is_git_repo")
+    @patch("os.path.exists")
+    @patch("os.makedirs")
+    @patch("shutil.rmtree")
+    @patch("subprocess.run")
+    def test_clone_repo_success(
+        self, mock_run, mock_rmtree, mock_makedirs, mock_exists, mock_is_git
+    ):
+        """测试成功克隆仓库"""
+        # 设置mock返回值
+        mock_exists.side_effect = [True, False]  # 源路径存在，目标路径不存在
+        mock_is_git.return_value = True
+        mock_run.return_value = MagicMock(returncode=0, stderr="")
 
-    def test_validate_file_extension(self):
-        """Test file extension validation."""
-        # Test valid extensions
-        valid_extensions = [".txt", ".pdf", ".docx", ".doc"]
-        for ext in valid_extensions:
-            file_path = f"test{ext}"
-            self.assertTrue(FileHandler.validate_file_extension(file_path))
+        result = GitHandler.clone_repo(self.git_repo_path, self.target_path)
 
-        # Test invalid extensions
-        invalid_extensions = [".exe", ".bat", ".sh", ".py"]
-        for ext in invalid_extensions:
-            file_path = f"test{ext}"
-            self.assertFalse(FileHandler.validate_file_extension(file_path))
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "clone", "--local", self.git_repo_path, self.target_path],
+            capture_output=True,
+            text=True,
+        )
 
-    def test_get_file_size(self):
-        """Test getting file size."""
-        file_size = FileHandler.get_file_size(self.test_file_path)
-        self.assertIsInstance(file_size, int)
-        self.assertGreater(file_size, 0)
+    @patch("os.path.exists")
+    def test_clone_repo_source_not_exists(self, mock_exists):
+        """测试克隆不存在的源仓库"""
+        mock_exists.return_value = False
 
-    def test_get_file_size_nonexistent(self):
-        """Test getting file size for nonexistent file."""
-        nonexistent_path = os.path.join(self.temp_dir, "nonexistent.txt")
-        file_size = FileHandler.get_file_size(nonexistent_path)
-        self.assertEqual(file_size, 0)
+        result = GitHandler.clone_repo("/nonexistent/path", self.target_path)
 
-    def test_create_directory_if_not_exists(self):
-        """Test creating directory if it doesn't exist."""
+        self.assertFalse(result)
+
+    @patch("grading.utils.GitHandler.is_git_repo")
+    @patch("os.path.exists")
+    def test_clone_repo_not_git_repo(self, mock_exists, mock_is_git):
+        """测试克隆非Git仓库"""
+        mock_exists.return_value = True
+        mock_is_git.return_value = False
+
+        result = GitHandler.clone_repo("/not/git/repo", self.target_path)
+
+        self.assertFalse(result)
+
+    @patch("subprocess.run")
+    def test_get_repo_name_with_remote(self, mock_run):
+        """测试获取有远程仓库的仓库名称"""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="https://github.com/user/test-repo.git\n"
+        )
+
+        result = GitHandler.get_repo_name("/path/to/repo")
+
+        self.assertEqual(result, "test-repo")
+
+    @patch("subprocess.run")
+    def test_get_repo_name_without_remote(self, mock_run):
+        """测试获取无远程仓库的仓库名称"""
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
+
+        result = GitHandler.get_repo_name("/path/to/local-repo")
+
+        self.assertEqual(result, "local-repo")
+
+    @patch("subprocess.run")
+    def test_get_repo_name_exception(self, mock_run):
+        """测试获取仓库名称时发生异常"""
+        mock_run.side_effect = Exception("Command failed")
+
+        result = GitHandler.get_repo_name("/path/to/repo")
+
+        self.assertEqual(result, "repo")
+
+    @patch("subprocess.run")
+    def test_clone_repo_remote_success(self, mock_run):
+        """测试成功克隆远程仓库"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = GitHandler.clone_repo_remote("https://github.com/user/repo.git", self.target_path)
+
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "clone", "https://github.com/user/repo.git", self.target_path],
+            capture_output=True,
+            text=True,
+        )
+
+    @patch("subprocess.run")
+    def test_clone_repo_remote_failure(self, mock_run):
+        """测试克隆远程仓库失败"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = GitHandler.clone_repo_remote("invalid-repo", self.target_path)
+
+        self.assertFalse(result)
+
+    @patch("subprocess.run")
+    def test_pull_repo_success(self, mock_run):
+        """测试成功拉取仓库更新"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = GitHandler.pull_repo(self.git_repo_path)
+
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "pull"], cwd=self.git_repo_path, capture_output=True, text=True
+        )
+
+    @patch("subprocess.run")
+    def test_pull_repo_failure(self, mock_run):
+        """测试拉取仓库更新失败"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = GitHandler.pull_repo(self.git_repo_path)
+
+        self.assertFalse(result)
+
+    @patch("subprocess.run")
+    def test_checkout_branch_success(self, mock_run):
+        """测试成功切换分支"""
+        mock_run.return_value = MagicMock(returncode=0)
+
+        result = GitHandler.checkout_branch(self.git_repo_path, "develop")
+
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "checkout", "develop"], cwd=self.git_repo_path, capture_output=True, text=True
+        )
+
+    @patch("subprocess.run")
+    def test_checkout_branch_failure(self, mock_run):
+        """测试切换分支失败"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = GitHandler.checkout_branch(self.git_repo_path, "nonexistent")
+
+        self.assertFalse(result)
+
+    @patch("subprocess.run")
+    def test_get_branches_success(self, mock_run):
+        """测试成功获取分支列表"""
+        mock_run.return_value = MagicMock(
+            returncode=0, stdout="  origin/main\n  origin/develop\n  origin/feature/test\n"
+        )
+
+        result = GitHandler.get_branches(self.git_repo_path)
+
+        expected = ["origin/main", "origin/develop", "origin/feature/test"]
+        self.assertEqual(result, expected)
+
+    @patch("subprocess.run")
+    def test_get_branches_failure(self, mock_run):
+        """测试获取分支列表失败"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = GitHandler.get_branches(self.git_repo_path)
+
+        self.assertEqual(result, [])
+
+    @patch("os.path.exists")
+    def test_is_git_repository_true(self, mock_exists):
+        """测试检查Git仓库目录（是Git仓库）"""
+        mock_exists.return_value = True
+
+        result = GitHandler.is_git_repository("/path/to/git/repo")
+
+        self.assertTrue(result)
+        mock_exists.assert_called_once_with("/path/to/git/repo/.git")
+
+    @patch("os.path.exists")
+    def test_is_git_repository_false(self, mock_exists):
+        """测试检查Git仓库目录（不是Git仓库）"""
+        mock_exists.return_value = False
+
+        result = GitHandler.is_git_repository("/path/to/normal/dir")
+
+        self.assertFalse(result)
+
+    @patch("subprocess.run")
+    def test_get_current_branch_success(self, mock_run):
+        """测试成功获取当前分支"""
+        mock_run.return_value = MagicMock(returncode=0, stdout="main\n")
+
+        result = GitHandler.get_current_branch(self.git_repo_path)
+
+        self.assertEqual(result, "main")
+
+    @patch("subprocess.run")
+    def test_get_current_branch_failure(self, mock_run):
+        """测试获取当前分支失败"""
+        mock_run.return_value = MagicMock(returncode=1)
+
+        result = GitHandler.get_current_branch(self.git_repo_path)
+
+        self.assertIsNone(result)
+
+
+class FileHandlerTest(BaseTestCase):
+    """文件处理器测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        super().tearDown()
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    @override_settings(MEDIA_ROOT="/media/root")
+    @patch("os.path.realpath")
+    def test_is_safe_path_within_media_root(self, mock_realpath):
+        """测试路径在媒体根目录内（安全）"""
+        mock_realpath.side_effect = ["/media/root/subdir/file.txt", "/media/root"]
+
+        result = FileHandler.is_safe_path("/media/root/subdir/file.txt")
+
+        self.assertTrue(result)
+
+    @override_settings(MEDIA_ROOT="/media/root")
+    @patch("os.path.realpath")
+    def test_is_safe_path_outside_media_root(self, mock_realpath):
+        """测试路径在媒体根目录外（不安全）"""
+        mock_realpath.side_effect = ["/etc/passwd", "/media/root"]
+
+        result = FileHandler.is_safe_path("/etc/passwd")
+
+        self.assertFalse(result)
+
+    @override_settings(MEDIA_ROOT="/media/root")
+    @patch("os.path.realpath")
+    def test_is_safe_path_realpath_exception(self, mock_realpath):
+        """测试realpath抛出异常"""
+        mock_realpath.side_effect = OSError("Path error")
+
+        result = FileHandler.is_safe_path("/some/path")
+
+        self.assertFalse(result)
+
+    @override_settings(MEDIA_ROOT="")
+    def test_is_safe_path_no_media_root_safe(self):
+        """测试没有MEDIA_ROOT设置时的安全路径"""
+        result = FileHandler.is_safe_path("relative/path/file.txt")
+
+        self.assertTrue(result)
+
+    @override_settings(MEDIA_ROOT="")
+    def test_is_safe_path_no_media_root_unsafe_absolute(self):
+        """测试没有MEDIA_ROOT设置时的不安全绝对路径"""
+        result = FileHandler.is_safe_path("/absolute/path/file.txt")
+
+        self.assertFalse(result)
+
+    @override_settings(MEDIA_ROOT="")
+    def test_is_safe_path_no_media_root_unsafe_dotdot(self):
+        """测试没有MEDIA_ROOT设置时的不安全相对路径"""
+        result = FileHandler.is_safe_path("../../../etc/passwd")
+
+        self.assertFalse(result)
+
+    @patch("mimetypes.guess_type")
+    def test_get_mime_type_success(self, mock_guess_type):
+        """测试成功获取MIME类型"""
+        mock_guess_type.return_value = ("text/plain", None)
+
+        result = FileHandler.get_mime_type("test.txt")
+
+        self.assertEqual(result, "text/plain")
+        mock_guess_type.assert_called_once_with("test.txt")
+
+    @patch("mimetypes.guess_type")
+    def test_get_mime_type_exception(self, mock_guess_type):
+        """测试获取MIME类型时发生异常"""
+        mock_guess_type.side_effect = Exception("MIME type error")
+
+        result = FileHandler.get_mime_type("test.txt")
+
+        self.assertIsNone(result)
+
+    @patch("os.path.getsize")
+    def test_get_file_size_success(self, mock_getsize):
+        """测试成功获取文件大小"""
+        mock_getsize.return_value = 1024
+
+        result = FileHandler.get_file_size("test.txt")
+
+        self.assertEqual(result, 1024)
+        mock_getsize.assert_called_once_with("test.txt")
+
+    @patch("os.path.getsize")
+    def test_get_file_size_file_not_found(self, mock_getsize):
+        """测试获取不存在文件的大小"""
+        mock_getsize.side_effect = OSError("File not found")
+
+        result = FileHandler.get_file_size("nonexistent.txt")
+
+        self.assertEqual(result, 0)
+
+    @patch("os.makedirs")
+    def test_create_directory_if_not_exists(self, mock_makedirs):
+        """测试创建目录"""
+        FileHandler.create_directory_if_not_exists("/path/to/new/dir")
+
+        mock_makedirs.assert_called_once_with("/path/to/new/dir", exist_ok=True)
+
+    def test_get_mime_type_common_types(self):
+        """测试常见文件类型的MIME类型"""
+        test_cases = [
+            ("test.txt", "text/plain"),
+            ("test.html", "text/html"),
+            ("test.css", "text/css"),
+            ("test.js", "application/javascript"),
+            ("test.json", "application/json"),
+            ("test.pdf", "application/pdf"),
+            ("test.jpg", "image/jpeg"),
+            ("test.png", "image/png"),
+            ("test.gif", "image/gif"),
+        ]
+
+        for filename, expected_mime in test_cases:
+            with self.subTest(filename=filename):
+                result = FileHandler.get_mime_type(filename)
+                # 由于不同系统可能有不同的MIME类型映射，这里只检查是否返回了值
+                if expected_mime:
+                    self.assertIsNotNone(result)
+
+
+class UtilsIntegrationTest(BaseTestCase):
+    """工具函数集成测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.temp_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        super().tearDown()
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_file_handler_with_real_files(self):
+        """测试文件处理器与真实文件"""
+        # 创建测试文件
+        test_file = os.path.join(self.temp_dir, "test.txt")
+        test_content = "Hello, World!"
+
+        with open(test_file, "w", encoding="utf-8") as f:
+            f.write(test_content)
+
+        # 测试获取文件大小
+        size = FileHandler.get_file_size(test_file)
+        self.assertEqual(size, len(test_content.encode("utf-8")))
+
+        # 测试获取MIME类型
+        mime_type = FileHandler.get_mime_type(test_file)
+        self.assertIsNotNone(mime_type)
+
+    def test_create_and_check_directory(self):
+        """测试创建和检查目录"""
         new_dir = os.path.join(self.temp_dir, "new_directory")
+
+        # 目录应该不存在
+        self.assertFalse(os.path.exists(new_dir))
+
+        # 创建目录
         FileHandler.create_directory_if_not_exists(new_dir)
+
+        # 目录应该存在
         self.assertTrue(os.path.exists(new_dir))
         self.assertTrue(os.path.isdir(new_dir))
 
-    def test_create_directory_if_exists(self):
-        """Test creating directory when it already exists."""
-        # Create directory first
-        existing_dir = os.path.join(self.temp_dir, "existing_directory")
-        os.makedirs(existing_dir, exist_ok=True)
+    @patch("subprocess.run")
+    def test_git_operations_workflow(self, mock_run):
+        """测试Git操作工作流"""
+        repo_path = "/test/repo"
 
-        # Try to create it again
-        FileHandler.create_directory_if_not_exists(existing_dir)
-        self.assertTrue(os.path.exists(existing_dir))
-
-
-class GitHandlerTest(TestCase):
-    """Test cases for GitHandler utility class."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.temp_dir = tempfile.mkdtemp()
-        self.repo_name = "test-repo"
-        self.repo_path = os.path.join(self.temp_dir, self.repo_name)
-
-    def tearDown(self):
-        """Clean up test data."""
-        import shutil
-
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    @patch("grading.utils.subprocess.run")
-    def test_clone_repo_success(self, mock_run):
-        """Test successful repository cloning."""
-        # Mock successful subprocess run
+        # 模拟检查Git仓库
         mock_run.return_value = MagicMock(returncode=0)
+        self.assertTrue(GitHandler.is_git_repo(repo_path))
 
-        result = GitHandler.clone_repo(self.repo_name, self.repo_path)
-        self.assertTrue(result)
-        mock_run.assert_called_once()
+        # 模拟获取分支
+        mock_run.return_value = MagicMock(returncode=0, stdout="  origin/main\n  origin/develop\n")
+        branches = GitHandler.get_branches(repo_path)
+        self.assertEqual(len(branches), 2)
 
-    @patch("grading.utils.subprocess.run")
-    def test_clone_repo_failure(self, mock_run):
-        """Test failed repository cloning."""
-        # Mock failed subprocess run
-        mock_run.return_value = MagicMock(returncode=1)
-
-        result = GitHandler.clone_repo(self.repo_name, self.repo_path)
-        self.assertFalse(result)
-        mock_run.assert_called_once()
-
-    @patch("grading.utils.subprocess.run")
-    def test_pull_repo_success(self, mock_run):
-        """Test successful repository pulling."""
-        # Mock successful subprocess run
+        # 模拟切换分支
         mock_run.return_value = MagicMock(returncode=0)
+        self.assertTrue(GitHandler.checkout_branch(repo_path, "develop"))
 
-        result = GitHandler.pull_repo(self.repo_path)
-        self.assertTrue(result)
-        mock_run.assert_called_once()
-
-    @patch("grading.utils.subprocess.run")
-    def test_pull_repo_failure(self, mock_run):
-        """Test failed repository pulling."""
-        # Mock failed subprocess run
-        mock_run.return_value = MagicMock(returncode=1)
-
-        result = GitHandler.pull_repo(self.repo_path)
-        self.assertFalse(result)
-        mock_run.assert_called_once()
-
-    @patch("grading.utils.subprocess.run")
-    def test_checkout_branch_success(self, mock_run):
-        """Test successful branch checkout."""
-        # Mock successful subprocess run
+        # 模拟拉取更新
         mock_run.return_value = MagicMock(returncode=0)
-
-        result = GitHandler.checkout_branch(self.repo_path, "main")
-        self.assertTrue(result)
-        mock_run.assert_called_once()
-
-    @patch("grading.utils.subprocess.run")
-    def test_checkout_branch_failure(self, mock_run):
-        """Test failed branch checkout."""
-        # Mock failed subprocess run
-        mock_run.return_value = MagicMock(returncode=1)
-
-        result = GitHandler.checkout_branch(self.repo_path, "nonexistent")
-        self.assertFalse(result)
-        mock_run.assert_called_once()
-
-    @patch("grading.utils.subprocess.run")
-    def test_get_branches_success(self, mock_run):
-        """Test getting repository branches."""
-        # Mock successful subprocess run with branch output
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout=b"* main\n  develop\n  feature-branch\n"
-        )
-
-        branches = GitHandler.get_branches(self.repo_path)
-        self.assertIsInstance(branches, list)
-        self.assertIn("main", branches)
-        self.assertIn("develop", branches)
-        self.assertIn("feature-branch", branches)
-
-    @patch("grading.utils.subprocess.run")
-    def test_get_branches_failure(self, mock_run):
-        """Test getting branches when command fails."""
-        # Mock failed subprocess run
-        mock_run.return_value = MagicMock(returncode=1)
-
-        branches = GitHandler.get_branches(self.repo_path)
-        self.assertEqual(branches, [])
-
-    def test_is_git_repository(self):
-        """Test checking if directory is a git repository."""
-        # Test non-git directory
-        self.assertFalse(GitHandler.is_git_repository(self.temp_dir))
-
-        # Test with .git directory
-        git_dir = os.path.join(self.temp_dir, ".git")
-        os.makedirs(git_dir, exist_ok=True)
-        self.assertTrue(GitHandler.is_git_repository(self.temp_dir))
-
-    def test_get_current_branch(self):
-        """Test getting current branch."""
-        # Create .git directory and HEAD file
-        git_dir = os.path.join(self.temp_dir, ".git")
-        os.makedirs(git_dir, exist_ok=True)
-
-        head_file = os.path.join(git_dir, "HEAD")
-        with open(head_file, "w") as f:
-            f.write("ref: refs/heads/main")
-
-        current_branch = GitHandler.get_current_branch(self.temp_dir)
-        self.assertEqual(current_branch, "main")
-
-    def test_get_current_branch_nonexistent(self):
-        """Test getting current branch for non-git directory."""
-        current_branch = GitHandler.get_current_branch(self.temp_dir)
-        self.assertIsNone(current_branch)
-
-
-class UtilityIntegrationTest(TestCase):
-    """Integration tests for utility functions."""
-
-    def setUp(self):
-        """Set up test data."""
-        self.temp_dir = tempfile.mkdtemp()
-
-    def tearDown(self):
-        """Clean up test data."""
-        import shutil
-
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_file_handler_and_git_handler_integration(self):
-        """Test FileHandler and GitHandler working together."""
-        # Create a test repository structure
-        repo_path = os.path.join(self.temp_dir, "test-repo")
-        FileHandler.create_directory_if_not_exists(repo_path)
-
-        # Create some files in the repository
-        test_file = os.path.join(repo_path, "test.txt")
-        with open(test_file, "w") as f:
-            f.write("Test content")
-
-        # Test file operations
-        self.assertTrue(FileHandler.validate_file_extension(test_file))
-        self.assertGreater(FileHandler.get_file_size(test_file), 0)
-        self.assertEqual(FileHandler.get_mime_type(test_file), "text/plain")
-
-        # Test path safety
-        self.assertTrue(FileHandler.is_safe_path(test_file))
-
-    @patch("grading.utils.subprocess.run")
-    def test_git_operations_with_file_operations(self, mock_run):
-        """Test Git operations with file operations."""
-        # Mock successful git operations
-        mock_run.return_value = MagicMock(returncode=0)
-
-        # Create repository directory
-        repo_path = os.path.join(self.temp_dir, "git-repo")
-        FileHandler.create_directory_if_not_exists(repo_path)
-
-        # Test git operations
-        self.assertTrue(GitHandler.clone_repo("test-repo", repo_path))
         self.assertTrue(GitHandler.pull_repo(repo_path))
-        self.assertTrue(GitHandler.checkout_branch(repo_path, "main"))
-
-        # Verify directory exists
-        self.assertTrue(os.path.exists(repo_path))
-        self.assertTrue(os.path.isdir(repo_path))

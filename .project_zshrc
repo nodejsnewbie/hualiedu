@@ -1,0 +1,27 @@
+# 项目特定的zsh配置
+# 将此内容添加到你的 ~/.zshrc 文件中，或者创建一个函数来自动加载
+
+# 项目自动环境切换函数
+auto_activate_conda_env() {
+    if [[ -f "environment.yml" && -f ".python-version" ]]; then
+        local env_name=$(grep "name:" environment.yml | cut -d' ' -f2)
+        local current_env=$(conda info --envs | grep '*' | awk '{print $1}')
+
+        if [[ "$current_env" != "$env_name" ]]; then
+            echo "检测到项目环境: $env_name"
+            conda activate "$env_name" 2>/dev/null || {
+                echo "环境 $env_name 不存在，正在创建..."
+                conda env create -f environment.yml
+                conda activate "$env_name"
+            }
+        fi
+    fi
+}
+
+# 在进入目录时自动执行
+chpwd() {
+    auto_activate_conda_env
+}
+
+# 立即执行一次
+auto_activate_conda_env

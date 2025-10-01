@@ -1,0 +1,19 @@
+# 自动激活py313 conda环境
+# 需要安装autoenv: brew install autoenv (macOS)
+
+# 检查并激活conda环境
+if command -v conda >/dev/null 2>&1; then
+    # 初始化conda
+    eval "$(conda shell.bash hook)"
+
+    # 检查当前环境
+    current_env=$(conda info --envs | grep '*' | awk '{print $1}')
+
+    if [ "$current_env" != "py313" ]; then
+        echo "正在切换到py313环境..."
+        conda activate py313
+        echo "✓ 已激活py313环境"
+    fi
+else
+    echo "⚠️  conda未找到，请确保已安装Anaconda"
+fi

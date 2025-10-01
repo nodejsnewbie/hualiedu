@@ -23,6 +23,7 @@ from .models import (
     GradeTypeConfig,
     Repository,
     Semester,
+    SemesterTemplate,
     Student,
     Submission,
     Tenant,
@@ -1106,6 +1107,58 @@ class SemesterAdmin(admin.ModelAdmin):
             return HttpResponse(f"编辑页面加载失败: {str(e)}", status=500)
 
 
+class SemesterTemplateAdmin(admin.ModelAdmin):
+    """学期模板管理界面"""
+
+    list_display = (
+        "season",
+        "start_month_day",
+        "end_month_day",
+        "duration_weeks",
+        "name_pattern",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("season", "is_active", "created_at")
+    search_fields = ("name_pattern",)
+    ordering = ("season", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+    fieldsets = (
+        ("基本信息", {"fields": ("season", "name_pattern", "is_active")}),
+        (
+            "时间配置",
+            {"fields": (("start_month", "start_day"), ("end_month", "end_day"), "duration_weeks")},
+        ),
+        ("系统信息", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    def start_month_day(self, obj):
+        """显示开始月日"""
+        return f"{obj.start_month}月{obj.start_day}日"
+
+    start_month_day.short_description = "开始日期"
+
+    def end_month_day(self, obj):
+        """显示结束月日"""
+        return f"{obj.end_month}月{obj.end_day}日"
+
+    end_month_day.short_description = "结束日期"
+
+    def save_model(self, request, obj, form, change):
+        """保存前验证数据"""
+        try:
+            obj.clean()
+            super().save_model(request, obj, form, change)
+            messages.success(request, f"学期模板 '{obj}' 保存成功")
+        except ValidationError as e:
+            messages.error(request, f"保存失败: {e}")
+
+    def get_queryset(self, request):
+        """自定义查询集"""
+        return super().get_queryset(request).select_related()
+
+
 class CourseScheduleInline(admin.TabularInline):
     """课程安排内联编辑"""
 
@@ -1164,6 +1217,7 @@ class CourseWeekScheduleAdmin(admin.ModelAdmin):
 
 # 注册校历相关模型
 admin_site.register(Semester, SemesterAdmin)
+admin_site.register(SemesterTemplate, SemesterTemplateAdmin)
 admin_site.register(Course, CourseAdmin)
 admin_site.register(CourseSchedule, CourseScheduleAdmin)
 admin_site.register(CourseWeekSchedule, CourseWeekScheduleAdmin)

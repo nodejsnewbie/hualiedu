@@ -137,6 +137,168 @@
             background-color: #e68900;
         }
 
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background-color: #218838;
+        }
+
+        .semester-status-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .semester-status.current {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .semester-status.past {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .semester-status.future {
+            background-color: #17a2b8;
+            color: white;
+        }
+
+        .auto-created-badge {
+            background-color: #007bff;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 8px;
+        }
+
+        .sync-warning {
+            color: #ffc107;
+            font-size: 14px;
+            cursor: help;
+        }
+
+        /* 学期状态概览样式 */
+        .semester-status-overview {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+
+        .semester-status-overview h3 {
+            margin: 0 0 20px 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .status-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .status-card {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .status-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+        }
+
+        .status-icon {
+            font-size: 32px;
+            min-width: 50px;
+            text-align: center;
+        }
+
+        .status-content {
+            flex: 1;
+        }
+
+        .status-content h4 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            font-weight: 600;
+            opacity: 0.9;
+        }
+
+        .status-text {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            font-weight: 500;
+            line-height: 1.3;
+        }
+
+        .status-details {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        .status-details span {
+            display: block;
+        }
+
+        /* 特定状态卡片样式 */
+        .current-status {
+            border-left: 4px solid #28a745;
+        }
+
+        .vacation-status {
+            border-left: 4px solid #ffc107;
+        }
+
+        .next-semester {
+            border-left: 4px solid #17a2b8;
+        }
+
+        .previous-semester {
+            border-left: 4px solid #6c757d;
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .status-cards {
+                grid-template-columns: 1fr;
+            }
+
+            .status-card {
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .status-icon {
+                font-size: 40px;
+            }
+        }
+
         .add-semester-section {
             background-color: #f0f8ff;
             padding: 20px;
@@ -181,6 +343,12 @@
             border: 1px solid #f5c6cb;
         }
 
+        .message.warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
         .empty-state {
             text-align: center;
             color: #666;
@@ -194,32 +362,162 @@
 
         <h1>学期管理</h1>
 
+        <!-- 显示消息 -->
+        {% if messages %}
+            {% for message in messages %}
+                <div class="message {% if message.tags %}{{ message.tags }}{% endif %}">
+                    {{ message }}
+                    {% if message.tags == 'warning' and request.session.pending_delete_semester %}
+                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ffeaa7;">
+                            <strong>⚠️ 确认删除操作：</strong>
+                            <div style="margin-top: 10px;">
+                                <button onclick="forceDelete({{ request.session.pending_delete_semester }})" class="btn btn-danger" style="margin-right: 10px;">
+                                    强制删除学期及所有课程
+                                </button>
+                                <button onclick="cancelDelete()" class="btn btn-secondary">
+                                    取消删除
+                                </button>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        {% endif %}
+
+        <!-- 学期状态概览 -->
+        <div class="semester-status-overview">
+            <h3>📊 学期状态概览</h3>
+            <div class="status-cards">
+                <div class="status-card current-status">
+                    <div class="status-icon">🎓</div>
+                    <div class="status-content">
+                        <h4>当前状态</h4>
+                        <p class="status-text">{{ semester_status.summary.text }}</p>
+                        {% if semester_status.current_semester %}
+                        <div class="status-details">
+                            <span>学期: {{ semester_status.current_semester.name }}</span>
+                            {% if semester_status.status.days_to_end %}
+                            <span>剩余: {{ semester_status.status.days_to_end }}天</span>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if semester_status.vacation.is_vacation %}
+                <div class="status-card vacation-status">
+                    <div class="status-icon">
+                        {% if semester_status.vacation.type == 'winter' %}❄️
+                        {% elif semester_status.vacation.type == 'summer' %}☀️
+                        {% else %}🏖️{% endif %}
+                    </div>
+                    <div class="status-content">
+                        <h4>{{ semester_status.vacation.text }}</h4>
+                        <p class="status-text">{{ semester_status.vacation.description }}</p>
+                        {% if semester_status.vacation.days_to_next_semester %}
+                        <div class="status-details">
+                            <span>距离开学: {{ semester_status.vacation.days_to_next_semester }}天</span>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if semester_status.next_semester %}
+                <div class="status-card next-semester">
+                    <div class="status-icon">⏭️</div>
+                    <div class="status-content">
+                        <h4>下一学期</h4>
+                        <p class="status-text">{{ semester_status.next_semester.semester.name }}</p>
+                        <div class="status-details">
+                            <span>开始日期: {{ semester_status.next_semester.start_date|date:"m月d日" }}</span>
+                            <span>{{ semester_status.next_semester.countdown_text }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if semester_status.previous_semester %}
+                <div class="status-card previous-semester">
+                    <div class="status-icon">⏮️</div>
+                    <div class="status-content">
+                        <h4>上一学期</h4>
+                        <p class="status-text">{{ semester_status.previous_semester.semester.name }}</p>
+                        <div class="status-details">
+                            <span>结束日期: {{ semester_status.previous_semester.end_date|date:"m月d日" }}</span>
+                            <span>{{ semester_status.previous_semester.elapsed_text }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
         <div class="add-semester-section">
-            <h3>添加新学期</h3>
-            <p style="color: #666; margin-bottom: 20px;">点击下方按钮添加新学期信息</p>
-            <a href="{% url 'grading:semester_add' %}" class="btn btn-primary">添加学期</a>
+            <h3>学期管理</h3>
+            <p style="color: #666; margin-bottom: 20px;">系统会自动识别当前学期，您也可以手动添加新学期或同步学期状态</p>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <a href="{% url 'grading:semester_add' %}" class="btn btn-primary">添加学期</a>
+                <button onclick="syncSemesterStatus()" class="btn btn-secondary">同步学期状态</button>
+                <button onclick="refreshStatus()" class="btn btn-secondary">刷新状态</button>
+            </div>
         </div>
 
         <div class="semester-list">
             <h3>学期列表</h3>
             {% if semesters %}
                 {% for semester in semesters %}
-                <div class="semester-item {% if semester.is_active %}active{% endif %}">
+                <div class="semester-item {% if semester.status_info.is_current %}active{% endif %}">
                     <div class="semester-header">
-                        <div class="semester-name">{{ semester.name }}</div>
-                        <span class="semester-status {% if semester.is_active %}active{% else %}inactive{% endif %}">
-                            {% if semester.is_active %}当前学期{% else %}非活跃{% endif %}
-                        </span>
+                        <div class="semester-name">
+                            {{ semester.name }}
+                            {% if semester.auto_created %}
+                                <span class="auto-created-badge">自动创建</span>
+                            {% endif %}
+                        </div>
+                        <div class="semester-status-group">
+                            <span class="semester-status {{ semester.status_info.status_class }}">
+                                {{ semester.status_info.status_text }}
+                            </span>
+                            {% if semester.status_info.needs_sync %}
+                                <span class="sync-warning" title="数据库状态需要同步">⚠️</span>
+                            {% endif %}
+                        </div>
                     </div>
                     <div class="semester-details">
                         <p><strong>学期时间：</strong>{{ semester.start_date|date:"Y年m月d日" }} - {{ semester.end_date|date:"Y年m月d日" }}</p>
                         <p><strong>总周数：</strong>{{ semester.get_week_count }}周</p>
+                        <p><strong>关联课程：</strong>{{ semester.courses_count }}门</p>
+                        {% if semester.season %}
+                        <p><strong>学期季节：</strong>{% if semester.season == 'spring' %}春季{% elif semester.season == 'autumn' %}秋季{% endif %}</p>
+                        {% endif %}
+                        {% if semester.status_info.is_current %}
+                            {% if semester.status_info.days_to_end > 0 %}
+                            <p><strong>剩余天数：</strong>{{ semester.status_info.days_to_end }}天</p>
+                            {% endif %}
+                        {% elif semester.status_info.status == 'future' %}
+                            <p><strong>距离开始：</strong>{{ semester.status_info.days_to_start }}天</p>
+                        {% elif semester.status_info.status == 'past' %}
+                            <p><strong>已结束：</strong>{{ semester.status_info.days_to_end|add:"-1"|floatformat:"0" }}天前</p>
+                        {% endif %}
                         <p><strong>创建时间：</strong>{{ semester.created_at|date:"Y年m月d日 H:i" }}</p>
                     </div>
                     <div class="semester-actions">
                         <a href="{% url 'grading:semester_edit' semester.id %}" class="btn btn-secondary">编辑</a>
-                        {% if not semester.is_active %}
-                        <a href="{% url 'grading:semester_edit' semester.id %}" class="btn btn-warning">设为当前学期</a>
+                        {% if semester.status_info.is_current %}
+                            <span class="btn btn-success" style="cursor: default;">✓ 当前学期</span>
+                        {% elif semester.status_info.status == 'future' %}
+                            <span class="btn" style="background-color: #17a2b8; color: white; cursor: default;">未来学期</span>
+                        {% elif semester.status_info.status == 'past' %}
+                            <span class="btn" style="background-color: #6c757d; color: white; cursor: default;">已结束</span>
+                        {% endif %}
+
+                        {% if not semester.status_info.is_current %}
+                            {% if semester.can_delete %}
+                            <button onclick="confirmDelete('{{ semester.id }}', '{{ semester.name }}')" class="btn btn-danger">删除</button>
+                            {% else %}
+                            <button onclick="confirmDelete('{{ semester.id }}', '{{ semester.name }}')" class="btn btn-danger" title="该学期有{{ semester.courses_count }}门课程，点击可强制删除">删除 ({{ semester.courses_count }}门课程)</button>
+                            {% endif %}
                         {% endif %}
                     </div>
                 </div>
@@ -233,5 +531,135 @@
             {% endif %}
         </div>
     </div>
+
+    <!-- 隐藏的删除表单 -->
+    <form id="deleteForm" method="post" style="display: none;">
+        {% csrf_token %}
+    </form>
+
+    <script>
+        function confirmDelete(semesterId, semesterName) {
+            const message = `确定要删除学期 "${semesterName}" 吗？
+
+⚠️ 注意事项：
+• 只能删除非活跃学期
+• 如果该学期下有课程，系统会提示您选择是否强制删除
+• 强制删除将同时删除该学期下的所有课程
+• 删除后无法恢复`;
+
+            if (confirm(message)) {
+                const form = document.getElementById('deleteForm');
+                form.action = `/grading/semester-delete/${semesterId}/`;
+                // 清除之前的force_delete参数
+                const forceInput = form.querySelector('input[name="force_delete"]');
+                if (forceInput) {
+                    forceInput.remove();
+                }
+                form.submit();
+            }
+        }
+
+        function forceDelete(semesterId) {
+            const message = `⚠️ 强制删除确认
+
+您即将强制删除该学期及其所有关联课程！
+
+这个操作将：
+• 删除该学期的所有课程
+• 删除课程相关的所有数据
+• 无法恢复
+
+确定要继续吗？`;
+
+            if (confirm(message)) {
+                const form = document.getElementById('deleteForm');
+                form.action = `/grading/semester-delete/${semesterId}/`;
+
+                // 添加强制删除参数
+                let forceInput = form.querySelector('input[name="force_delete"]');
+                if (!forceInput) {
+                    forceInput = document.createElement('input');
+                    forceInput.type = 'hidden';
+                    forceInput.name = 'force_delete';
+                    form.appendChild(forceInput);
+                }
+                forceInput.value = 'true';
+
+                form.submit();
+            }
+        }
+
+        function cancelDelete() {
+            // 发送请求清除session中的pending_delete_semester
+            fetch('/grading/semester-management/', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'cancel_delete=true'
+            }).then(() => {
+                location.reload();
+            });
+        }
+
+        function syncSemesterStatus() {
+            if (confirm('确定要同步所有学期的状态吗？\n\n系统将根据当前日期自动识别并更新当前学期。')) {
+                // 显示加载状态
+                const button = event.target;
+                const originalText = button.textContent;
+                button.textContent = '同步中...';
+                button.disabled = true;
+
+                fetch('/grading/semester-management/', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: 'sync_semester_status=true'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        alert('同步失败: ' + (data.message || data.error));
+                        button.textContent = originalText;
+                        button.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    alert('同步失败: ' + error.message);
+                    button.textContent = originalText;
+                    button.disabled = false;
+                });
+            }
+        }
+
+        function refreshStatus() {
+            // 刷新页面以获取最新状态
+            location.reload();
+        }
+
+        // 自动刷新状态（每5分钟）
+        setInterval(function() {
+            // 静默刷新状态信息，不重新加载整个页面
+            fetch('/grading/semester-management/', {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.ok) {
+                    console.log('状态已自动刷新');
+                }
+            })
+            .catch(error => {
+                console.log('自动刷新失败:', error);
+            });
+        }, 5 * 60 * 1000); // 5分钟
+    </script>
 </body>
 </html>

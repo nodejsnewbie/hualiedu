@@ -7,7 +7,7 @@ app_name = "grading"
 
 urlpatterns = [
     path("", views.index, name="index"),
-    path("grading/", views.grading_page, name="grading"),
+    path("grading/", views.grading_page, name="grading_page"),
     path("test-js/", views.test_js, name="test_js"),
     path("test-grade-switch/", views.test_grade_switch, name="test_grade_switch"),
     path("debug-grading/", views.debug_grading, name="debug_grading"),
@@ -72,11 +72,13 @@ urlpatterns = [
         name="update_tenant_config",
     ),
     # 校历功能相关路由
-    path("calendar/", views.calendar_view, name="calendar"),
+    path("calendar/", views.calendar_view, name="calendar_view"),
     path("course-management/", views.course_management_view, name="course_management"),
     path("semester-management/", views.semester_management_view, name="semester_management"),
+    path("semester-status-api/", views.semester_status_api, name="semester_status_api"),
     path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
     path("semester-add/", views.semester_add_view, name="semester_add"),
+    path("semester-delete/<int:semester_id>/", views.semester_delete_view, name="semester_delete"),
     path("add-course/", views.add_course_view, name="add_course"),
     path("delete-course/", views.delete_course_view, name="delete_course"),
     path("add-schedule/", views.add_schedule_view, name="add_schedule"),
@@ -84,4 +86,11 @@ urlpatterns = [
         "get-schedule-weeks/<int:schedule_id>/", views.get_schedule_weeks, name="get_schedule_weeks"
     ),
     path("get-schedule-data/", views.get_schedule_data, name="get_schedule_data"),
+    # 仓库管理相关路由
+    path("repository-management/", views.repository_management_view, name="repository_management"),
+    path("add-repository/", views.add_repository_view, name="add_repository"),
+    path("update-repository/", views.update_repository_view, name="update_repository"),
+    path("delete-repository/", views.delete_repository_view, name="delete_repository"),
+    path("sync-repository/", views.sync_repository_view, name="sync_repository"),
+    path("api/repositories/", views.get_repository_list_api, name="get_repository_list_api"),
 ]

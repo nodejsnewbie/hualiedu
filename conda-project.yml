@@ -1,0 +1,37 @@
+# Conda Project配置文件
+# 使用 conda-project 工具自动管理环境
+# 安装: conda install conda-project
+
+name: teacher-grading-system
+description: 教师评分系统 - 自动运行在py313环境
+
+channels:
+  - defaults
+  - conda-forge
+
+dependencies:
+  - python=3.13
+  - pip
+
+variables:
+  DJANGO_SETTINGS_MODULE: hualiEdu.settings
+  PYTHONPATH: ${PROJECT_DIR}
+
+platforms:
+  - osx-64
+  - osx-arm64
+  - linux-64
+
+services:
+  default:
+    unix: conda run -n py313 python manage.py runserver
+
+commands:
+  default:
+    unix: conda run -n py313 python manage.py runserver
+  test:
+    unix: conda run -n py313 python manage.py test
+  migrate:
+    unix: conda run -n py313 python manage.py migrate
+  shell:
+    unix: conda run -n py313 python manage.py shell

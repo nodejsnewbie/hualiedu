@@ -8,6 +8,7 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.backup
 
 # Django
 staticfiles/
@@ -19,6 +20,25 @@ logs/
 # Tools
 .mypy_cache/
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .DS_Store
+
+# History and backup files
+.history/
+*.backup
+*~
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# 保留VS Code配置但忽略用户特定设置
+.vscode/c_cpp_properties.json
+.vscode/extensions.json
+
+# 环境配置（保留项目配置，忽略用户特定配置）
+.direnv/
+.autoenv_leave

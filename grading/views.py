@@ -18,6 +18,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseServerError, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.decorators import method_decorator  # noqa: F401
 from django.views import View  # noqa: F401
 from django.views.decorators.csrf import csrf_exempt
@@ -307,15 +308,26 @@ def clear_directory_file_count_cache():
 
 
 def index(request):
-    """首页视图 - 包含校历功能"""
+    """首页视图 - 包含校历功能和仓库统计"""
     try:
         # 获取当前活跃学期
         current_semester = Semester.objects.filter(is_active=True).first()
 
-        # 获取当前用户的课程
+        # 获取当前用户的课程和仓库信息
         user_courses = []
+        user_repositories = []
+        repository_stats = {}
+
         if request.user.is_authenticated:
             user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+            user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
+
+            # 统计仓库信息
+            repository_stats = {
+                "total": user_repositories.count(),
+                "git_repos": user_repositories.filter(repo_type="git").count(),
+                "local_repos": user_repositories.filter(repo_type="local").count(),
+            }
 
         # 获取当前周次
         current_week = 1
@@ -331,6 +343,8 @@ def index(request):
             "current_semester": current_semester,
             "user_courses": user_courses,
             "current_week": current_week,
+            "user_repositories": user_repositories,
+            "repository_stats": repository_stats,
         }
 
         return render(request, "index.html", context)
@@ -458,57 +472,19 @@ def get_dir_file_count(request):
 @login_required
 @require_http_methods(["GET", "POST"])
 def grading_page(request):
-    """评分页面视图"""
+    """评分页面视图 - 基于用户仓库的评分系统"""
     try:
-        # 检查用户权限
-        if not request.user.is_authenticated:
-            logger.error("用户未认证")
-            return HttpResponseForbidden("请先登录")
+        # 获取用户的仓库列表
+        user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
 
-        if not request.user.is_staff:
-            logger.error("用户无权限")
-            return HttpResponseForbidden("无权限访问")
+        # 准备初始数据
+        context = {
+            "repositories": user_repositories,
+            "initial_tree_data": "[]",  # 初始为空，通过AJAX加载
+            "page_title": "作业评分",
+        }
 
-        # 获取全局配置
-        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
-        base_dir = os.path.expanduser(repo_base_dir)
-
-        # 检查目录权限
-        if not os.path.exists(base_dir):
-            os.makedirs(base_dir)
-
-        if not os.access(base_dir, os.R_OK):
-            logger.error(f"无权限访问目录: {base_dir}")
-            return HttpResponseForbidden("无权限访问目录")
-
-        # 获取目录树
-        try:
-            initial_tree_data = get_directory_tree()
-        except Exception as e:
-            logger.error(f"获取目录树失败: {str(e)}")
-            return render(
-                request,
-                "grading.html",
-                {
-                    "files": [],
-                    "error": f"获取目录树失败: {str(e)}",
-                    "config": None,
-                    "base_dir": base_dir,
-                    "initial_tree_data": "[]",
-                },
-            )
-
-        return render(
-            request,
-            "grading.html",
-            {
-                "files": [],
-                "error": None,
-                "config": None,
-                "base_dir": base_dir,
-                "initial_tree_data": json.dumps(initial_tree_data, ensure_ascii=False),
-            },
-        )
+        return render(request, "grading_simple.html", context)
 
     except Exception as e:
         logger.error(f"处理评分页面请求失败: {str(e)}")
@@ -3220,16 +3196,88 @@ def semester_management_view(request):
             messages.error(request, "您没有权限管理学期信息")
             return redirect("grading:index")
 
-        # 获取所有学期
-        semesters = Semester.objects.all().order_by("-start_date")
+        # 处理同步学期状态请求
+        if request.method == "POST" and request.POST.get("sync_semester_status"):
+            try:
+                from grading.services.semester_manager import SemesterManager
 
-        # 获取当前活跃学期
-        current_semester = Semester.objects.filter(is_active=True).first()
+                semester_manager = SemesterManager()
+                result = semester_manager.sync_all_semester_status()
+
+                if result["success"]:
+                    if result["updated_count"] > 0:
+                        messages.success(request, f"已同步 {result['updated_count']} 个学期的状态")
+                        if result["current_semester"]:
+                            messages.info(request, f"当前学期: {result['current_semester']}")
+                    else:
+                        messages.info(request, "所有学期状态已是最新")
+                else:
+                    messages.error(request, f"同步失败: {result['error']}")
+
+                return JsonResponse(result)
+            except Exception as e:
+                logger.error(f"同步学期状态失败: {str(e)}")
+                messages.error(request, f"同步学期状态失败: {str(e)}")
+                return JsonResponse({"status": "error", "message": f"同步失败: {str(e)}"})
+
+        # 处理取消删除请求
+        if request.method == "POST" and request.POST.get("cancel_delete"):
+            if "pending_delete_semester" in request.session:
+                del request.session["pending_delete_semester"]
+            return JsonResponse({"status": "success"})
+
+        # 初始化学期管理器和状态服务
+        from grading.services.semester_manager import SemesterManager
+        from grading.services.semester_status import semester_status_service
+
+        semester_manager = SemesterManager()
+
+        # 尝试自动创建当前学期（如果需要）
+        try:
+            from grading.services.semester_auto_creator import SemesterAutoCreator
+
+            auto_creator = SemesterAutoCreator()
+            new_semester = auto_creator.check_and_create_current_semester()
+            if new_semester:
+                messages.info(request, f"系统自动创建了学期: {new_semester.name}")
+        except Exception as e:
+            logger.warning(f"自动创建学期失败: {str(e)}")
+
+        # 获取综合学期状态
+        comprehensive_status = semester_status_service.get_comprehensive_status()
+
+        # 获取排序后的学期列表（自动更新当前学期状态）
+        semesters = semester_manager.get_sorted_semesters_for_display()
+
+        # 为每个学期添加课程数量和状态信息
+        for semester in semesters:
+            semester.courses_count = Course.objects.filter(semester=semester).count()
+            semester.can_delete = not semester.is_active and semester.courses_count == 0
+
+            # 添加状态信息
+            status_info = semester_manager.get_semester_status_info(semester)
+            semester.status_info = status_info
+
+        # 获取当前学期
+        current_semester = semester_manager.get_current_semester()
 
         context = {
             "semesters": semesters,
             "current_semester": current_semester,
+            "semester_status": comprehensive_status,
+            "dashboard_info": semester_status_service.get_dashboard_info(),
         }
+
+        # 如果是AJAX请求，返回JSON数据
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return JsonResponse(
+                {
+                    "status": "success",
+                    "semester_status": comprehensive_status,
+                    "dashboard_info": semester_status_service.get_dashboard_info(),
+                    "current_semester": current_semester.name if current_semester else None,
+                }
+            )
 
         return render(request, "semester_management.html", context)
 
@@ -3324,6 +3372,108 @@ def semester_add_view(request):
         logger.error(f"学期添加页面加载失败: {str(e)}")
         messages.error(request, f"学期添加页面加载失败: {str(e)}")
         return redirect("grading:semester_management")
+
+
+@login_required
+@require_http_methods(["POST"])
+def semester_delete_view(request, semester_id):
+    """删除学期视图"""
+    try:
+        # 权限检查
+        if not request.user.is_superuser and not request.user.is_staff:
+            messages.error(request, "您没有权限删除学期信息")
+            return redirect("grading:semester_management")
+
+        # 获取学期对象
+        semester = get_object_or_404(Semester, id=semester_id)
+
+        # 检查是否为当前活跃学期
+        if semester.is_active:
+            messages.error(request, "无法删除当前活跃的学期，请先设置其他学期为活跃状态")
+            return redirect("grading:semester_management")
+
+        # 获取强制删除参数
+        force_delete = request.POST.get("force_delete") == "true"
+
+        # 检查是否有关联的课程
+        related_courses = Course.objects.filter(semester=semester)
+        courses_count = related_courses.count()
+
+        if courses_count > 0 and not force_delete:
+            # 有关联课程且不是强制删除，显示详细信息
+            course_names = [course.name for course in related_courses[:5]]  # 最多显示5门课程
+            course_list = "、".join(course_names)
+            if courses_count > 5:
+                course_list += f" 等{courses_count}门课程"
+
+            messages.warning(
+                request,
+                f"该学期下还有 {courses_count} 门课程：{course_list}。"
+                f"删除学期将同时删除这些课程及其相关数据。",
+            )
+            # 在session中存储待删除的学期ID，用于强制删除确认
+            request.session["pending_delete_semester"] = semester_id
+            return redirect("grading:semester_management")
+
+        # 执行删除（包括强制删除）
+        semester_name = semester.name
+        deleted_courses_count = 0
+
+        if force_delete and courses_count > 0:
+            # 强制删除时，先删除关联的课程
+            deleted_courses_count = courses_count
+            related_courses.delete()
+            logger.info(
+                f"用户 {request.user.username} 强制删除了学期 {semester_name} 及其 {deleted_courses_count} 门课程"
+            )
+
+        semester.delete()
+
+        if deleted_courses_count > 0:
+            messages.success(
+                request, f"学期 '{semester_name}' 及其 {deleted_courses_count} 门课程已成功删除"
+            )
+        else:
+            messages.success(request, f"学期 '{semester_name}' 已成功删除")
+
+        logger.info(f"用户 {request.user.username} 删除了学期: {semester_name}")
+
+        # 清除session中的待删除学期ID
+        if "pending_delete_semester" in request.session:
+            del request.session["pending_delete_semester"]
+
+        return redirect("grading:semester_management")
+
+    except Exception as e:
+        logger.error(f"删除学期失败: {str(e)}")
+        messages.error(request, f"删除学期失败: {str(e)}")
+        return redirect("grading:semester_management")
+
+
+@login_required
+def semester_status_api(request):
+    """学期状态API视图"""
+    try:
+        from grading.services.semester_status import semester_status_service
+
+        # 获取综合状态
+        comprehensive_status = semester_status_service.get_comprehensive_status()
+
+        # 获取仪表板信息
+        dashboard_info = semester_status_service.get_dashboard_info()
+
+        return JsonResponse(
+            {
+                "success": True,
+                "status": comprehensive_status,
+                "dashboard": dashboard_info,
+                "timestamp": timezone.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取学期状态失败: {str(e)}")
+        return JsonResponse({"success": False, "error": str(e)}, status=500)
 
 
 @login_required
@@ -3664,3 +3814,264 @@ def delete_course_view(request):
     except Exception as e:
         logger.error(f"删除课程失败: {str(e)}")
         return JsonResponse({"status": "error", "message": f"删除课程失败: {str(e)}"})
+
+
+# 仓库管理功能
+@login_required
+def repository_management_view(request):
+    """仓库管理页面"""
+    try:
+        # 获取用户的仓库列表
+        repositories = Repository.objects.filter(owner=request.user, is_active=True).order_by(
+            "-created_at"
+        )
+
+        context = {
+            "repositories": repositories,
+            "page_title": "仓库管理",
+        }
+
+        return render(request, "repository_management.html", context)
+
+    except Exception as e:
+        logger.error(f"仓库管理页面加载失败: {str(e)}")
+        messages.error(request, f"页面加载失败: {str(e)}")
+        return redirect("grading:index")
+
+
+@login_required
+@require_http_methods(["POST"])
+def add_repository_view(request):
+    """添加仓库"""
+    try:
+        name = request.POST.get("name", "").strip()
+        path = request.POST.get("path", "").strip()
+        url = request.POST.get("url", "").strip()
+        branch = request.POST.get("branch", "main").strip()
+        description = request.POST.get("description", "").strip()
+        repo_type = request.POST.get("repo_type", "local")
+
+        if not name:
+            return JsonResponse({"status": "error", "message": "仓库名称不能为空"})
+
+        # 检查仓库名称是否已存在
+        if Repository.objects.filter(owner=request.user, name=name).exists():
+            return JsonResponse({"status": "error", "message": "仓库名称已存在"})
+
+        # 验证仓库类型和必需字段
+        if repo_type == "git" and not url:
+            return JsonResponse({"status": "error", "message": "Git仓库必须提供URL"})
+
+        if repo_type == "local" and not path:
+            return JsonResponse({"status": "error", "message": "本地仓库必须提供路径"})
+
+        # 获取用户租户
+        tenant = None
+        if hasattr(request, "tenant"):
+            tenant = request.tenant
+
+        # 创建仓库
+        repository = Repository.objects.create(
+            owner=request.user,
+            tenant=tenant,
+            name=name,
+            path=path,
+            url=url,
+            branch=branch,
+            description=description,
+            repo_type=repo_type,
+        )
+
+        logger.info(f"用户 {request.user.username} 创建了仓库: {name} ({repo_type})")
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "message": f"仓库 '{name}' 创建成功",
+                "repository": {
+                    "id": repository.id,
+                    "name": repository.name,
+                    "type": repository.repo_type,
+                    "path": repository.get_display_path(),
+                    "description": repository.description,
+                    "created_at": repository.created_at.strftime("%Y-%m-%d %H:%M"),
+                },
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"创建仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"创建仓库失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_repository_view(request):
+    """更新仓库信息"""
+    try:
+        repository_id = request.POST.get("repository_id")
+        if not repository_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
+
+        repository = get_object_or_404(Repository, id=repository_id, owner=request.user)
+
+        # 更新字段
+        name = request.POST.get("name", "").strip()
+        path = request.POST.get("path", "").strip()
+        url = request.POST.get("url", "").strip()
+        branch = request.POST.get("branch", "main").strip()
+        description = request.POST.get("description", "").strip()
+
+        if name and name != repository.name:
+            # 检查新名称是否已存在
+            if (
+                Repository.objects.filter(owner=request.user, name=name)
+                .exclude(id=repository.id)
+                .exists()
+            ):
+                return JsonResponse({"status": "error", "message": "仓库名称已存在"})
+            repository.name = name
+
+        if path:
+            repository.path = path
+        if url:
+            repository.url = url
+        if branch:
+            repository.branch = branch
+        if description is not None:
+            repository.description = description
+
+        repository.save()
+
+        logger.info(f"用户 {request.user.username} 更新了仓库: {repository.name}")
+
+        return JsonResponse({"status": "success", "message": f"仓库 '{repository.name}' 更新成功"})
+
+    except Repository.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except Exception as e:
+        logger.error(f"更新仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"更新仓库失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def delete_repository_view(request):
+    """删除仓库"""
+    try:
+        repository_id = request.POST.get("repository_id")
+        if not repository_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
+
+        repository = get_object_or_404(Repository, id=repository_id, owner=request.user)
+        repository_name = repository.name
+
+        # 软删除：设置为非激活状态
+        repository.is_active = False
+        repository.save()
+
+        logger.info(f"用户 {request.user.username} 删除了仓库: {repository_name}")
+
+        return JsonResponse({"status": "success", "message": f"仓库 '{repository_name}' 删除成功"})
+
+    except Repository.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except Exception as e:
+        logger.error(f"删除仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"删除仓库失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def sync_repository_view(request):
+    """同步Git仓库"""
+    try:
+        repository_id = request.POST.get("repository_id")
+        if not repository_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
+
+        repository = get_object_or_404(Repository, id=repository_id, owner=request.user)
+
+        if not repository.can_sync():
+            return JsonResponse({"status": "error", "message": "该仓库不支持同步"})
+
+        # 使用GitHandler进行同步
+        from .utils import GitHandler
+
+        full_path = repository.get_full_path()
+
+        # 检查本地是否已存在
+        if os.path.exists(full_path):
+            # 拉取更新
+            success = GitHandler.pull_repo(full_path)
+            if success:
+                repository.last_sync = timezone.now()
+                repository.save()
+                message = f"仓库 '{repository.name}' 同步成功"
+            else:
+                message = f"仓库 '{repository.name}' 同步失败"
+        else:
+            # 克隆仓库
+            success = GitHandler.clone_repo_remote(repository.url, full_path)
+            if success:
+                repository.last_sync = timezone.now()
+                repository.save()
+                message = f"仓库 '{repository.name}' 克隆成功"
+            else:
+                message = f"仓库 '{repository.name}' 克隆失败"
+
+        logger.info(f"用户 {request.user.username} 同步仓库: {repository.name} - {message}")
+
+        return JsonResponse(
+            {
+                "status": "success" if success else "error",
+                "message": message,
+                "last_sync": (
+                    repository.last_sync.strftime("%Y-%m-%d %H:%M")
+                    if repository.last_sync
+                    else None
+                ),
+            }
+        )
+
+    except Repository.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except Exception as e:
+        logger.error(f"同步仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"同步仓库失败: {str(e)}"})
+
+
+@login_required
+def get_repository_list_api(request):
+    """获取用户仓库列表API"""
+    try:
+        repositories = Repository.objects.filter(owner=request.user, is_active=True).order_by(
+            "-created_at"
+        )
+
+        repo_list = []
+        for repo in repositories:
+            repo_list.append(
+                {
+                    "id": repo.id,
+                    "name": repo.name,
+                    "type": repo.repo_type,
+                    "path": repo.get_display_path(),
+                    "description": repo.description,
+                    "branch": repo.branch,
+                    "is_git": repo.is_git_repository(),
+                    "can_sync": repo.can_sync(),
+                    "last_sync": (
+                        repo.last_sync.strftime("%Y-%m-%d %H:%M") if repo.last_sync else None
+                    ),
+                    "created_at": repo.created_at.strftime("%Y-%m-%d %H:%M"),
+                }
+            )
+
+        return JsonResponse(
+            {"status": "success", "repositories": repo_list, "total": len(repo_list)}
+        )
+
+    except Exception as e:
+        logger.error(f"获取仓库列表失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取仓库列表失败: {str(e)}"})

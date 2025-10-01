@@ -17,6 +17,26 @@
     <div class="row">
         <!-- 左侧文件树 -->
         <div class="col-md-3">
+            <!-- 仓库选择 -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <h6 class="card-title mb-0">
+                        <i class="bi bi-folder2-open"></i> 仓库选择
+                    </h6>
+                </div>
+                <div class="card-body">
+                    <select class="form-select" id="repositorySelect">
+                        <option value="">选择仓库...</option>
+                    </select>
+                    <div class="mt-2">
+                        <a href="{% url 'grading:repository_management' %}" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-gear"></i> 管理仓库
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 文件目录 -->
             <div class="card">
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件目录</h5>
@@ -31,7 +51,7 @@
                 </div>
                 <div class="card-body">
                     <div id="directory-tree">
-                        <p class="text-muted">文件树加载中...</p>
+                        <p class="text-muted">请先选择仓库</p>
                     </div>
                 </div>
             </div>
@@ -243,5 +263,122 @@
             }
         }
     });
+
+    // 仓库管理相关功能
+    $(document).ready(function() {
+        // 加载用户仓库列表
+        loadRepositoryList();
+
+        // 仓库选择变化事件
+        $('#repositorySelect').change(function() {
+            const selectedRepo = $(this).val();
+            if (selectedRepo) {
+                loadRepositoryFiles(selectedRepo);
+            } else {
+                $('#directory-tree').html('<p class="text-muted">请先选择仓库</p>');
+            }
+        });
+    });
+
+    // 加载仓库列表
+    function loadRepositoryList() {
+        $.ajax({
+            url: '{% url "grading:get_repository_list_api" %}',
+            method: 'GET',
+            success: function(response) {
+                if (response.status === 'success') {
+                    const select = $('#repositorySelect');
+                    select.empty().append('<option value="">选择仓库...</option>');
+
+                    response.repositories.forEach(function(repo) {
+                        select.append(`<option value="${repo.id}" data-path="${repo.path}">${repo.name} (${repo.type === 'git' ? 'Git' : '本地'})</option>`);
+                    });
+
+                    // 如果只有一个仓库，自动选择
+                    if (response.repositories.length === 1) {
+                        select.val(response.repositories[0].id).trigger('change');
+                    }
+                } else {
+                    console.error('加载仓库列表失败:', response.message);
+                }
+            },
+            error: function(xhr) {
+                console.error('加载仓库列表失败');
+            }
+        });
+    }
+
+    // 加载仓库文件
+    function loadRepositoryFiles(repositoryId) {
+        const selectedOption = $('#repositorySelect option:selected');
+        const repositoryPath = selectedOption.data('path');
+
+        if (!repositoryPath) {
+            $('#directory-tree').html('<p class="text-muted text-danger">仓库路径未配置</p>');
+            return;
+        }
+
+        $('#directory-tree').html('<p class="text-muted">加载文件树中...</p>');
+
+        // 使用现有的文件树加载逻辑，但传入仓库路径
+        $.ajax({
+            url: '{% url "grading:get_directory_tree" %}',
+            method: 'GET',
+            data: {
+                'path': repositoryPath
+            },
+            success: function(response) {
+                if (response && response.children) {
+                    // 使用现有的文件树渲染逻辑
+                    renderDirectoryTree(response, '#directory-tree');
+                } else {
+                    $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无文件</p>');
+                }
+            },
+            error: function(xhr) {
+                $('#directory-tree').html('<p class="text-muted text-danger">加载文件失败</p>');
+                console.error('加载仓库文件失败');
+            }
+        });
+    }
+
+    // 渲染文件树（简化版本，可以根据需要扩展）
+    function renderDirectoryTree(data, container) {
+        const $container = $(container);
+        $container.empty();
+
+        if (data.children && data.children.length > 0) {
+            const $list = $('<ul class="list-unstyled"></ul>');
+
+            data.children.forEach(function(item) {
+                const $item = $('<li class="mb-1"></li>');
+
+                if (item.type === 'directory') {
+                    $item.html(`
+                        <i class="bi bi-folder text-warning"></i>
+                        <span class="ms-1">${item.name}</span>
+                    `);
+                } else {
+                    $item.html(`
+                        <i class="bi bi-file-text text-info"></i>
+                        <a href="#" class="ms-1 file-link" data-path="${item.path}">${item.name}</a>
+                    `);
+                }
+
+                $list.append($item);
+            });
+
+            $container.append($list);
+
+            // 绑定文件点击事件
+            $container.find('.file-link').click(function(e) {
+                e.preventDefault();
+                const filePath = $(this).data('path');
+                loadFileContent(filePath);
+            });
+        } else {
+            $container.html('<p class="text-muted">该目录为空</p>');
+        }
+    }
 </script>
 {% endblock %}

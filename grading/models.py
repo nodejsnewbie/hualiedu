@@ -169,15 +169,30 @@ class Assignment(models.Model):
 
 
 class Repository(models.Model):
-    """仓库模型 - 支持多租户"""
+    """仓库模型 - 用户级仓库管理"""
 
+    owner = models.ForeignKey(
+        "auth.User", on_delete=models.CASCADE, related_name="repositories", help_text="仓库所有者"
+    )
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="repositories", null=True, blank=True
     )
     name = models.CharField(max_length=255, help_text="仓库名称")
     path = models.CharField(max_length=500, help_text="仓库路径", default="")
+    url = models.URLField(blank=True, help_text="仓库URL（Git仓库）")
+    branch = models.CharField(max_length=100, default="main", help_text="默认分支")
     description = models.TextField(blank=True, help_text="仓库描述")
+    repo_type = models.CharField(
+        max_length=20,
+        choices=[
+            ("local", "本地目录"),
+            ("git", "Git仓库"),
+        ],
+        default="local",
+        help_text="仓库类型",
+    )
     is_active = models.BooleanField(default=True, help_text="是否激活")
+    last_sync = models.DateTimeField(null=True, blank=True, help_text="最后同步时间")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -185,17 +200,34 @@ class Repository(models.Model):
         db_table = "grading_repository"
         verbose_name = "仓库"
         verbose_name_plural = "仓库"
-        unique_together = ["tenant", "name"]
+        unique_together = ["owner", "name"]
 
     def __str__(self):
-        return f"{self.tenant.name} - {self.name}"
+        return f"{self.owner.username} - {self.name}"
 
     def get_full_path(self):
         """获取完整路径"""
-        user_profile = self.tenant.users.first()
-        if user_profile and user_profile.repo_base_dir:
-            return f"{user_profile.repo_base_dir}/{self.path}"
+        try:
+            user_profile = self.owner.profile
+            if user_profile and user_profile.repo_base_dir:
+                return f"{user_profile.repo_base_dir}/{self.path}"
+        except:
+            pass
         return self.path
+
+    def get_display_path(self):
+        """获取显示路径"""
+        if self.repo_type == "git" and self.url:
+            return self.url
+        return self.get_full_path()
+
+    def is_git_repository(self):
+        """检查是否为Git仓库"""
+        return self.repo_type == "git" and bool(self.url)
+
+    def can_sync(self):
+        """检查是否可以同步"""
+        return self.is_git_repository() and self.is_active
 
 
 class Submission(models.Model):
@@ -273,10 +305,29 @@ class GradeTypeConfig(models.Model):
 class Semester(models.Model):
     """学期模型"""
 
+    SEASON_CHOICES = [
+        ("spring", "春季"),
+        ("autumn", "秋季"),
+    ]
+
     name = models.CharField(max_length=100, help_text="学期名称，如：2024年春季学期")
     start_date = models.DateField(help_text="学期第一周第一天上课日期")
     end_date = models.DateField(help_text="学期结束日期")
-    is_active = models.BooleanField(default=True, help_text="是否为当前学期")
+    is_active = models.BooleanField(default=False, help_text="是否为当前学期")
+
+    # 自动创建相关字段
+    auto_created = models.BooleanField(default=False, help_text="是否为自动创建")
+    reference_semester = models.ForeignKey(
+        "self",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        help_text="参考学期（用于自动创建）",
+    )
+    season = models.CharField(
+        max_length=10, choices=SEASON_CHOICES, null=True, blank=True, help_text="学期季节"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -285,6 +336,11 @@ class Semester(models.Model):
         verbose_name = "学期"
         verbose_name_plural = "学期"
         ordering = ["-start_date"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["start_date", "end_date"], name="unique_semester_period"
+            )
+        ]
 
     def __str__(self):
         return self.name
@@ -301,6 +357,171 @@ class Semester(models.Model):
         start = self.start_date + timedelta(days=(week_number - 1) * 7)
         end = start + timedelta(days=6)
         return start, end
+
+    def get_season(self):
+        """获取学期季节"""
+        if self.season:
+            return self.season
+
+        # 根据开始日期自动判断季节
+        # 春季学期：3月-7月开始
+        # 秋季学期：8月-2月开始（跨年）
+        start_month = self.start_date.month
+        if 3 <= start_month <= 7:
+            return "spring"
+        else:
+            return "autumn"
+
+    def is_current_semester(self, current_date=None):
+        """判断是否为当前学期"""
+        from datetime import date
+
+        if current_date is None:
+            current_date = date.today()
+
+        return self.start_date <= current_date <= self.end_date
+
+    def get_next_year_dates(self):
+        """获取下一年对应的日期"""
+        from datetime import date
+
+        try:
+            next_start = self.start_date.replace(year=self.start_date.year + 1)
+            next_end = self.end_date.replace(year=self.end_date.year + 1)
+            return next_start, next_end
+        except ValueError:
+            # 处理2月29日的特殊情况
+            from datetime import timedelta
+
+            next_start = self.start_date.replace(year=self.start_date.year + 1, month=2, day=28)
+            next_end = self.end_date.replace(year=self.end_date.year + 1)
+            return next_start, next_end
+
+
+class SemesterTemplate(models.Model):
+    """学期模板配置"""
+
+    SEASON_CHOICES = [
+        ("spring", "春季"),
+        ("autumn", "秋季"),
+    ]
+
+    season = models.CharField(max_length=10, choices=SEASON_CHOICES, help_text="学期季节")
+    start_month = models.IntegerField(help_text="开始月份 (1-12)")
+    start_day = models.IntegerField(help_text="开始日期 (1-31)")
+    end_month = models.IntegerField(help_text="结束月份 (1-12)")
+    end_day = models.IntegerField(help_text="结束日期 (1-31)")
+    duration_weeks = models.IntegerField(default=16, help_text="学期周数")
+    name_pattern = models.CharField(
+        max_length=50, help_text="命名模式，如'{year}年{season}'", default="{year}年{season}"
+    )
+    is_active = models.BooleanField(default=True, help_text="是否启用此模板")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_semester_template"
+        verbose_name = "学期模板"
+        verbose_name_plural = "学期模板"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["season"],
+                condition=models.Q(is_active=True),
+                name="unique_active_season_template",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.get_season_display()}模板"
+
+    def clean(self):
+        """验证模板数据"""
+        from django.core.exceptions import ValidationError
+
+        # 验证月份范围
+        if not (1 <= self.start_month <= 12):
+            raise ValidationError("开始月份必须在1-12之间")
+        if not (1 <= self.end_month <= 12):
+            raise ValidationError("结束月份必须在1-12之间")
+
+        # 验证日期范围
+        if not (1 <= self.start_day <= 31):
+            raise ValidationError("开始日期必须在1-31之间")
+        if not (1 <= self.end_day <= 31):
+            raise ValidationError("结束日期必须在1-31之间")
+
+        # 验证学期周数
+        if not (1 <= self.duration_weeks <= 52):
+            raise ValidationError("学期周数必须在1-52之间")
+
+    def generate_semester_dates(self, year):
+        """为指定年份生成学期日期"""
+        from datetime import date
+
+        try:
+            start_date = date(year, self.start_month, self.start_day)
+
+            # 处理跨年情况
+            end_year = year
+            if self.season == "autumn" and self.end_month <= 7:
+                end_year = year + 1
+
+            end_date = date(end_year, self.end_month, self.end_day)
+
+            return start_date, end_date
+        except ValueError as e:
+            # 处理无效日期（如2月30日）
+            raise ValueError(f"无法生成有效日期: {e}")
+
+    def generate_semester_name(self, year):
+        """为指定年份生成学期名称"""
+        season_map = {"spring": "春季", "autumn": "秋季"}
+
+        return self.name_pattern.format(year=year, season=season_map.get(self.season, self.season))
+
+    @classmethod
+    def get_template_for_season(cls, season):
+        """获取指定季节的活跃模板"""
+        try:
+            return cls.objects.get(season=season, is_active=True)
+        except cls.DoesNotExist:
+            return None
+
+    @classmethod
+    def get_template_for_date(cls, target_date):
+        """根据日期获取对应的学期模板"""
+        month = target_date.month
+
+        # 根据月份判断季节
+        # 春季学期：3月-7月
+        # 秋季学期：8月-2月（跨年）
+        if 3 <= month <= 7:
+            season = "spring"
+        else:
+            season = "autumn"
+
+        return cls.get_template_for_season(season)
+
+    @classmethod
+    def get_current_semester_auto(cls, current_date=None):
+        """自动获取当前学期
+
+        使用学期管理器自动识别并返回当前学期
+
+        Args:
+            current_date: 当前日期，默认为今天
+
+        Returns:
+            当前学期对象，如果没有找到则返回None
+        """
+        try:
+            from grading.services.semester_manager import SemesterManager
+
+            manager = SemesterManager()
+            return manager.get_current_semester(current_date)
+        except Exception:
+            # 如果自动识别失败，回退到数据库查询
+            return cls.objects.filter(is_active=True).first()
 
 
 class Course(models.Model):

@@ -1,0 +1,153 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Django: Run Server",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "manage_py313.py",
+                "runserver"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中启动Django开发服务器"
+        },
+        {
+            "label": "Django: Run Tests",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "manage_py313.py",
+                "test"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中运行Django测试"
+        },
+        {
+            "label": "Django: Migrate",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "manage_py313.py",
+                "migrate"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中运行数据库迁移"
+        },
+        {
+            "label": "Django: Make Migrations",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "manage_py313.py",
+                "makemigrations"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中创建数据库迁移"
+        },
+        {
+            "label": "Django: Shell",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "manage_py313.py",
+                "shell"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": true,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中打开Django shell"
+        },
+        {
+            "label": "Test: Semester Manager",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "test_py313.py",
+                "test_semester_manager_simple.py"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中测试学期管理器"
+        },
+        {
+            "label": "Test: Semester Manager Unit Tests",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "test_py313.py",
+                "grading.tests.test_semester_manager"
+            ],
+            "group": "test",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "在py313环境中运行学期管理器单元测试"
+        },
+        {
+            "label": "Check Environment",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "run_in_env.py",
+                "python",
+                "--version"
+            ],
+            "group": "build",
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "new"
+            },
+            "problemMatcher": [],
+            "detail": "检查py313环境状态"
+        }
+    ]
+}

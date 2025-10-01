@@ -61,18 +61,65 @@ python manage.py runserver
 ### 7. 访问应用
 访问 http://localhost:8000/
 
-**文档索引与环境说明请查看 `docs/`：**
-- 文档索引: `docs/README.md`
-- 环境与配置: `docs/environment.md`
-- AI 密钥排查: `docs/ai-key.md`
-- 优化与技术改进: `docs/optimization.md`
+**详细文档请查看 `docs/` 目录：**
+- 📚 [文档索引](docs/README.md) - 完整的文档导航
+- 🔧 [环境配置](docs/environment.md) - 环境变量和部署配置
+- 🤖 [AI评分功能](docs/features/ai-scoring.md) - 智能评分系统
+- 📁 [仓库管理](docs/features/repository-management.md) - 用户级仓库管理系统
+- 🏢 [多租户系统](docs/features/multi-tenant.md) - 多租户架构
+- 📅 [校历功能](docs/features/calendar.md) - 学期和课程管理
+- 🔒 [安全指南](docs/security/api-security.md) - API安全最佳实践
+- 🧪 [测试指南](docs/testing.md) - 完整的测试框架
 
 ## 测试
-- 所有测试用例位于 `tests/` 目录
-- 运行全部测试：
-  ```bash
-  python -m unittest discover tests
-  ```
+
+### 测试结构
+```
+grading/tests/
+├── base.py                  # 测试基类和工具
+├── test_models.py           # 模型测试
+├── test_views.py            # 视图测试
+├── test_forms.py            # 表单测试
+├── test_utils.py            # 工具函数测试
+├── test_middleware.py       # 中间件测试
+├── test_settings.py         # 测试配置
+└── test_fixtures.py         # 测试数据固件
+
+tests/
+├── test_integration.py      # 集成测试
+└── test_utils.py           # 通用工具测试
+```
+
+### 运行测试
+```bash
+# 运行所有测试
+python scripts/run_tests.py
+
+# 运行特定类型的测试
+python scripts/run_tests.py --type models     # 模型测试
+python scripts/run_tests.py --type views      # 视图测试
+python scripts/run_tests.py --type forms      # 表单测试
+python scripts/run_tests.py --type unit       # 单元测试
+python scripts/run_tests.py --type integration # 集成测试
+
+# 高级选项
+python scripts/run_tests.py --coverage        # 生成覆盖率报告
+python scripts/run_tests.py --verbose         # 详细输出
+python scripts/run_tests.py --failfast        # 遇到失败立即停止
+python scripts/run_tests.py --parallel 4      # 并行运行
+
+# 原生Django/pytest命令
+python manage.py test                          # Django测试
+python -m pytest                              # pytest测试
+```
+
+### 测试覆盖率
+- 模型测试覆盖率: > 90%
+- 视图测试覆盖率: > 85%
+- 工具函数覆盖率: > 95%
+- 总体覆盖率: > 80%
+
+详细测试指南请查看：`docs/testing.md`
 
 ## 开发规范
 
@@ -100,6 +147,23 @@ python manage.py runserver
 ## 贡献
 - 欢迎提交PR和Issue，建议先阅读 `docs/project_rules.md`
 
+## 项目维护
+
+### 清理项目文件
+```bash
+# 清理缓存文件、日志文件和临时文件
+python scripts/cleanup.py
+```
+
+### 更新依赖
+```bash
+# 更新requirements.txt
+pip-compile requirements.in
+
+# 安装更新的依赖
+pip install -r requirements.txt
+```
+
 ## 其它
 - 日志文件默认输出到 logs/ 目录
-- 所有依赖请用 `pip freeze > requirements.txt` 定期更新
+- 环境变量配置请参考 `.env.example`

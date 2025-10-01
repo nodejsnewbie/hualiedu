@@ -1,23 +1,8 @@
-from django.test import TestCase
+# 主测试文件 - 导入所有测试模块
+# 这个文件保持简单，主要测试功能已移至tests/目录下的专门文件中
 
-from grading.views import volcengine_score_homework
-
-
-class TestVolcengineScoreHomework(TestCase):
-    def test_normal(self):
-        content = "这是一篇测试作文，内容充实，结构完整。"
-        score, comment = volcengine_score_homework(content)
-        self.assertTrue(isinstance(score, int) or score is None)
-        self.assertIsInstance(comment, str)
-
-    def test_empty(self):
-        content = ""
-        score, comment = volcengine_score_homework(content)
-        self.assertTrue(isinstance(score, int) or score is None)
-        self.assertIsInstance(comment, str)
-
-    def test_long_content(self):
-        content = "测试内容" * 10000
-        score, comment = volcengine_score_homework(content)
-        self.assertTrue(isinstance(score, int) or score is None)
-        self.assertIsInstance(comment, str)
+from .tests.test_forms import *
+from .tests.test_middleware import *
+from .tests.test_models import *
+from .tests.test_utils import *
+from .tests.test_views import *

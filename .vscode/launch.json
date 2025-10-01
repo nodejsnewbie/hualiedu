@@ -1,0 +1,78 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Django: Debug Server",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "args": [
+                "runserver",
+                "--noreload"
+            ],
+            "django": true,
+            "autoReload": {
+                "enable": true
+            },
+            "python": "~/anaconda3/envs/py313/bin/python",
+            "env": {
+                "DJANGO_SETTINGS_MODULE": "hualiEdu.settings",
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Django: Debug Tests",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/manage.py",
+            "args": [
+                "test",
+                "${input:testModule}"
+            ],
+            "django": true,
+            "python": "~/anaconda3/envs/py313/bin/python",
+            "env": {
+                "DJANGO_SETTINGS_MODULE": "hualiEdu.settings",
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Debug Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "python": "~/anaconda3/envs/py313/bin/python",
+            "env": {
+                "DJANGO_SETTINGS_MODULE": "hualiEdu.settings",
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Test: Semester Manager",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_semester_manager_simple.py",
+            "python": "~/anaconda3/envs/py313/bin/python",
+            "env": {
+                "DJANGO_SETTINGS_MODULE": "hualiEdu.settings",
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "testModule",
+            "description": "测试模块名称",
+            "default": "grading.tests.test_semester_manager",
+            "type": "promptString"
+        }
+    ]
+}
