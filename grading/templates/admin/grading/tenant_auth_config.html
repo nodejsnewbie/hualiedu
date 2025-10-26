@@ -1,0 +1,244 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+&rsaquo; <a href="{% url 'admin:grading_tenantconfig_changelist' %}">租户配置</a>
+&rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+    <div class="module aligned">
+        <h2>🔐 Git认证配置 - {{ tenant.name }}</h2>
+        
+        <form method="post" enctype="multipart/form-data" novalidate>
+            {% csrf_token %}
+            
+            <fieldset class="module aligned">
+                <h2>SSH认证配置</h2>
+                <div class="form-row">
+                    <div>
+                        <label for="id_ssh_private_key_file">SSH私钥文件:</label>
+                        <input type="file" name="ssh_private_key_file" id="id_ssh_private_key_file" accept=".pem,.key,.rsa,*" class="ssh-key-file-input">
+                        <p class="help">选择SSH私钥文件（通常是id_rsa、id_ed25519等）。生成方法: ssh-keygen -t rsa -b 4096</p>
+                        
+                        {% if auth_configs.ssh_private_key %}
+                        <div class="current-key-info">
+                            <p class="help" style="color: #28a745; margin-top: 10px;">
+                                ✅ 当前已配置SSH私钥 ({{ auth_configs.ssh_private_key|length }} 字符)
+                                <button type="button" class="button small" onclick="toggleKeyDisplay()" style="margin-left: 10px;">查看/隐藏</button>
+                            </p>
+                            <div id="current-key-display" style="display: none; margin-top: 10px;">
+                                <textarea readonly rows="6" cols="80" style="font-family: monospace; font-size: 11px; background: #f5f5f5;">{{ auth_configs.ssh_private_key }}</textarea>
+                            </div>
+                        </div>
+                        {% else %}
+                        <p class="help" style="color: #dc3545;">❌ 未配置SSH私钥</p>
+                        {% endif %}
+                        
+                        <div class="form-row" style="margin-top: 15px;">
+                            <label>
+                                <input type="checkbox" name="clear_ssh_key" value="1"> 清除现有SSH私钥
+                            </label>
+                            <p class="help">勾选此项将删除当前配置的SSH私钥</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div>
+                        <label for="id_ssh_passphrase">SSH密钥密码:</label>
+                        <input type="password" name="config_ssh_key_passphrase" id="id_ssh_passphrase" value="{{ auth_configs.ssh_key_passphrase }}" placeholder="如果SSH密钥有密码，请输入">
+                        <p class="help">SSH私钥的密码（如果设置了的话）</p>
+                    </div>
+                </div>
+            </fieldset>
+            
+            <fieldset class="module aligned">
+                <h2>HTTPS认证配置</h2>
+                <div class="form-row">
+                    <div>
+                        <label for="id_https_username">用户名:</label>
+                        <input type="text" name="config_https_username" id="id_https_username" value="{{ auth_configs.https_username }}" placeholder="Git服务器用户名">
+                        <p class="help">GitHub/GitLab等Git服务器的用户名</p>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div>
+                        <label for="id_https_password">密码:</label>
+                        <input type="password" name="config_https_password" id="id_https_password" value="{{ auth_configs.https_password }}" placeholder="密码（不推荐）">
+                        <p class="help">Git服务器密码（不推荐，建议使用个人访问令牌）</p>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div>
+                        <label for="id_https_token">个人访问令牌:</label>
+                        <input type="password" name="config_https_token" id="id_https_token" value="{{ auth_configs.https_token }}" placeholder="ghp_xxxxxxxxxxxx">
+                        <p class="help">个人访问令牌（推荐）。GitHub: Settings → Developer settings → Personal access tokens</p>
+                    </div>
+                </div>
+            </fieldset>
+            
+            <fieldset class="module aligned">
+                <h2>Git用户配置</h2>
+                <div class="form-row">
+                    <div>
+                        <label for="id_git_user_name">Git用户名:</label>
+                        <input type="text" name="config_git_user_name" id="id_git_user_name" value="{{ auth_configs.git_user_name }}" placeholder="提交时显示的用户名">
+                        <p class="help">Git提交时使用的用户名</p>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div>
+                        <label for="id_git_user_email">Git邮箱:</label>
+                        <input type="email" name="config_git_user_email" id="id_git_user_email" value="{{ auth_configs.git_user_email }}" placeholder="user@example.com">
+                        <p class="help">Git提交时使用的邮箱地址</p>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div>
+                        <label for="id_default_auth_method">默认认证方式:</label>
+                        <select name="config_default_auth_method" id="id_default_auth_method">
+                            <option value="https" {% if auth_configs.default_auth_method == 'https' %}selected{% endif %}>HTTPS</option>
+                            <option value="ssh" {% if auth_configs.default_auth_method == 'ssh' %}selected{% endif %}>SSH</option>
+                        </select>
+                        <p class="help">系统优先使用的认证方式</p>
+                    </div>
+                </div>
+            </fieldset>
+            
+            <div class="submit-row">
+                <input type="submit" value="保存配置" class="default" name="_save">
+                <a href="{% url 'admin:grading_tenantconfig_changelist' %}" class="button cancel-link">返回</a>
+            </div>
+        </form>
+        
+        <div class="module">
+            <h2>📋 使用说明</h2>
+            <ul>
+                <li><strong>SSH方式</strong>: 生成SSH密钥对，将私钥填入上方，公钥添加到Git服务器</li>
+                <li><strong>HTTPS方式</strong>: 推荐使用个人访问令牌，比密码更安全</li>
+                <li><strong>自动选择</strong>: 系统会根据仓库URL和您的配置自动选择认证方式</li>
+                <li><strong>URL转换</strong>: 系统可以在SSH和HTTPS URL之间自动转换</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<style>
+.form-row textarea, .form-row input[type="text"], .form-row input[type="password"], .form-row input[type="email"], .form-row select {
+    width: 100%;
+    max-width: 600px;
+}
+.form-row textarea {
+    font-family: monospace;
+    font-size: 12px;
+}
+.ssh-key-file-input {
+    width: 100%;
+    max-width: 600px;
+    padding: 8px;
+    border: 2px dashed #ddd;
+    border-radius: 4px;
+    background: #fafafa;
+    cursor: pointer;
+    transition: border-color 0.3s;
+}
+.ssh-key-file-input:hover {
+    border-color: #79aec8;
+    background: #f0f8ff;
+}
+.ssh-key-file-input:focus {
+    outline: none;
+    border-color: #79aec8;
+    box-shadow: 0 0 5px rgba(121, 174, 200, 0.3);
+}
+.current-key-info {
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+}
+.button.small {
+    padding: 4px 8px;
+    font-size: 11px;
+    background: #79aec8;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.button.small:hover {
+    background: #609ab6;
+}
+.help {
+    color: #666;
+    font-size: 11px;
+    margin-top: 2px;
+}
+fieldset {
+    margin-bottom: 20px;
+    padding: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+fieldset h2 {
+    margin-top: 0;
+    color: #333;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 5px;
+}
+</style>
+
+<script>
+function toggleKeyDisplay() {
+    const display = document.getElementById('current-key-display');
+    if (display.style.display === 'none') {
+        display.style.display = 'block';
+    } else {
+        display.style.display = 'none';
+    }
+}
+
+// 文件上传预览
+document.addEventListener('DOMContentLoaded', function() {
+    const fileInput = document.getElementById('id_ssh_private_key_file');
+    if (fileInput) {
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                // 检查文件大小（限制为100KB）
+                if (file.size > 100 * 1024) {
+                    alert('SSH私钥文件过大，请确认选择了正确的私钥文件');
+                    return;
+                }
+                
+                // 读取文件内容进行基本验证
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    if (!content.includes('BEGIN') || !content.includes('PRIVATE KEY')) {
+                        if (!confirm('选择的文件可能不是SSH私钥文件，是否继续？')) {
+                            fileInput.value = '';
+                            return;
+                        }
+                    }
+                };
+                reader.readAsText(file);
+            }
+        });
+    }
+});
+</script>
+{% endblock %}

@@ -1,91 +1,294 @@
 {% extends "admin/base_site.html" %}
 {% load i18n admin_urls static admin_modify %}
 
+{% block title %}{{ title }} | {{ site_title|default:_('Django site admin') }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+<a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+&rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+&rsaquo; <a href="{% url 'admin:grading_repository_changelist' %}">仓库管理</a>
+&rsaquo; {{ title }}
+</div>
+{% endblock %}
+
 {% block extrahead %}
 {{ block.super }}
 <link rel="stylesheet" type="text/css" href="{% static "admin/css/forms.css" %}">
 <style>
+    .repo-info {
+        background: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        padding: 20px;
+        margin-bottom: 20px;
+    }
+    .repo-info h3 {
+        margin-top: 0;
+        color: #495057;
+    }
+    .info-row {
+        display: flex;
+        margin-bottom: 10px;
+    }
+    .info-label {
+        font-weight: bold;
+        min-width: 100px;
+        color: #6c757d;
+    }
+    .info-value {
+        color: #495057;
+    }
     .branch-list {
         margin: 20px 0;
         padding: 20px;
-        background: #f8f9fa;
-        border-radius: 4px;
+        background: #ffffff;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+    }
+    .branch-list h3 {
+        margin-top: 0;
+        color: #495057;
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 10px;
     }
     .branch-item {
-        padding: 10px;
-        margin: 5px 0;
-        border: 1px solid #ddd;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 12px 15px;
+        margin: 8px 0;
+        border: 1px solid #dee2e6;
         border-radius: 4px;
         cursor: pointer;
+        transition: all 0.2s ease;
     }
     .branch-item:hover {
         background: #e9ecef;
+        border-color: #adb5bd;
+    }
+    .branch-item.current {
+        background: #d4edda;
+        border-color: #28a745;
+        color: #155724;
     }
     .branch-item.selected {
         background: #007bff;
+        border-color: #007bff;
+        color: white;
+    }
+    .branch-name {
+        font-weight: 500;
+        font-size: 14px;
+    }
+    .branch-status {
+        font-size: 12px;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 500;
+    }
+    .status-current {
+        background: #28a745;
+        color: white;
+    }
+    .status-remote {
+        background: #6c757d;
         color: white;
     }
     .submit-row {
         margin-top: 20px;
         padding: 20px;
         background: #f8f9fa;
-        border-radius: 4px;
+        border: 1px solid #dee2e6;
+        border-radius: 6px;
+        display: flex;
+        gap: 10px;
+        align-items: center;
     }
     .submit-row input[type="submit"] {
         padding: 10px 20px;
         font-size: 14px;
         border-radius: 4px;
+        background: #007bff;
+        color: white;
+        border: 1px solid #007bff;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+    .submit-row input[type="submit"]:hover {
+        background: #0056b3;
+        border-color: #0056b3;
+    }
+    .submit-row input[type="submit"]:disabled {
+        background: #6c757d;
+        border-color: #6c757d;
+        cursor: not-allowed;
+    }
+    .cancel-link {
+        padding: 10px 20px;
+        background: #6c757d;
+        color: white;
+        text-decoration: none;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+    .cancel-link:hover {
+        background: #545b62;
+        color: white;
+        text-decoration: none;
+    }
+    .warning-box {
+        background: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 4px;
+        padding: 15px;
+        margin-bottom: 20px;
+        color: #856404;
+    }
+    .warning-box h4 {
+        margin-top: 0;
+        color: #856404;
     }
 </style>
 {% endblock %}
 
 {% block content %}
 <div id="content-main">
+    <!-- 仓库信息 -->
+    <div class="repo-info">
+        <h3>📁 仓库信息</h3>
+        <div class="info-row">
+            <div class="info-label">仓库名称：</div>
+            <div class="info-value">{{ repo.name }}</div>
+        </div>
+        <div class="info-row">
+            <div class="info-label">仓库URL：</div>
+            <div class="info-value">{{ repo.url }}</div>
+        </div>
+        <div class="info-row">
+            <div class="info-label">当前分支：</div>
+            <div class="info-value">
+                <strong style="color: #28a745;">{{ current_branch }}</strong>
+                {% if is_cloned %}
+                    <span style="color: #28a745; font-size: 12px;">✓ 已克隆</span>
+                {% else %}
+                    <span style="color: #dc3545; font-size: 12px;">⚠ 未克隆</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="info-row">
+            <div class="info-label">可用分支：</div>
+            <div class="info-value">{{ branches|length }} 个分支</div>
+        </div>
+    </div>
+
+    {% if not is_cloned %}
+    <div class="warning-box">
+        <h4>⚠️ 注意</h4>
+        <p>该仓库尚未克隆到本地。分支切换只会更新数据库中的配置，不会执行实际的Git操作。</p>
+        <p>建议先克隆仓库，然后再进行分支切换操作。</p>
+    </div>
+    {% endif %}
+
     <form method="post" id="branch-form">
         {% csrf_token %}
-        <fieldset class="module aligned">
-            <div class="form-row">
-                <div>
-                    <label>仓库名称：</label>
-                    <div>{{ repo.name }}</div>
-                </div>
-            </div>
-            <div class="form-row">
-                <div>
-                    <label>当前分支：</label>
-                    <div>{{ current_branch }}</div>
-                </div>
-            </div>
-        </fieldset>
-
+        
         <div class="branch-list">
-            <h2>选择新分支：</h2>
+            <h3>🌿 选择分支</h3>
+            <p style="color: #6c757d; margin-bottom: 15px;">
+                点击下方分支名称选择要切换的分支
+                {% if is_cloned %}
+                    （将执行实际的Git切换操作）
+                {% else %}
+                    （仅更新配置，不执行Git操作）
+                {% endif %}
+            </p>
+            
             {% for branch in branches %}
-            <div class="branch-item {% if branch == current_branch %}selected{% endif %}"
-                 onclick="selectBranch('{{ branch }}')">
-                {{ branch }}
+            <div class="branch-item {% if branch == current_branch %}current{% endif %}"
+                 onclick="selectBranch('{{ branch }}', this)">
+                <div class="branch-name">{{ branch }}</div>
+                <div class="branch-status {% if branch == current_branch %}status-current{% else %}status-remote{% endif %}">
+                    {% if branch == current_branch %}
+                        当前分支
+                    {% else %}
+                        可切换
+                    {% endif %}
+                </div>
+            </div>
+            {% empty %}
+            <div style="text-align: center; color: #6c757d; padding: 20px;">
+                <p>暂无可用分支</p>
+                {% if not is_cloned %}
+                <p><small>请先克隆仓库以获取分支列表</small></p>
+                {% endif %}
             </div>
             {% endfor %}
+            
             <input type="hidden" name="branch" id="selected-branch" value="{{ current_branch }}">
         </div>
 
         <div class="submit-row">
-            <input type="submit" value="确认修改" class="default">
-            <a href="{% url 'admin:grading_repository_changelist' %}" class="button cancel-link">取消</a>
+            <input type="submit" value="确认切换分支" id="submit-btn" {% if not branches %}disabled{% endif %}>
+            <a href="{% url 'admin:grading_repository_changelist' %}" class="cancel-link">返回列表</a>
+            <span id="selected-info" style="color: #6c757d; margin-left: 15px;">
+                当前选择：<strong id="selected-display">{{ current_branch }}</strong>
+            </span>
         </div>
     </form>
 </div>
 
 <script>
-function selectBranch(branch) {
+let selectedBranch = '{{ current_branch }}';
+
+function selectBranch(branch, element) {
+    // 如果点击的是当前分支，不做任何操作
+    if (branch === '{{ current_branch }}') {
+        return;
+    }
+    
     // 更新选中状态
     document.querySelectorAll('.branch-item').forEach(item => {
         item.classList.remove('selected');
     });
-    event.target.classList.add('selected');
+    element.classList.add('selected');
 
     // 更新隐藏输入框的值
     document.getElementById('selected-branch').value = branch;
+    document.getElementById('selected-display').textContent = branch;
+    
+    // 更新提交按钮状态
+    const submitBtn = document.getElementById('submit-btn');
+    if (branch !== '{{ current_branch }}') {
+        submitBtn.disabled = false;
+        submitBtn.value = '确认切换到 ' + branch;
+    } else {
+        submitBtn.disabled = true;
+        submitBtn.value = '确认切换分支';
+    }
+    
+    selectedBranch = branch;
 }
+
+// 表单提交前确认
+document.getElementById('branch-form').addEventListener('submit', function(e) {
+    if (selectedBranch === '{{ current_branch }}') {
+        e.preventDefault();
+        alert('请选择不同的分支');
+        return false;
+    }
+    
+    const confirmMsg = `确定要切换到分支 "${selectedBranch}" 吗？`;
+    {% if is_cloned %}
+    const fullMsg = confirmMsg + '\n\n这将执行实际的Git切换操作，可能会影响本地文件。';
+    {% else %}
+    const fullMsg = confirmMsg + '\n\n这只会更新配置，不会执行实际的Git操作。';
+    {% endif %}
+    
+    if (!confirm(fullMsg)) {
+        e.preventDefault();
+        return false;
+    }
+});
 </script>
 {% endblock %}

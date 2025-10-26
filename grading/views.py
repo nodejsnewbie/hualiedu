@@ -23,12 +23,10 @@ from django.views import View  # noqa: F401
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from docx import Document
-from volcenginesdkarkruntime import Ark
+# from volcenginesdkarkruntime import Ark  # 临时注释，缺少依赖包
 
 from .models import (
     Course,
-    CourseSchedule,
-    CourseWeekSchedule,
     GlobalConfig,
     GradeTypeConfig,
     Repository,
@@ -851,7 +849,11 @@ def get_directory_tree(file_path=""):
                     continue
 
                 item_path = os.path.join(full_path, item)
-                relative_path = os.path.join(file_path, item)
+                # 确保相对路径使用正斜杠，以便前端JavaScript正确处理
+                if file_path:
+                    relative_path = f"{file_path}/{item}".replace('\\', '/')
+                else:
+                    relative_path = item
 
                 # 检查项目权限
                 if not os.access(item_path, os.R_OK):
@@ -1130,9 +1132,230 @@ def get_file_content(request):
 
             # 获取文件类型
             mime_type, _ = mimetypes.guess_type(full_path)
+            file_ext = os.path.splitext(full_path)[1].lower()
 
             # 根据文件类型处理
-            if mime_type:
+            # 优先检查文件扩展名，因为某些文件的MIME类型可能无法正确识别
+            if file_ext == '.docx':
+                # Word 文档 - 直接处理，不依赖MIME类型
+                try:
+                    # 尝试使用 mammoth 读取
+                    try:
+                        import mammoth
+
+                        with open(full_path, "rb") as docx_file:
+                            result = mammoth.convert_to_html(docx_file)
+                            html_content = result.value
+
+                        # 添加样式
+                        css = """
+                        <style>
+                            .docx-content {
+                                font-family: Arial, sans-serif;
+                                line-height: 1.6;
+                                padding: 20px;
+                                max-width: 100%;
+                                overflow-x: auto;
+                                box-sizing: border-box;
+                            }
+                            .docx-content img {
+                                max-width: 100%;
+                                height: auto;
+                            }
+                            .docx-content table {
+                                margin: 15px 0;
+                                border-collapse: collapse;
+                                width: 100%;
+                                max-width: 100%;
+                                overflow-x: auto;
+                                display: block;
+                            }
+                            .docx-content td, .docx-content th {
+                                padding: 8px;
+                                border: 1px solid #ddd;
+                                min-width: 100px;
+                                word-break: break-word;
+                            }
+                            .docx-content tr:nth-child(even) {
+                                background-color: #f9f9f9;
+                            }
+                            .docx-content h1 {
+                                font-size: clamp(20px, 5vw, 24px);
+                                margin: 20px 0;
+                            }
+                            .docx-content h2 {
+                                font-size: clamp(18px, 4vw, 20px);
+                                margin: 18px 0;
+                            }
+                            .docx-content h3 {
+                                font-size: clamp(16px, 3vw, 18px);
+                                margin: 16px 0;
+                            }
+                            .docx-content p {
+                                margin: 10px 0;
+                                font-size: clamp(14px, 2vw, 16px);
+                            }
+                            @media screen and (max-width: 768px) {
+                                .docx-content {
+                                    padding: 10px;
+                                }
+                                .docx-content td, .docx-content th {
+                                    padding: 4px;
+                                    font-size: 14px;
+                                }
+                            }
+                        </style>
+                        """
+
+                        final_content = css + f'<div class="docx-content">{html_content}</div>'
+
+                        # 获取文件评分信息
+                        grade_info = get_file_grade_info(full_path)
+
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "type": "docx",
+                                "content": final_content,
+                                "grade_info": grade_info,
+                            }
+                        )
+
+                    except Exception as mammoth_error:
+                        logger.error(
+                            f"Mammoth 处理失败，尝试使用 python-docx: {str(mammoth_error)}"
+                        )
+                        # 如果 mammoth 失败，回退到 python-docx
+                        from docx import Document
+
+                        doc = Document(full_path)
+
+                        # 构建 HTML 内容
+                        html_content = ['<div class="docx-content">']
+
+                        # 处理段落
+                        for paragraph in doc.paragraphs:
+                            # 检查段落样式和内容
+                            style = paragraph.style.name
+                            text = paragraph.text.strip()
+
+                            # 跳过完全空的段落
+                            if not text and not paragraph.runs:
+                                continue
+
+                            # 处理段落样式
+                            if style.startswith("Heading"):
+                                level = style[-1] if style[-1].isdigit() else 1
+                                html_content.append(f"<h{level}>{text}</h{level}>")
+                            else:
+                                # 处理段落中的格式
+                                formatted_text = ""
+                                for run in paragraph.runs:
+                                    if run.bold:
+                                        formatted_text += f"<strong>{run.text}</strong>"
+                                    elif run.italic:
+                                        formatted_text += f"<em>{run.text}</em>"
+                                    else:
+                                        formatted_text += run.text
+
+                                if formatted_text:
+                                    html_content.append(f"<p>{formatted_text}</p>")
+                                else:
+                                    html_content.append(f"<p>{text}</p>")
+
+                        # 处理表格
+                        for table in doc.tables:
+                            html_content.append('<table>')
+                            for row in table.rows:
+                                html_content.append('<tr>')
+                                for cell in row.cells:
+                                    html_content.append(f'<td>{cell.text}</td>')
+                                html_content.append('</tr>')
+                            html_content.append('</table>')
+
+                        html_content.append('</div>')
+
+                        # 添加样式
+                        css = """
+                        <style>
+                            .docx-content {
+                                font-family: Arial, sans-serif;
+                                line-height: 1.6;
+                                padding: 20px;
+                                max-width: 100%;
+                                overflow-x: auto;
+                                box-sizing: border-box;
+                            }
+                            .docx-content img {
+                                max-width: 100%;
+                                height: auto;
+                            }
+                            .docx-content table {
+                                margin: 15px 0;
+                                border-collapse: collapse;
+                                width: 100%;
+                                max-width: 100%;
+                                overflow-x: auto;
+                                display: block;
+                            }
+                            .docx-content td, .docx-content th {
+                                padding: 8px;
+                                border: 1px solid #ddd;
+                                min-width: 100px;
+                                word-break: break-word;
+                            }
+                            .docx-content tr:nth-child(even) {
+                                background-color: #f9f9f9;
+                            }
+                            .docx-content h1 {
+                                font-size: clamp(20px, 5vw, 24px);
+                                margin: 20px 0;
+                            }
+                            .docx-content h2 {
+                                font-size: clamp(18px, 4vw, 20px);
+                                margin: 18px 0;
+                            }
+                            .docx-content h3 {
+                                font-size: clamp(16px, 3vw, 18px);
+                                margin: 16px 0;
+                            }
+                            .docx-content p {
+                                margin: 10px 0;
+                                font-size: clamp(14px, 2vw, 16px);
+                            }
+                            @media screen and (max-width: 768px) {
+                                .docx-content {
+                                    padding: 10px;
+                                }
+                                .docx-content td, .docx-content th {
+                                    padding: 4px;
+                                    font-size: 14px;
+                                }
+                            }
+                        </style>
+                        """
+
+                        final_content = css + ''.join(html_content)
+                        grade_info = get_file_grade_info(full_path)
+
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "type": "docx",
+                                "content": final_content,
+                                "grade_info": grade_info,
+                            }
+                        )
+
+                except Exception as e:
+                    logger.error(f"Word 文档处理失败: {str(e)}")
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "message": f"Word 文档处理失败: {str(e)}",
+                        }
+                    )
+            elif mime_type:
                 if mime_type.startswith("image/"):
                     # 图片文件
                     with open(full_path, "rb") as f:
@@ -1187,21 +1410,42 @@ def get_file_content(request):
                                 "message": f"Excel 文件处理失败: {str(e)}",
                             }
                         )
-                elif mime_type == "text/plain":
-                    # 文本文件
-                    with open(full_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                        # 获取文件评分信息
-                        grade_info = get_file_grade_info(full_path)
+                elif mime_type and mime_type.startswith("text/"):
+                    # 文本文件（包括text/plain, text/html, text/css, text/javascript等）
+                    try:
+                        with open(full_path, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            # 获取文件评分信息
+                            grade_info = get_file_grade_info(full_path)
 
-                        return JsonResponse(
-                            {
-                                "status": "success",
-                                "type": "text",
-                                "content": content,
-                                "grade_info": grade_info,
-                            }
-                        )
+                            return JsonResponse(
+                                {
+                                    "status": "success",
+                                    "type": "text",
+                                    "content": content,
+                                    "grade_info": grade_info,
+                                }
+                            )
+                    except UnicodeDecodeError:
+                        # 如果UTF-8解码失败，尝试其他编码
+                        try:
+                            with open(full_path, "r", encoding="gbk") as f:
+                                content = f.read()
+                                grade_info = get_file_grade_info(full_path)
+                                return JsonResponse(
+                                    {
+                                        "status": "success",
+                                        "type": "text",
+                                        "content": content,
+                                        "grade_info": grade_info,
+                                    }
+                                )
+                        except UnicodeDecodeError:
+                            # 如果仍然失败，作为二进制文件处理
+                            logger.warning(f"无法解码文本文件: {full_path}")
+                            return JsonResponse(
+                                {"status": "success", "type": "binary", "content": f"/media/{path}"}
+                            )
                 elif (
                     mime_type
                     == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1431,6 +1675,48 @@ def get_file_content(request):
                                 "message": f"Word 文档处理失败: {str(e)}",
                             }
                         )
+
+            # 检查文件扩展名，对于常见的代码文件，尝试作为文本文件处理
+            file_ext = os.path.splitext(full_path)[1].lower()
+            text_extensions = {
+                '.py', '.js', '.html', '.htm', '.css', '.json', '.xml', '.yaml', '.yml',
+                '.md', '.txt', '.log', '.ini', '.cfg', '.conf', '.sh', '.bat', '.sql',
+                '.java', '.cpp', '.c', '.h', '.php', '.rb', '.go', '.rs', '.ts', '.jsx',
+                '.tsx', '.vue', '.scss', '.sass', '.less', '.csv', '.tsv'
+            }
+            
+            if file_ext in text_extensions:
+                try:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        grade_info = get_file_grade_info(full_path)
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "type": "text",
+                                "content": content,
+                                "grade_info": grade_info,
+                            }
+                        )
+                except UnicodeDecodeError:
+                    try:
+                        with open(full_path, "r", encoding="gbk") as f:
+                            content = f.read()
+                            grade_info = get_file_grade_info(full_path)
+                            return JsonResponse(
+                                {
+                                    "status": "success",
+                                    "type": "text",
+                                    "content": content,
+                                    "grade_info": grade_info,
+                                }
+                            )
+                    except UnicodeDecodeError:
+                        logger.warning(f"无法解码文件: {full_path}")
+                        pass  # 继续作为二进制文件处理
+                except Exception as e:
+                    logger.error(f"读取文件失败: {full_path}, 错误: {e}")
+                    pass  # 继续作为二进制文件处理
 
             # 如果是二进制文件，提供下载链接
             return JsonResponse(
