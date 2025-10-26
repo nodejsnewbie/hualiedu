@@ -62,7 +62,6 @@ class MultiTenantMiddleware:
                 user=user,
                 defaults={
                     "tenant": tenant,
-                    "repo_base_dir": f"~/jobs/{user.username}",
                     "is_tenant_admin": True,
                 },
             )
@@ -117,6 +116,6 @@ def get_user_profile(request):
 def get_tenant_repo_base_dir(request):
     """获取租户的基础仓库目录"""
     profile = get_user_profile(request)
-    if profile:
-        return profile.get_repo_base_dir()
+    if profile and profile.tenant:
+        return profile.tenant.get_full_repo_path()
     return None
