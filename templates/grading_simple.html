@@ -255,7 +255,10 @@
     function loadCoursesList(repositoryId) {
         const $ = jQuery;
         
+        console.log('loadCoursesList called with repositoryId:', repositoryId);
+        
         if (!repositoryId) {
+            console.log('No repositoryId provided');
             return;
         }
 
@@ -268,10 +271,12 @@
                 'repo_id': repositoryId
             },
             success: function(response) {
+                console.log('Courses list response:', response);
                 const select = $('#courseSelect');
                 select.empty().append('<option value="">选择课程...</option>');
                 
                 if (response.status === 'success' && response.courses && response.courses.length > 0) {
+                    console.log('Found', response.courses.length, 'courses');
                     response.courses.forEach(function(course) {
                         select.append(`<option value="${course.path}">${course.name}</option>`);
                     });
@@ -282,13 +287,14 @@
                         select.val(response.courses[0].path).trigger('change');
                     }
                 } else {
+                    console.log('No courses found or error:', response);
                     select.append('<option value="">暂无课程</option>');
                     $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无课程目录</p>');
                 }
             },
             error: function(xhr) {
+                console.error('加载课程列表失败:', xhr.status, xhr.responseText);
                 $('#courseSelect').html('<option value="">加载失败</option>');
-                console.error('加载课程列表失败');
             }
         });
     }

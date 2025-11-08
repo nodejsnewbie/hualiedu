@@ -883,6 +883,7 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None):
 
 
 @login_required
+@login_required
 def get_courses_list_view(request):
     """获取仓库下的课程列表（第一级目录）
     
