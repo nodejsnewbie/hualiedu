@@ -32,17 +32,24 @@
                         </div>
                     </div>
                     <div class="row">
-                        <div class="col-sm-8">
+                        <div class="col-sm-12">
                             <select id="courseSelect" class="form-select" disabled>
                                 <option value="">选择课程...</option>
                             </select>
-                        </div>
-                        <div class="col-sm-4">
-                            <div class="form-check mt-2">
-                                <input class="form-check-input" type="checkbox" id="isLabCourse" disabled>
-                                <label class="form-check-label" for="isLabCourse">
-                                    实验课
-                                </label>
+                            <div class="mt-2 d-flex align-items-center" style="font-size: 0.9em;">
+                                <span class="text-muted me-2">课程类型：</span>
+                                <select id="courseTypeSelect" class="form-select form-select-sm" disabled style="width: auto; min-width: 120px;">
+                                    <option value="theory">理论课</option>
+                                    <option value="lab">实验课</option>
+                                    <option value="practice">实践课</option>
+                                    <option value="mixed">理论+实验</option>
+                                </select>
+                                <span id="courseTypeSaving" class="ms-2 text-muted" style="display: none;">
+                                    <i class="bi bi-hourglass-split"></i> 保存中...
+                                </span>
+                                <span id="courseTypeSaved" class="ms-2 text-success" style="display: none;">
+                                    <i class="bi bi-check-circle"></i> 已保存
+                                </span>
                             </div>
                         </div>
                     </div>
@@ -205,6 +212,8 @@
                 // 更新全局变量
                 currentRepoId = selectedRepo;
                 currentCourse = null;
+                window.currentCourse = null;
+                window.currentRepoId = selectedRepo;
                 
                 loadCoursesList(selectedRepo);
                 // 清空课程选择和目录树
@@ -214,6 +223,8 @@
                 // 清空全局变量
                 currentRepoId = null;
                 currentCourse = null;
+                window.currentCourse = null;
+                window.currentRepoId = null;
                 
                 $('#courseSelect').val('').prop('disabled', true).html('<option value="">选择课程...</option>');
                 $('#directory-tree').html('<p class="text-muted">请先选择仓库和课程</p>');
@@ -228,27 +239,112 @@
                 // 更新全局变量
                 currentRepoId = selectedRepo;
                 currentCourse = selectedCourse;
+                window.currentCourse = selectedCourse;
+                window.currentRepoId = selectedRepo;
                 
-                // 启用实验课复选框
-                $('#isLabCourse').prop('disabled', false);
+                // 隐藏保存状态提示
+                $('#courseTypeSaving, #courseTypeSaved').hide();
+                
+                // 调用API获取课程信息
+                $.ajax({
+                    url: '/grading/api/course-info/',
+                    method: 'GET',
+                    data: {
+                        course_name: selectedCourse,
+                        auto_create: true
+                    },
+                    success: function(response) {
+                        if (response.success && response.course) {
+                            const courseType = response.course.course_type;
+                            
+                            // 设置课程类型下拉框
+                            $('#courseTypeSelect').val(courseType).prop('disabled', false);
+                            
+                            // 更新isLabCourse变量
+                            isLabCourse = (courseType === 'lab' || courseType === 'practice' || courseType === 'mixed');
+                            
+                            // 显示课程类型提示
+                            const typeDisplay = response.course.course_type_display;
+                            console.log(`课程类型: ${typeDisplay} (${courseType})`);
+                            
+                            // 如果是自动创建的，显示提示
+                            if (response.course.auto_created) {
+                                console.log('课程已自动创建');
+                            }
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('获取课程信息失败:', error);
+                        // 失败时仍然启用下拉框，让用户手动选择
+                        $('#courseTypeSelect').prop('disabled', false);
+                    }
+                });
                 
                 loadCourseFiles(selectedRepo, selectedCourse);
             } else {
                 // 清空课程全局变量
                 currentCourse = null;
+                window.currentCourse = null;
                 
-                // 禁用并取消选中实验课复选框
-                $('#isLabCourse').prop('disabled', true).prop('checked', false);
+                // 禁用课程类型选择
+                $('#courseTypeSelect').prop('disabled', true).val('theory');
+                $('#courseTypeSaving, #courseTypeSaved').hide();
                 isLabCourse = false;
                 
                 $('#directory-tree').html('<p class="text-muted">请选择课程</p>');
             }
         });
         
-        // 实验课复选框变化事件
-        $('#isLabCourse').change(function() {
-            isLabCourse = $(this).is(':checked');
-            console.log('实验课模式:', isLabCourse ? '是' : '否');
+        // 课程类型选择变化事件 - 自动保存
+        $('#courseTypeSelect').change(function() {
+            const selectedCourse = $('#courseSelect').val();
+            const courseType = $(this).val();
+            
+            if (!selectedCourse) {
+                return;
+            }
+            
+            // 更新isLabCourse变量
+            isLabCourse = (courseType === 'lab' || courseType === 'practice' || courseType === 'mixed');
+            console.log('课程类型已更改:', $(this).find('option:selected').text(), '实验课模式:', isLabCourse ? '是' : '否');
+            
+            // 显示保存中状态
+            $('#courseTypeSaved').hide();
+            $('#courseTypeSaving').show();
+            
+            // 自动保存到数据库
+            $.ajax({
+                url: '/grading/api/update-course-type/',
+                method: 'POST',
+                data: {
+                    course_name: selectedCourse,
+                    course_type: courseType,
+                    csrfmiddlewaretoken: '{{ csrf_token }}'
+                },
+                success: function(response) {
+                    if (response.success) {
+                        console.log('课程类型已保存:', response.course.course_type_display);
+                        
+                        // 显示保存成功状态
+                        $('#courseTypeSaving').hide();
+                        $('#courseTypeSaved').show();
+                        
+                        // 2秒后隐藏成功提示
+                        setTimeout(function() {
+                            $('#courseTypeSaved').fadeOut();
+                        }, 2000);
+                    } else {
+                        console.error('保存失败:', response.message);
+                        $('#courseTypeSaving').hide();
+                        alert('保存失败：' + response.message);
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('保存课程类型失败:', error);
+                    $('#courseTypeSaving').hide();
+                    alert('保存失败，请重试');
+                }
+            });
         });
     });
 
@@ -426,4 +522,6 @@
 <script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
 <!-- 自定义脚本 -->
 <script src="{% static 'grading/js/grading.js' %}"></script>
+<!-- 作业类型标签管理 -->
+<script src="{% static 'grading/js/homework-type-labels.js' %}"></script>
 {% endblock %}

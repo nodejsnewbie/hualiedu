@@ -94,6 +94,13 @@ urlpatterns = [
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
     path("sync-repository/", views.sync_repository_view, name="sync_repository"),
     path("api/repositories/", views.get_repository_list_api, name="get_repository_list_api"),
+    # 课程和作业信息API
+    path("api/course-info/", views.get_course_info_api, name="get_course_info_api"),
+    path("api/update-course-type/", views.update_course_type_api, name="update_course_type_api"),
+    path("api/homework-list/", views.get_homework_list_api, name="get_homework_list_api"),
+    path("api/homework-info/", views.get_homework_info_api, name="get_homework_info_api"),
+    path("api/homework-type/", views.get_homework_type_api, name="get_homework_type_api"),
+    path("api/update-homework-type/", views.update_homework_type_api, name="update_homework_type_api"),
     # 测试页面
     path("jquery-test/", views.jquery_test, name="jquery_test"),
     path("test-clean/", views.test_clean, name="test_clean"),

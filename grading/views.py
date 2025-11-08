@@ -30,6 +30,7 @@ from .models import (
     Course,
     GlobalConfig,
     GradeTypeConfig,
+    Homework,
     Repository,
     Semester,
 )
@@ -202,6 +203,277 @@ def get_file_extension(full_path):
     """获取文件扩展名（小写，不含点）"""
     _, ext = os.path.splitext(full_path)
     return ext.lower()[1:] if ext else "unknown"
+
+
+def is_lab_course_by_name(course_name):
+    """
+    根据课程名称判断是否是实验课程（备用方法）
+    
+    Args:
+        course_name: 课程名称
+    
+    Returns:
+        bool: 是否是实验课程
+    """
+    if not course_name:
+        return False
+    
+    try:
+        # 首先尝试从数据库查询课程
+        course = Course.objects.filter(name=course_name).first()
+        if course:
+            return course.course_type in ["lab", "practice", "mixed"]
+    except Exception as e:
+        logger.warning(f"查询课程失败: {e}")
+    
+    # 如果数据库查询失败，使用关键词判断
+    course_name_lower = course_name.lower()
+    lab_keywords = [
+        "实验",
+        "lab",
+        "experiment",
+        "实训",
+        "practice",
+    ]
+    
+    for keyword in lab_keywords:
+        if keyword in course_name_lower:
+            logger.info(f"课程'{course_name}'包含关键词'{keyword}'，判定为实验课程")
+            return True
+    
+    return False
+
+
+def auto_detect_course_type(course_name):
+    """
+    根据课程名称自动检测课程类型
+    
+    Args:
+        course_name: 课程名称
+    
+    Returns:
+        str: 课程类型 (theory/lab/practice/mixed)
+    """
+    if not course_name:
+        return "theory"
+    
+    course_name_lower = course_name.lower()
+    
+    # 实验课关键词
+    lab_keywords = ["实验", "lab", "experiment"]
+    # 实训课关键词
+    practice_keywords = ["实训", "practice", "实践"]
+    # 混合课关键词
+    mixed_keywords = ["理论与实验", "理论+实验", "mixed"]
+    
+    # 优先级：mixed > lab > practice > theory
+    if any(keyword in course_name_lower for keyword in mixed_keywords):
+        return "mixed"
+    elif any(keyword in course_name_lower for keyword in lab_keywords):
+        return "lab"
+    elif any(keyword in course_name_lower for keyword in practice_keywords):
+        return "practice"
+    else:
+        return "theory"
+
+
+def auto_create_or_update_course(course_name, user=None):
+    """
+    自动创建或更新课程记录
+    
+    Args:
+        course_name: 课程名称
+        user: 当前用户（用于设置教师）
+    
+    Returns:
+        Course: 课程对象
+    """
+    try:
+        # 查找是否已存在
+        course = Course.objects.filter(name=course_name).first()
+        
+        if course:
+            logger.info(f"课程已存在: {course.name} (类型: {course.course_type})")
+            return course
+        
+        # 自动检测课程类型
+        course_type = auto_detect_course_type(course_name)
+        
+        # 需要学期和教师信息
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+        if not current_semester:
+            # 如果没有活跃学期，获取最新的学期
+            current_semester = Semester.objects.order_by('-start_date').first()
+        
+        if not current_semester:
+            logger.error("没有可用的学期，无法创建课程")
+            return None
+        
+        # 使用当前用户作为教师，如果没有用户则使用第一个staff用户
+        teacher = user if user else User.objects.filter(is_staff=True).first()
+        if not teacher:
+            logger.error("没有可用的教师用户，无法创建课程")
+            return None
+        
+        # 创建课程
+        course = Course.objects.create(
+            name=course_name,
+            course_type=course_type,
+            semester=current_semester,
+            teacher=teacher,
+            location="待设置",
+            description=f"自动创建的课程（从目录: {course_name}）"
+        )
+        
+        logger.info(f"自动创建课程: {course.name} (类型: {course.course_type})")
+        return course
+        
+    except Exception as e:
+        logger.error(f"自动创建课程失败: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return None
+
+
+def get_course_type_from_name(course_name):
+    """
+    根据课程名称获取课程类型
+    
+    Args:
+        course_name: 课程名称
+    
+    Returns:
+        str: 课程类型 (theory/lab/practice/mixed)，默认返回 theory
+    """
+    if not course_name:
+        return "theory"
+    
+    try:
+        course = Course.objects.filter(name=course_name).first()
+        if course:
+            logger.info(f"从数据库获取课程类型: {course.name} -> {course.course_type}")
+            return course.course_type
+    except Exception as e:
+        logger.warning(f"查询课程失败: {e}")
+    
+    # 课程不在数据库中，根据关键词判断
+    course_name_lower = course_name.lower()
+    lab_keywords = ["实验", "lab", "experiment", "实训", "practice"]
+    
+    if any(keyword in course_name_lower for keyword in lab_keywords):
+        logger.info(f"课程不在数据库，根据关键词判断为实验课: {course_name}")
+        return "lab"
+    
+    logger.info(f"课程不在数据库，返回默认类型（理论课）: {course_name}")
+    return "theory"
+
+
+def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, base_dir=None):
+    """
+    综合判断文件是否是实验报告
+    
+    Args:
+        course_name: 课程名称
+        homework_folder: 作业文件夹名称
+        file_path: 文件路径
+        base_dir: 基础目录
+    
+    Returns:
+        bool: 是否是实验报告
+    """
+    # 方法1：根据作业信息从数据库查询（最准确）
+    if course_name and homework_folder:
+        try:
+            from grading.models import Homework
+            homework = Homework.objects.filter(
+                course__name=course_name,
+                folder_name=homework_folder
+            ).first()
+            
+            if homework:
+                is_lab = homework.is_lab_report()
+                type_display = homework.get_homework_type_display()
+                logger.info(f"[OK] 从数据库查询作业类型: 课程={course_name}, 作业批次={homework_folder}")
+                logger.info(f"  作业类型: {homework.homework_type} ({type_display})")
+                logger.info(f"  是否实验报告: {is_lab}")
+                return is_lab
+            else:
+                logger.warning(f"[X] 数据库中未找到作业记录: 课程={course_name}, 作业批次={homework_folder}")
+        except Exception as e:
+            logger.warning(f"[X] 查询作业信息失败: {e}")
+    
+    # 方法2：从文件路径提取课程和作业信息
+    if file_path and base_dir:
+        try:
+            rel_path = os.path.relpath(file_path, base_dir)
+            path_parts = rel_path.split(os.sep)
+            logger.info(f"路径分析: file_path={file_path}, base_dir={base_dir}")
+            logger.info(f"相对路径: {rel_path}")
+            logger.info(f"路径部分: {path_parts}, 长度: {len(path_parts)}")
+            
+            # 跳过中间的仓库目录（如 linyuan/homework）
+            # 查找包含"班"的部分，它前面的就是课程名
+            course_idx = -1
+            for i, part in enumerate(path_parts):
+                if '班' in part or 'class' in part.lower():
+                    # 找到班级，前一个是课程
+                    if i > 0:
+                        course_idx = i - 1
+                    break
+            
+            # 如果没找到班级，尝试查找课程名（通常是倒数第3或第4个部分）
+            if course_idx == -1 and len(path_parts) >= 3:
+                # 从后往前找：文件名、作业文件夹、可能的班级、课程名
+                # 跳过常见的仓库/用户目录名
+                skip_dirs = ['homework', 'jobs', 'work', 'documents', 'repos', 'projects']
+                for i in range(len(path_parts) - 3, -1, -1):
+                    part_lower = path_parts[i].lower()
+                    # 跳过明显的仓库目录名和用户名目录
+                    if part_lower not in skip_dirs and not part_lower.startswith('.'):
+                        course_idx = i
+                        break
+            
+            if course_idx >= 0 and len(path_parts) > course_idx + 1:
+                extracted_course = path_parts[course_idx]
+                # 判断下一部分是班级还是作业
+                next_part = path_parts[course_idx + 1]
+                if '班' in next_part or 'class' in next_part.lower():
+                    extracted_homework = path_parts[course_idx + 2] if len(path_parts) > course_idx + 2 else None
+                    logger.info(f"检测到班级: {next_part}, 作业文件夹: {extracted_homework}")
+                else:
+                    extracted_homework = next_part
+                    logger.info(f"未检测到班级, 作业文件夹: {extracted_homework}")
+                
+                if extracted_homework:
+                    logger.info(f"从路径提取: 课程={extracted_course}, 作业={extracted_homework}")
+                    return is_lab_report_file(
+                        course_name=extracted_course,
+                        homework_folder=extracted_homework
+                    )
+                else:
+                    logger.warning(f"无法提取作业文件夹名称")
+            else:
+                logger.warning(f"路径层级不足: {len(path_parts)} < 3")
+        except Exception as e:
+            logger.warning(f"从路径提取信息失败: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
+    
+    # 方法3：根据课程类型判断（备用）
+    if course_name:
+        course_type = get_course_type_from_name(course_name)
+        if course_type:
+            is_lab = course_type in ["lab", "practice", "mixed"]
+            logger.info(f"根据课程类型判断: {course_name} ({course_type}) -> is_lab={is_lab}")
+            return is_lab
+        
+        # 如果数据库查询失败，使用关键词判断
+        is_lab = is_lab_course_by_name(course_name)
+        logger.info(f"根据课程名称关键词判断: {course_name} -> is_lab={is_lab}")
+        return is_lab
+    
+    return False
 
 
 def require_staff_user(view_func):
@@ -793,12 +1065,13 @@ def grading_view(request):
         )
 
 
-def get_directory_tree(file_path: str = "", base_dir: str | None = None):
+def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_name: str = None):
     """获取目录树结构（返回Python对象列表）
 
     Args:
         file_path: 相对路径（相对于 base_dir）
         base_dir: 基础目录，若为空则读取全局默认目录
+        course_name: 课程名称，用于查询作业类型
     """
     try:
         if not base_dir:
@@ -866,7 +1139,7 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None):
 
                 # 如果是目录，递归获取子目录并统计文件数量
                 if is_dir:
-                    children = get_directory_tree(relative_path, base_dir=base_dir)
+                    children = get_directory_tree(relative_path, base_dir=base_dir, course_name=course_name)
                     if children:
                         node["children"] = children
                     else:
@@ -876,6 +1149,29 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None):
                     # 统计并缓存目录文件数量
                     file_count = get_directory_file_count_cached(relative_path, base_dir=base_dir)
                     node["data"] = {"file_count": file_count}
+                    
+                    # 如果提供了课程名称，检查是否是作业文件夹（第二层）
+                    # file_path不为空但不包含'/'表示是第二层（班级下的作业文件夹）
+                    if course_name and file_path and '/' not in file_path:
+                        # 这是班级下的作业文件夹
+                        try:
+                            course = Course.objects.get(name=course_name)
+                            try:
+                                homework = Homework.objects.get(course=course, folder_name=item)
+                                node["data"]["homework_type"] = homework.homework_type
+                                node["data"]["homework_type_display"] = homework.get_homework_type_display()
+                                logger.info(f"作业文件夹 '{item}' (路径: {relative_path}) 类型: {homework.get_homework_type_display()}")
+                            except Homework.DoesNotExist:
+                                # 作业不存在，根据课程类型使用默认类型
+                                # 实验课、实践课、理论+实验课默认为实验报告
+                                default_type = "lab_report" if course.course_type in ["lab", "practice", "mixed"] else "normal"
+                                default_display = "实验报告" if default_type == "lab_report" else "普通作业"
+                                
+                                node["data"]["homework_type"] = default_type
+                                node["data"]["homework_type_display"] = default_display
+                                logger.info(f"作业文件夹 '{item}' (路径: {relative_path}) 使用默认类型: {default_display} (基于课程类型: {course.get_course_type_display()})")
+                        except Course.DoesNotExist:
+                            pass
                 # 如果是文件，添加文件特定的属性
                 else:
                     # 获取文件扩展名
@@ -908,6 +1204,234 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None):
 
 
 @login_required
+@login_required
+@require_http_methods(["GET"])
+def get_course_info_api(request):
+    """获取课程信息API - 自动创建课程"""
+    try:
+        course_name = request.GET.get("course_name")
+        auto_create = request.GET.get("auto_create", "true").lower() == "true"
+        
+        if not course_name:
+            return JsonResponse({"success": False, "message": "未提供课程名称"})
+        
+        try:
+            course = Course.objects.filter(name=course_name).first()
+            
+            if not course and auto_create:
+                # 课程不存在，自动创建
+                logger.info(f"课程不存在，尝试自动创建: {course_name}")
+                course = auto_create_or_update_course(course_name, request.user)
+                
+                if course:
+                    return JsonResponse({
+                        "success": True,
+                        "course": {
+                            "id": course.id,
+                            "name": course.name,
+                            "course_type": course.course_type,
+                            "course_type_display": course.get_course_type_display(),
+                            "description": course.description,
+                            "in_database": True,
+                            "auto_created": True,  # 标记为自动创建
+                        }
+                    })
+                else:
+                    # 自动创建失败，返回默认值
+                    logger.warning(f"自动创建课程失败: {course_name}，返回默认类型")
+                    default_type = auto_detect_course_type(course_name)
+                    
+                    return JsonResponse({
+                        "success": True,
+                        "course": {
+                            "id": None,
+                            "name": course_name,
+                            "course_type": default_type,
+                            "course_type_display": dict(Course.COURSE_TYPE_CHOICES).get(default_type, "理论课"),
+                            "description": "",
+                            "in_database": False,
+                            "auto_created": False,
+                        }
+                    })
+            
+            if not course:
+                # 不自动创建，返回默认值
+                default_type = auto_detect_course_type(course_name)
+                return JsonResponse({
+                    "success": True,
+                    "course": {
+                        "id": None,
+                        "name": course_name,
+                        "course_type": default_type,
+                        "course_type_display": dict(Course.COURSE_TYPE_CHOICES).get(default_type, "理论课"),
+                        "description": "",
+                        "in_database": False,
+                        "auto_created": False,
+                    }
+                })
+            
+            # 课程存在，返回数据库中的信息
+            return JsonResponse({
+                "success": True,
+                "course": {
+                    "id": course.id,
+                    "name": course.name,
+                    "course_type": course.course_type,
+                    "course_type_display": course.get_course_type_display(),
+                    "description": course.description,
+                    "in_database": True,
+                    "auto_created": False,
+                }
+            })
+        except Exception as e:
+            logger.error(f"查询课程信息失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return JsonResponse({"success": False, "message": str(e)})
+    except Exception as e:
+        logger.error(f"获取课程信息API异常: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JsonResponse({"success": False, "message": str(e)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def get_homework_list_api(request):
+    """获取课程的作业列表API"""
+    try:
+        course_name = request.GET.get("course_name")
+        if not course_name:
+            return JsonResponse({"success": False, "message": "未提供课程名称"})
+        
+        try:
+            from grading.models import Homework
+            course = Course.objects.filter(name=course_name).first()
+            if not course:
+                return JsonResponse({"success": False, "message": "课程不存在"})
+            
+            homeworks = Homework.objects.filter(course=course).order_by('created_at')
+            homework_list = [{
+                "id": hw.id,
+                "title": hw.title,
+                "homework_type": hw.homework_type,
+                "homework_type_display": hw.get_homework_type_display(),
+                "folder_name": hw.folder_name,
+                "description": hw.description,
+                "due_date": hw.due_date.isoformat() if hw.due_date else None,
+            } for hw in homeworks]
+            
+            return JsonResponse({
+                "success": True,
+                "course_name": course.name,
+                "homeworks": homework_list
+            })
+        except Exception as e:
+            logger.error(f"查询作业列表失败: {e}")
+            return JsonResponse({"success": False, "message": str(e)})
+    except Exception as e:
+        logger.error(f"获取作业列表API异常: {e}")
+        return JsonResponse({"success": False, "message": str(e)})
+
+
+@login_required
+@require_http_methods(["POST"])
+def update_course_type_api(request):
+    """更新课程类型API"""
+    try:
+        course_name = request.POST.get("course_name")
+        course_type = request.POST.get("course_type")
+        
+        if not course_name or not course_type:
+            return JsonResponse({"success": False, "message": "缺少必要参数"})
+        
+        # 验证课程类型
+        valid_types = ["theory", "lab", "practice", "mixed"]
+        if course_type not in valid_types:
+            return JsonResponse({"success": False, "message": "无效的课程类型"})
+        
+        try:
+            # 查找或创建课程
+            course = Course.objects.filter(name=course_name).first()
+            
+            if not course:
+                # 课程不存在，自动创建
+                course = auto_create_or_update_course(course_name, request.user)
+                if not course:
+                    return JsonResponse({"success": False, "message": "创建课程失败"})
+            
+            # 更新课程类型
+            old_type = course.course_type
+            course.course_type = course_type
+            course.save()
+            
+            logger.info(f"更新课程类型: {course.name} ({old_type} -> {course_type})")
+            
+            return JsonResponse({
+                "success": True,
+                "message": "课程类型已更新",
+                "course": {
+                    "id": course.id,
+                    "name": course.name,
+                    "course_type": course.course_type,
+                    "course_type_display": course.get_course_type_display(),
+                    "old_type": old_type,
+                }
+            })
+        except Exception as e:
+            logger.error(f"更新课程类型失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return JsonResponse({"success": False, "message": str(e)})
+    except Exception as e:
+        logger.error(f"更新课程类型API异常: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return JsonResponse({"success": False, "message": str(e)})
+
+
+@login_required
+@require_http_methods(["GET"])
+def get_homework_info_api(request):
+    """获取作业信息API"""
+    try:
+        course_name = request.GET.get("course_name")
+        homework_folder = request.GET.get("homework_folder")
+        
+        if not course_name or not homework_folder:
+            return JsonResponse({"success": False, "message": "缺少必要参数"})
+        
+        try:
+            from grading.models import Homework
+            homework = Homework.objects.filter(
+                course__name=course_name,
+                folder_name=homework_folder
+            ).first()
+            
+            if not homework:
+                return JsonResponse({"success": False, "message": "作业不存在"})
+            
+            return JsonResponse({
+                "success": True,
+                "homework": {
+                    "id": homework.id,
+                    "title": homework.title,
+                    "homework_type": homework.homework_type,
+                    "homework_type_display": homework.get_homework_type_display(),
+                    "folder_name": homework.folder_name,
+                    "description": homework.description,
+                    "due_date": homework.due_date.isoformat() if homework.due_date else None,
+                    "is_lab_report": homework.is_lab_report(),
+                }
+            })
+        except Exception as e:
+            logger.error(f"查询作业信息失败: {e}")
+            return JsonResponse({"success": False, "message": str(e)})
+    except Exception as e:
+        logger.error(f"获取作业信息API异常: {e}")
+        return JsonResponse({"success": False, "message": str(e)})
+
+
 @login_required
 def get_courses_list_view(request):
     """获取仓库下的课程列表（第一级目录）
@@ -986,7 +1510,7 @@ def get_directory_tree_view(request):
             except Repository.DoesNotExist:
                 return JsonResponse({"children": []}, safe=False)
 
-        data = get_directory_tree(rel_path, base_dir=base_dir)
+        data = get_directory_tree(rel_path, base_dir=base_dir, course_name=course)
         # 转换为前端模板期望的格式（包含children属性）
         return JsonResponse({"children": data}, safe=False)
     except Exception as e:
@@ -1016,12 +1540,15 @@ def get_file_grade_info(full_path):
 
                 # 首先检查表格中是否有评分
                 for table in doc.tables:
-                    for row in table.rows:
-                        for i, cell in enumerate(row.cells):
-                            if "评定分数" in cell.text:
+                    for row_idx, row in enumerate(table.rows):
+                        for col_idx, cell in enumerate(row.cells):
+                            cell_text = cell.text.strip()
+                            
+                            # 检查"评定分数"（旧格式）
+                            if "评定分数" in cell_text:
                                 # 检查下一个单元格是否有评分
-                                if i + 1 < len(row.cells):
-                                    next_cell = row.cells[i + 1]
+                                if col_idx + 1 < len(row.cells):
+                                    next_cell = row.cells[col_idx + 1]
                                     if next_cell.text.strip():
                                         grade_info["has_grade"] = True
                                         grade_info["grade"] = next_cell.text.strip()
@@ -1044,6 +1571,32 @@ def get_file_grade_info(full_path):
                                         ]:
                                             grade_info["grade_type"] = "text"
                                         break
+                            
+                            # 检查"教师（签字）"（实验报告格式）
+                            elif "教师（签字）" in cell_text or "教师(签字)" in cell_text:
+                                # 从单元格文本中提取评分
+                                # 格式：第一行是评分，第二行是评价
+                                lines = cell_text.split('\n')
+                                if lines:
+                                    first_line = lines[0].strip()
+                                    # 检查第一行是否是有效的评分
+                                    if first_line in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
+                                        grade_info["has_grade"] = True
+                                        grade_info["grade"] = first_line
+                                        grade_info["in_table"] = True
+                                        # 判断评分类型
+                                        if first_line in ["A", "B", "C", "D", "E"]:
+                                            grade_info["grade_type"] = "letter"
+                                        elif first_line in ["优秀", "良好", "中等", "及格", "不及格"]:
+                                            grade_info["grade_type"] = "text"
+                                        # 提取评价（如果有）
+                                        if len(lines) > 1:
+                                            comment_line = lines[1].strip()
+                                            # 确保不是"教师（签字）"这样的文本
+                                            if comment_line and "教师" not in comment_line and "签字" not in comment_line:
+                                                grade_info["comment"] = comment_line
+                                        break
+                        
                         if grade_info["has_grade"]:
                             break
                     if grade_info["has_grade"]:
@@ -1832,23 +2385,38 @@ def add_grade_to_file(request):
 
     # 获取请求参数
     grade = request.POST.get("grade")
+    course = request.POST.get("course", "").strip()
     is_lab_report = request.POST.get("is_lab_report", "false").lower() == "true"
     
     if not grade:
         logger.error("未提供评分")
         return create_error_response("未提供评分")
 
-    logger.info(f"请求添加评分到文件，路径: {request.POST.get('path')}, 评分: {grade}, 实验报告: {is_lab_report}")
-
     # 使用统一函数添加评分
     try:
         full_path = request.validated_file_path
         base_dir = get_base_directory()
-        write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir, is_lab_report=is_lab_report)
+        
+        # 如果没有明确指定is_lab_report，则自动判断
+        # 优先从文件路径判断（会查询数据库中的作业类型）
+        if not is_lab_report:
+            is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+            logger.info(f"自动判断文件类型: is_lab_report={is_lab_report}")
+        
+        logger.info(f"请求添加评分到文件，路径: {request.POST.get('path')}, 评分: {grade}, 课程: {course}, 实验报告: {is_lab_report}")
+        
+        warning = write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir, is_lab_report=is_lab_report)
         logger.info(f"成功添加评分: {full_path}")
 
         file_type = get_file_extension(full_path)
-        return create_success_response(data={"file_type": file_type}, message="评分已添加")
+        response_data = {"file_type": file_type}
+        
+        # 如果有警告信息，添加到响应中
+        if warning:
+            response_data["warning"] = warning
+            return create_success_response(data=response_data, message=f"评分已添加（警告：{warning}）")
+        
+        return create_success_response(data=response_data, message="评分已添加")
     except Exception as e:
         logger.error(f"添加评分失败: {str(e)}")
         return create_error_response(f"添加评分失败: {str(e)}")
@@ -1928,39 +2496,102 @@ def save_grade(request):
         return JsonResponse({"status": "error", "message": str(e)})
 
 
-@login_required
-@require_http_methods(["POST"])
+def clear_lab_report_grade_and_comment(doc):
+    """
+    清除实验报告表格中的评分和评价
+    查找包含"教师（签字）："的单元格，清空评分和评价，保留"教师（签字）"文本
+    
+    Args:
+        doc: Document对象
+    
+    Returns:
+        bool: 是否成功清除
+    """
+    try:
+        from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        logger.info(f"=== 开始清除实验报告评分和评价 ===")
+        
+        # 遍历所有表格
+        for table_idx, table in enumerate(doc.tables):
+            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
+            for row_idx, row in enumerate(table.rows):
+                for col_idx, cell in enumerate(row.cells):
+                    cell_text = cell.text.strip()
+                    
+                    # 查找包含"教师（签字）："的单元格
+                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
+                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
+                        logger.info(f"原始内容: '{cell_text}'")
+                        
+                        # 提取并保留"教师（签字）："文本
+                        teacher_signature_text = ""
+                        for line in cell_text.split('\n'):
+                            if '教师（签字）' in line or '教师(签字)' in line:
+                                teacher_signature_text = line
+                                logger.info(f"保留教师签字文本: '{teacher_signature_text}'")
+                                break
+                        
+                        # 清空单元格
+                        for paragraph in cell.paragraphs:
+                            paragraph.clear()
+                        while len(cell.paragraphs) > 1:
+                            p = cell.paragraphs[-1]._element
+                            p.getparent().remove(p)
+                        
+                        # 只写入"教师（签字）"文本
+                        if teacher_signature_text:
+                            p = cell.paragraphs[0]
+                            run = p.add_run(teacher_signature_text)
+                            run.font.size = Pt(10)
+                            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            logger.info(f"已恢复教师签字文本: '{teacher_signature_text}'")
+                        
+                        logger.info(f"*** 成功清除评分和评价")
+                        return True
+        
+        logger.warning("*** 未找到'教师（签字）'单元格")
+        return False
+        
+    except Exception as e:
+        logger.error(f"清除实验报告评分和评价失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+@csrf_exempt
 def remove_grade(request):
     """删除文件中的评分"""
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "message": "不支持的请求方法"})
+    
     try:
         logger.info("开始处理删除评分请求")
 
-        # 检查用户权限
-        if not request.user.is_authenticated:
-            logger.error("用户未认证")
-            return JsonResponse({"status": "error", "message": "请先登录"}, status=403)
-
-        if not request.user.is_staff:
-            logger.error("用户无权限")
-            return JsonResponse({"status": "error", "message": "无权限访问"}, status=403)
-
         # 获取文件路径
         path = request.POST.get("path")
+        repo_id = request.POST.get("repo_id")
+        course = request.POST.get("course", "").strip()
+        
         if not path:
             logger.error("未提供文件路径")
             return JsonResponse({"status": "error", "message": "未提供文件路径"})
 
-        logger.info(f"请求删除评分，路径: {path}")
+        logger.info(f"请求删除评分，路径: {path}, repo_id: {repo_id}, course: {course}")
 
-        # 从全局配置获取仓库基础目录
-        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
-        if not repo_base_dir:
-            logger.error("未配置仓库基础目录")
-            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
-
-        # 展开路径中的用户目录符号（~）
-        base_dir = os.path.expanduser(repo_base_dir)
-        full_path = os.path.join(base_dir, path)
+        # 验证文件路径
+        is_valid, full_path, error_msg = validate_file_path(
+            path,
+            request=request,
+            repo_id=repo_id,
+            course=course
+        )
+        
+        if not is_valid:
+            logger.error(f"文件路径验证失败: {error_msg}")
+            return JsonResponse({"status": "error", "message": error_msg})
 
         logger.info(f"尝试修改文件: {full_path}")
 
@@ -1974,50 +2605,79 @@ def remove_grade(request):
             logger.error(f"无权限修改文件: {full_path}")
             return JsonResponse({"status": "error", "message": "无权限修改文件"})
 
+        # 从文件路径自动判断作业类型（会查询数据库中的作业批次类型）
+        base_dir = get_base_directory(request)
+        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        
+        logger.info(f"文件类型判断: 实验报告={is_lab_report}")
+
         # 获取文件扩展名
         _, ext = os.path.splitext(full_path)
         ext = ext.lower()
 
         # 根据文件类型处理
         if ext == ".docx":
-            # 对于 Word 文档，使用 python-docx 删除评分
+            # 对于 Word 文档，使用 python-docx 删除评分和评价
             try:
                 doc = Document(full_path)
 
-                # 查找并删除所有评分段落
-                paragraphs_to_remove = []
-                for i, paragraph in enumerate(doc.paragraphs):
-                    text = paragraph.text.strip()
-                    if text.startswith(("老师评分：", "评定分数：")):
-                        paragraphs_to_remove.append(i)
-                        logger.info(f"找到评分段落 {i+1}: '{text}'")
+                if is_lab_report:
+                    # 实验报告：清除表格中的评分和评价
+                    logger.info("处理实验报告格式...")
+                    success = clear_lab_report_grade_and_comment(doc)
+                    
+                    if success:
+                        doc.save(full_path)
+                        logger.info(f"成功清除实验报告的评分和评价: {full_path}")
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "message": "已清除实验报告的评分和评价",
+                                "file_type": "docx",
+                            }
+                        )
+                    else:
+                        logger.warning("未找到实验报告格式，尝试普通格式...")
+                        # 如果实验报告格式处理失败，尝试普通格式
+                        is_lab_report = False
 
-                if paragraphs_to_remove:
-                    # 从后往前删除，避免索引变化
-                    for i in reversed(paragraphs_to_remove):
-                        doc._body._body.remove(doc.paragraphs[i]._p)
+                if not is_lab_report:
+                    # 普通作业：删除评分和评价段落
+                    logger.info("处理普通作业格式...")
+                    paragraphs_to_remove = []
+                    for i, paragraph in enumerate(doc.paragraphs):
+                        text = paragraph.text.strip()
+                        # 删除评分和评价
+                        if text.startswith(("老师评分：", "评定分数：", "教师评价：", "教师评语：", "评价：", "评语：")):
+                            paragraphs_to_remove.append(i)
+                            logger.info(f"找到评分/评价段落 {i+1}: '{text}'")
 
-                    # 保存文档
-                    doc.save(full_path)
-                    logger.info(
-                        f"成功删除 Word 文档中的 {len(paragraphs_to_remove)} 个评分段落: {full_path}"
-                    )
-                    return JsonResponse(
-                        {
-                            "status": "success",
-                            "message": f"已删除 {len(paragraphs_to_remove)} 个评分",
-                            "file_type": "docx",
-                        }
-                    )
-                else:
-                    logger.info(f"Word 文档中没有找到评分: {full_path}")
-                    return JsonResponse(
-                        {
-                            "status": "success",
-                            "message": "文件中没有找到评分",
-                            "file_type": "docx",
-                        }
-                    )
+                    if paragraphs_to_remove:
+                        # 从后往前删除，避免索引变化
+                        for i in reversed(paragraphs_to_remove):
+                            doc._body._body.remove(doc.paragraphs[i]._p)
+
+                        # 保存文档
+                        doc.save(full_path)
+                        logger.info(
+                            f"成功删除 Word 文档中的 {len(paragraphs_to_remove)} 个评分/评价段落: {full_path}"
+                        )
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "message": f"已删除 {len(paragraphs_to_remove)} 个评分/评价",
+                                "file_type": "docx",
+                            }
+                        )
+                    else:
+                        logger.info(f"Word 文档中没有找到评分或评价: {full_path}")
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "message": "文件中没有找到评分或评价",
+                                "file_type": "docx",
+                            }
+                        )
             except Exception as e:
                 logger.error(f"删除 Word 文档中的评分失败: {str(e)}")
                 return JsonResponse(
@@ -2032,16 +2692,28 @@ def remove_grade(request):
                 with open(full_path, "r+", encoding="utf-8") as f:
                     lines = f.readlines()
 
-                    # 查找并删除所有评分行
+                    # 查找并删除所有评分和评价行
                     lines_to_keep = []
                     removed_count = 0
+                    skip_next = False  # 用于跳过多行评价
+                    
                     for i, line in enumerate(lines):
                         line_text = line.strip()
-                        if line_text.startswith(("老师评分：", "评定分数：")):
-                            logger.info(f"找到评分行 {i+1}: '{line_text}'")
+                        
+                        # 检查是否是评分或评价的开始
+                        if line_text.startswith(("老师评分：", "评定分数：", "教师评价：", "教师评语：", "评价：", "评语：")):
+                            logger.info(f"找到评分/评价行 {i+1}: '{line_text}'")
                             removed_count += 1
+                            
+                            # 如果是评价开始，可能有多行，标记跳过后续空行
+                            if line_text.startswith(("教师评价：", "教师评语：", "评价：", "评语：")):
+                                skip_next = True
+                        elif skip_next and not line_text:
+                            # 跳过评价后的空行
+                            skip_next = False
                         else:
                             lines_to_keep.append(line)
+                            skip_next = False
 
                     if removed_count > 0:
                         # 移动到文件开头并截断
@@ -2050,20 +2722,20 @@ def remove_grade(request):
                         # 写入剩余内容
                         f.writelines(lines_to_keep)
 
-                        logger.info(f"成功删除文件中的 {removed_count} 个评分: {full_path}")
+                        logger.info(f"成功删除文件中的 {removed_count} 个评分/评价: {full_path}")
                         return JsonResponse(
                             {
                                 "status": "success",
-                                "message": f"已删除 {removed_count} 个评分",
+                                "message": f"已删除 {removed_count} 个评分/评价",
                                 "file_type": "text",
                             }
                         )
                     else:
-                        logger.info(f"文件中没有找到评分: {full_path}")
+                        logger.info(f"文件中没有找到评分或评价: {full_path}")
                         return JsonResponse(
                             {
                                 "status": "success",
-                                "message": "文件中没有找到评分",
+                                "message": "文件中没有找到评分或评价",
                                 "file_type": "text",
                             }
                         )
@@ -2078,25 +2750,71 @@ def remove_grade(request):
         return JsonResponse({"status": "error", "message": str(e)})
 
 
-@login_required
-@require_http_methods(["POST"])
-@require_staff_user
-@validate_file_operation(file_path_param="file_path", require_write=True)
+@csrf_exempt
 def save_teacher_comment(request):
     """保存教师评价到文件末尾"""
     logger.info("开始处理保存教师评价请求")
 
     # 获取请求参数
+    file_path = request.POST.get("file_path")
     comment = request.POST.get("comment")
+    repo_id = request.POST.get("repo_id")
+    course = request.POST.get("course", "").strip()
+    
+    if not file_path:
+        return create_error_response("未提供文件路径", response_format="success")
+    
     if not comment:
         logger.error("未提供评价内容")
         return create_error_response("缺少必要参数", response_format="success")
-
-    logger.info(f"请求保存教师评价，路径: {request.POST.get('file_path')}, 评价: {comment}")
+    
+    logger.info(f"保存教师评价请求: file_path={file_path}, repo_id={repo_id}, course={course}")
+    
+    # 验证文件路径
+    is_valid, full_path, error_msg = validate_file_path(
+        file_path,
+        request=request,
+        repo_id=repo_id,
+        course=course
+    )
+    
+    if not is_valid:
+        logger.error(f"文件路径验证失败: {error_msg}")
+        return create_error_response(error_msg, response_format="success")
+    
+    # 验证写入权限
+    is_valid, error_msg = validate_file_write_permission(full_path)
+    if not is_valid:
+        logger.error(f"文件写入权限验证失败: {error_msg}")
+        return create_error_response(error_msg, response_format="success")
+    
+    logger.info(f"验证通过，完整路径: {full_path}")
 
     # 使用统一函数保存评价
     try:
-        full_path = request.validated_file_path
+        
+        # 从文件路径自动判断作业类型（会查询数据库中的作业批次类型）
+        base_dir = get_base_directory(request)
+        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        
+        logger.info(f"请求保存教师评价，路径: {full_path}, 评价: {comment}, 课程: {course}, 实验报告: {is_lab_report}")
+        
+        # 获取文件扩展名
+        _, ext = os.path.splitext(full_path)
+        
+        # 如果是Word文档的实验报告，需要特殊处理
+        if is_lab_report and ext.lower() == ".docx":
+            doc = Document(full_path)
+            success = update_lab_report_comment(doc, comment)
+            if success:
+                doc.save(full_path)
+                logger.info(f"成功更新实验报告评价: {full_path}")
+                return create_success_response(message="教师评价已保存", response_format="success")
+            else:
+                logger.warning("实验报告格式更新失败，回退到普通格式")
+        
+        # 普通作业或实验报告格式更新失败时的处理
+        # 注意：这里不传递is_lab_report，让函数自己判断
         write_grade_and_comment_to_file(full_path, comment=comment)
         logger.info(f"成功保存教师评价: {full_path}")
         return create_success_response(message="教师评价已保存", response_format="success")
@@ -2170,15 +2888,63 @@ def get_file_grade_info_api(request):
         return JsonResponse({"has_grade": False, "error": str(e)}, status=500)
 
 
-@login_required
-@require_http_methods(["GET"])
-@require_staff_user
-@validate_file_operation(file_path_param="file_path", require_write=False)
+@csrf_exempt
 def get_teacher_comment(request):
     """从文件中获取教师评价"""
     try:
-        full_path = request.validated_file_path
-        logger.info(f"尝试读取文件: {full_path}")
+        # 获取参数
+        file_path = request.GET.get("file_path")
+        repo_id = request.GET.get("repo_id")
+        course = request.GET.get("course", "").strip()
+        
+        if not file_path:
+            return JsonResponse({"success": False, "message": "未提供文件路径"})
+        
+        logger.info(f"获取教师评价请求: file_path={file_path}, repo_id={repo_id}, course={course}")
+        
+        # 如果没有提供repo_id，尝试从用户的所有仓库中查找文件
+        if not repo_id:
+            logger.info("未提供repo_id，尝试从所有仓库中查找文件")
+            user_repos = Repository.objects.filter(owner=request.user, is_active=True)
+            
+            for repo in user_repos:
+                # 尝试不同的路径组合
+                possible_paths = [
+                    os.path.join(repo.get_full_path(), file_path),  # 直接拼接
+                ]
+                
+                # 如果file_path包含课程目录，也尝试提取课程名称
+                path_parts = file_path.split(os.sep)
+                if len(path_parts) >= 2:
+                    possible_course = path_parts[0]
+                    remaining_path = os.sep.join(path_parts[1:])
+                    possible_paths.append(os.path.join(repo.get_full_path(), possible_course, remaining_path))
+                
+                for test_path in possible_paths:
+                    if os.path.exists(test_path) and os.path.isfile(test_path):
+                        full_path = test_path
+                        logger.info(f"在仓库 {repo.name} 中找到文件: {full_path}")
+                        break
+                else:
+                    continue
+                break
+            else:
+                logger.error(f"在所有仓库中都未找到文件: {file_path}")
+                return JsonResponse({"success": False, "message": "文件不存在"})
+        else:
+            # 验证文件路径
+            is_valid, full_path, error_msg = validate_file_path(
+                file_path,
+                request=request,
+                repo_id=repo_id,
+                course=course
+            )
+            
+            if not is_valid:
+                logger.error(f"文件路径验证失败: {error_msg}")
+                return JsonResponse({"success": False, "message": error_msg})
+        
+        logger.info(f"验证通过，完整路径: {full_path}")
 
         # 获取文件扩展名
         _, ext = os.path.splitext(full_path)
@@ -2194,38 +2960,78 @@ def get_teacher_comment(request):
                 teacher_comment = None
                 found_comment = False
 
-                logger.info(f"开始分析文档段落，共 {len(doc.paragraphs)} 个段落")
+                logger.info(f"开始分析文档，共 {len(doc.tables)} 个表格，{len(doc.paragraphs)} 个段落")
 
-                for i, paragraph in enumerate(doc.paragraphs):
-                    text = paragraph.text.strip()
-                    logger.info(f"段落 {i+1}: '{text}'")
-
-                    # 优先查找以"评价："开头的段落（这是write_grade_and_comment_to_file写入的格式）
-                    if text.startswith("评价："):
-                        logger.info(f"找到标准格式评价内容: '{text}'")
-                        # 提取冒号后的内容
-                        teacher_comment = text[3:].strip()  # 去掉"评价："前缀
-                        found_comment = True
+                # 首先检查表格中的"教师（签字）"单元格（实验报告格式）
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            cell_text = cell.text.strip()
+                            # 查找包含"教师（签字）"的单元格
+                            if "教师（签字）" in cell_text or "教师(签字)" in cell_text:
+                                logger.info(f"找到'教师（签字）'单元格，内容: '{cell_text}'")
+                                # 从单元格文本中提取评价（第二行）
+                                lines = cell_text.split('\n')
+                                if len(lines) >= 2:
+                                    # 第一行是评分，第二行是评价
+                                    first_line = lines[0].strip()
+                                    second_line = lines[1].strip()
+                                    
+                                    # 检查第一行是否是有效的评分
+                                    if first_line in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
+                                        # 确保第二行不是"教师（签字）"这样的文本
+                                        if second_line and "教师" not in second_line and "签字" not in second_line:
+                                            teacher_comment = second_line
+                                            found_comment = True
+                                            logger.info(f"从表格中提取评价: '{teacher_comment}'")
+                                            break
+                        if found_comment:
+                            break
+                    if found_comment:
                         break
-                    # 查找包含评价关键词的段落
-                    elif (
-                        text and not text.startswith("老师评分") and not text.startswith("评定分数")
-                    ):
-                        if any(
-                            keyword in text for keyword in ["评价", "评语", "AI评价", "教师评价"]
-                        ):
-                            logger.info(f"找到评价内容: '{text}'")
-                            teacher_comment = text
+
+                # 如果表格中没有找到，检查段落中的评价
+                if not found_comment:
+                    logger.info("表格中未找到评价，开始检查段落")
+                    
+                    # 先查找所有段落，收集可能的评价
+                    possible_comments = []
+                    
+                    for i, paragraph in enumerate(doc.paragraphs):
+                        text = paragraph.text.strip()
+                        if not text:
+                            continue
+                        
+                        logger.info(f"段落 {i+1}: '{text[:50]}...'")
+
+                        # 优先查找以"评价："开头的段落（最高优先级）
+                        if text.startswith("评价："):
+                            teacher_comment = text[3:].strip()  # 去掉"评价："前缀
                             found_comment = True
+                            logger.info(f"找到标准格式评价: '{teacher_comment}'")
                             break
-                        # 如果段落内容较长且不是评分，可能是评价内容
-                        elif len(text) > 10 and not any(
-                            keyword in text for keyword in ["分数", "评分", "等级"]
+                        
+                        # 跳过评分行
+                        if text.startswith(("老师评分：", "评定分数：")):
+                            continue
+                        
+                        # 跳过只包含评分等级的行
+                        if text in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
+                            continue
+                        
+                        # 收集可能的评价（长度大于10且不包含评分关键词）
+                        if len(text) > 10 and not any(
+                            keyword in text for keyword in ["分数", "评分", "等级", "签字", "时间"]
                         ):
-                            logger.info(f"找到可能的评价内容: '{text}'")
-                            teacher_comment = text
-                            found_comment = True
-                            break
+                            possible_comments.append(text)
+                            logger.info(f"收集可能的评价: '{text[:50]}...'")
+                    
+                    # 如果没有找到标准格式的评价，使用第一个可能的评价
+                    if not found_comment and possible_comments:
+                        teacher_comment = possible_comments[0]
+                        found_comment = True
+                        logger.info(f"使用第一个可能的评价: '{teacher_comment[:50]}...'")
+
 
                 if not found_comment:
                     logger.info("没有找到评价内容")
@@ -2748,8 +3554,13 @@ def _perform_ai_scoring_for_file(full_path, base_dir, user=None):
         logger.info(f"转换后的等级: {grade} (评分类型: {grade_config.grade_type})")
 
         logger.info("开始写入AI评价和评分到文件...")
+        
+        # 判断是否是实验报告（从文件路径中提取课程名称）
+        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        logger.info(f"判定为实验报告: {is_lab_report}")
+        
         # 使用统一函数写入AI评价和评分
-        write_grade_and_comment_to_file(full_path, grade=grade, comment=comment, base_dir=base_dir)
+        write_grade_and_comment_to_file(full_path, grade=grade, comment=comment, base_dir=base_dir, is_lab_report=is_lab_report)
         logger.info("AI评价和评分已写入文件")
 
         # 如果是第一次评分，锁定评分类型
@@ -3211,10 +4022,118 @@ def generate_random_comment(grade):
     return random.choice(comments)
 
 
+def update_lab_report_comment(doc, comment):
+    """
+    更新实验报告表格中的评价（保留评分）
+    查找包含"教师（签字）："的单元格，只更新第二行的评价内容
+    
+    Args:
+        doc: Document对象
+        comment: 新的评价内容
+    
+    Returns:
+        bool: 是否成功更新
+    """
+    try:
+        from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        logger.info(f"=== 开始更新实验报告评价 ===")
+        logger.info(f"新评价: {comment}")
+        
+        # 遍历所有表格
+        for table_idx, table in enumerate(doc.tables):
+            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
+            for row_idx, row in enumerate(table.rows):
+                for col_idx, cell in enumerate(row.cells):
+                    cell_text = cell.text.strip()
+                    
+                    # 查找包含"教师（签字）："的单元格
+                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
+                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
+                        logger.info(f"原始内容: '{cell_text}'")
+                        
+                        # 提取现有的评分和教师签字文本
+                        lines = cell_text.split('\n')
+                        existing_grade = None
+                        teacher_signature_text = ""
+                        
+                        if lines:
+                            first_line = lines[0].strip()
+                            # 检查第一行是否是有效的评分
+                            if first_line in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
+                                existing_grade = first_line
+                                logger.info(f"保留现有评分: {existing_grade}")
+                            
+                            # 查找并保留"教师（签字）"文本
+                            for line in lines:
+                                if '教师（签字）' in line or '教师(签字)' in line:
+                                    teacher_signature_text = line
+                                    logger.info(f"保留教师签字文本: '{teacher_signature_text}'")
+                                    break
+                        
+                        if not existing_grade:
+                            logger.warning("未找到现有评分，无法更新评价")
+                            return False
+                        
+                        # 清空单元格
+                        for paragraph in cell.paragraphs:
+                            paragraph.clear()
+                        while len(cell.paragraphs) > 1:
+                            p = cell.paragraphs[-1]._element
+                            p.getparent().remove(p)
+                        
+                        # 重新写入内容
+                        # 第一行：保留原有评分
+                        p1 = cell.paragraphs[0]
+                        run1 = p1.add_run(existing_grade)
+                        run1.font.size = Pt(14)
+                        run1.bold = True
+                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        logger.info(f"评分已写入: {existing_grade}")
+                        
+                        # 第二行：新的评价
+                        p2 = cell.add_paragraph()
+                        run2 = p2.add_run(comment)
+                        run2.font.size = Pt(11)
+                        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        logger.info(f"新评价已写入: {comment}")
+                        
+                        # 第三行：保留教师签字文本
+                        if teacher_signature_text:
+                            p3 = cell.add_paragraph()
+                            run3 = p3.add_run(teacher_signature_text)
+                            run3.font.size = Pt(10)
+                            p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            logger.info(f"教师签字文本已写入: '{teacher_signature_text}'")
+                        
+                        logger.info(f"*** 成功更新评价")
+                        return True
+        
+        logger.warning("*** 未找到'教师（签字）'单元格")
+        return False
+        
+    except Exception as e:
+        logger.error(f"更新实验报告评价失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
 def write_grade_to_lab_report(doc, grade, comment=None):
     """
     将评分写入实验报告的表格中
-    在"成绩评定"单元格旁边找到"教师"，在其上方填写成绩，然后换行写评价
+    查找包含"教师（签字）："的单元格，清空其内容后写入评分和评价
+    
+    实验报告表格结构：
+    | 教师（签字）：时间： 年 月 日 |  <- 在这里写入评分和评价（可能是合并单元格）
+    | 成绩评定                      |
+    
+    写入格式：
+    第一行：评分（如"A"）
+    第二行：评价（如"作业完成得非常出色..."）
+    
+    注意：单元格可能是合并单元格，需要正确处理
     
     Args:
         doc: Document对象
@@ -3240,112 +4159,87 @@ def write_grade_to_lab_report(doc, grade, comment=None):
         for table_idx, table in enumerate(doc.tables):
             logger.info(f"检查表格 {table_idx + 1}, 行数: {len(table.rows)}, 列数: {len(table.columns)}")
             
-            # 遍历表格的所有行和单元格
+            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
             for row_idx, row in enumerate(table.rows):
                 logger.info(f"  检查行 {row_idx + 1}, 单元格数: {len(row.cells)}")
                 
-                # 首先检查这一行是否包含"成绩评定"
-                has_grade_cell = False
-                grade_cell = None
-                
-                for cell in row.cells:
-                    if '成绩评定' in cell.text.strip():
-                        has_grade_cell = True
-                        grade_cell = cell
-                        break
-                
-                if not has_grade_cell:
-                    # 这一行不包含"成绩评定"，跳过
-                    for cell_idx, cell in enumerate(row.cells):
-                        cell_text = cell.text.strip()
-                        logger.info(f"    单元格 [{row_idx + 1}, {cell_idx + 1}]: '{cell_text}'")
-                    continue
-                
-                # 找到了包含"成绩评定"的行
-                logger.info(f"*** 找到包含'成绩评定'的行: 行{row_idx + 1}")
-                logger.info(f"      开始查找包含'教师'的单元格...")
-                logger.info(f"      当前行共有 {len(row.cells)} 个单元格")
-                
-                # 输出所有单元格内容
-                for cell_idx, cell in enumerate(row.cells):
+                for col_idx, cell in enumerate(row.cells):
                     cell_text = cell.text.strip()
-                    logger.info(f"    单元格 [{row_idx + 1}, {cell_idx + 1}]: '{cell_text}'")
-                
-                # 在同一行中查找包含"教师"的单元格
-                target_cell = None
-                target_cell_idx = None
-                
-                # 遍历同一行的所有单元格
-                for search_idx, search_cell in enumerate(row.cells):
-                    # 跳过"成绩评定"单元格本身
-                    if id(search_cell) == id(grade_cell):
-                        logger.info(f"      跳过'成绩评定'单元格 [{row_idx + 1}, {search_idx + 1}]")
-                        continue
+                    logger.info(f"    单元格 [{row_idx + 1}, {col_idx + 1}]: '{cell_text[:50]}...'")
                     
-                    search_cell_text = search_cell.text.strip()
-                    logger.info(f"      检查单元格 [{row_idx + 1}, {search_idx + 1}]: '{search_cell_text}'")
-                    logger.info(f"      '教师' in search_cell_text = {'教师' in search_cell_text}")
-                    
-                    if '教师' in search_cell_text:
-                        target_cell = search_cell
-                        target_cell_idx = search_idx
-                        logger.info(f"*** 找到'教师'单元格，位置: 行{row_idx + 1}, 列{target_cell_idx + 1}")
-                        break
-                
-                # 检查是否找到了目标单元格
-                if target_cell is not None:
-                            logger.info(f"原始内容: '{target_cell.text.strip()}'")
-                            logger.info(f"单元格段落数: {len(target_cell.paragraphs)}")
-                            
-                            # 保存原始的"教师（签字）：时间： 年 月 日"文本
-                            original_text = target_cell.text.strip()
-                            logger.info(f"保存的原始文本: '{original_text}'")
-                            
-                            # 清空单元格的所有段落
-                            logger.info("开始清空单元格段落...")
-                            for paragraph in target_cell.paragraphs:
-                                paragraph.clear()
-                            
-                            # 删除多余的段落，只保留一个
-                            logger.info(f"清空后段落数: {len(target_cell.paragraphs)}")
-                            while len(target_cell.paragraphs) > 1:
-                                p = target_cell.paragraphs[-1]._element
-                                p.getparent().remove(p)
-                            logger.info(f"删除多余段落后剩余: {len(target_cell.paragraphs)}")
-                            
-                            # 获取第一个段落
-                            p = target_cell.paragraphs[0]
-                            logger.info("准备写入成绩...")
-                            
-                            # 添加成绩（第一行，居中，加粗）
-                            run = p.add_run(grade)
-                            run.font.size = Pt(14)
-                            run.bold = True
-                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                            logger.info(f"成绩已写入: {grade}")
-                            
-                            # 添加新段落：评价
-                            logger.info("准备写入评价...")
-                            p2 = target_cell.add_paragraph()
-                            run2 = p2.add_run(comment)
-                            run2.font.size = Pt(11)
-                            p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            logger.info(f"评价已写入: {comment}")
-                            
-                            # 添加新段落：保留原始的"教师（签字）"文本
-                            logger.info("准备写入原始文本...")
-                            p3 = target_cell.add_paragraph()
-                            run3 = p3.add_run(original_text)
+                    # 查找包含"教师（签字）："或"教师（签字）"的单元格
+                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
+                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
+                        logger.info(f"原始内容: '{cell_text}'")
+                        logger.info(f"单元格段落数: {len(cell.paragraphs)}")
+                        
+                        # 提取并保留"教师（签字）："及其后面的内容
+                        teacher_signature_text = ""
+                        for paragraph in cell.paragraphs:
+                            para_text = paragraph.text
+                            if '教师（签字）' in para_text or '教师(签字)' in para_text:
+                                # 找到包含"教师（签字）"的段落，保留整个段落
+                                teacher_signature_text = para_text
+                                logger.info(f"保留的教师签字文本: '{teacher_signature_text}'")
+                                break
+                        
+                        # 如果没有找到，尝试从整个单元格文本中提取
+                        if not teacher_signature_text:
+                            # 查找"教师（签字）"的位置
+                            if '教师（签字）' in cell_text:
+                                idx = cell_text.find('教师（签字）')
+                                teacher_signature_text = cell_text[idx:]
+                            elif '教师(签字)' in cell_text:
+                                idx = cell_text.find('教师(签字)')
+                                teacher_signature_text = cell_text[idx:]
+                            logger.info(f"从单元格文本提取的教师签字: '{teacher_signature_text}'")
+                        
+                        # 清空单元格的所有段落内容
+                        logger.info("开始清空单元格段落...")
+                        for paragraph in cell.paragraphs:
+                            paragraph.clear()
+                        
+                        # 删除多余的段落，只保留一个
+                        logger.info(f"清空后段落数: {len(cell.paragraphs)}")
+                        while len(cell.paragraphs) > 1:
+                            p = cell.paragraphs[-1]._element
+                            p.getparent().remove(p)
+                        logger.info(f"删除多余段落后剩余: {len(cell.paragraphs)}")
+                        
+                        # 获取第一个段落，写入评分
+                        p1 = cell.paragraphs[0]
+                        logger.info("准备写入评分...")
+                        
+                        # 第一行：评分（居中显示）
+                        run1 = p1.add_run(grade)
+                        run1.font.size = Pt(14)
+                        run1.bold = True
+                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        logger.info(f"评分已写入: {grade}")
+                        
+                        # 第二行：评价（左对齐）
+                        logger.info("准备写入评价...")
+                        p2 = cell.add_paragraph()
+                        run2 = p2.add_run(comment)
+                        run2.font.size = Pt(11)
+                        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        logger.info(f"评价已写入: {comment}")
+                        
+                        # 第三行：保留原始的"教师（签字）"文本
+                        if teacher_signature_text:
+                            logger.info("准备写入教师签字文本...")
+                            p3 = cell.add_paragraph()
+                            run3 = p3.add_run(teacher_signature_text)
                             run3.font.size = Pt(10)
                             p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            logger.info(f"原始文本已写入: {original_text}")
-                            
-                            logger.info(f"*** 成功写入评分: {grade}, 评价: {comment}")
-                            logger.info(f"最终单元格段落数: {len(target_cell.paragraphs)}")
-                            logger.info(f"新内容: '{target_cell.text}'")
-                            return True
+                            logger.info(f"教师签字文本已写入: '{teacher_signature_text}'")
+                        
+                        logger.info(f"*** 成功写入评分: {grade}, 评价: {comment}")
+                        logger.info(f"最终单元格段落数: {len(cell.paragraphs)}")
+                        logger.info(f"新内容: '{cell.text}'")
+                        return True
         
-        logger.warning("*** 未找到'成绩评定'和'教师'单元格")
+        logger.warning("*** 未找到'教师（签字）'单元格")
         logger.warning("请检查实验报告格式是否正确")
         return False
         
@@ -3356,7 +4250,7 @@ def write_grade_to_lab_report(doc, grade, comment=None):
         return False
 
 
-def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_dir=None, is_lab_report=False):
+def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_dir=None, is_lab_report=None):
     """
     统一的函数：向文件写入评分和评价
     支持AI评分和人工评分，使用相同的逻辑
@@ -3371,56 +4265,71 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         grade: 评分（必须提供，如果为None则不写入评分）
         comment: 评价内容（可选）
         base_dir: 基础目录（用于Excel登记，可选）
-        is_lab_report: 是否为实验报告（实验报告有特殊的表格格式）
+        is_lab_report: 是否为实验报告（None表示自动判断，True/False表示明确指定）
     """
     _, ext = os.path.splitext(full_path)
+
+    # 如果没有明确指定is_lab_report，则自动判断
+    if is_lab_report is None:
+        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        logger.info(f"自动判断文件类型: is_lab_report={is_lab_report}")
 
     if ext.lower() == ".docx":
         # Word文档处理
         doc = Document(full_path)
         
         # 如果是实验报告，使用特殊的表格格式
+        format_warning = None
         if is_lab_report and grade:
             success = write_grade_to_lab_report(doc, grade, comment)
             if success:
                 doc.save(full_path)
                 logger.info(f"已写入实验报告: 评分={grade}, 评价={comment}")
-                return
+                return None  # 返回None表示没有警告
             else:
-                logger.warning("实验报告格式写入失败，回退到普通格式")
+                # 实验报告格式不正确，给C评分并提示
+                logger.warning("实验报告格式写入失败：未找到'教师（签字）'表格")
+                logger.warning("将给予C评分并提示学生按要求格式写实验报告")
+                format_warning = "实验报告格式不正确（未找到'教师（签字）'表格），已自动给予C评分"
+                grade = "C"
+                comment = "请按要求的格式写实验报告"
         
         # 普通作业或实验报告格式写入失败时的处理
-        # 首先删除所有现有的评分和评价段落
-        paragraphs_to_remove = []
-        for i, paragraph in enumerate(doc.paragraphs):
+        # 检查是否已有评分段落
+        has_existing_grade = False
+        for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
-            # 删除以评分关键词开头的段落
             if text.startswith(("老师评分：", "评定分数：")):
-                paragraphs_to_remove.append(i)
-            # 删除以评价关键词开头的段落
-            elif text.startswith(("教师评价：", "AI评价：", "评价：")):
-                paragraphs_to_remove.append(i)
-            # 删除包含评价关键词的段落
-            elif any(keyword in text for keyword in ["评价", "评语", "AI评价", "教师评价"]):
-                paragraphs_to_remove.append(i)
-            # 删除看起来像分隔符的段落
-            elif text.startswith("=") or text.startswith("-") or text.startswith("*"):
-                paragraphs_to_remove.append(i)
-
-        # 从后往前删除，避免索引变化
-        for i in reversed(paragraphs_to_remove):
-            doc._body._body.remove(doc.paragraphs[i]._p)
-
-        # 添加新的评价（如果有）
-        if comment:
-            doc.add_paragraph(f"评价：{comment}")
-
-        # 添加新的评分（如果有）
-        if grade:
+                has_existing_grade = True
+                # 更新现有评分段落的内容
+                paragraph.text = f"老师评分：{grade}" if grade else ""
+                logger.info(f"更新现有评分段落: {paragraph.text}")
+                break
+        
+        # 如果没有现有评分，添加新的
+        if not has_existing_grade and grade:
             doc.add_paragraph(f"老师评分：{grade}")
+            logger.info(f"添加新评分段落: 老师评分：{grade}")
+        
+        # 检查是否已有评价段落
+        has_existing_comment = False
+        if comment:
+            for paragraph in doc.paragraphs:
+                text = paragraph.text.strip()
+                if text.startswith(("教师评价：", "AI评价：", "评价：")):
+                    has_existing_comment = True
+                    # 更新现有评价段落的内容
+                    paragraph.text = f"教师评价：{comment}"
+                    logger.info(f"更新现有评价段落: {paragraph.text}")
+                    break
+            
+            # 如果没有现有评价，添加新的
+            if not has_existing_comment:
+                doc.add_paragraph(f"教师评价：{comment}")
+                logger.info(f"添加新评价段落: 教师评价：{comment}")
 
         doc.save(full_path)
-        logger.info(f"已写入Word文档: 评分={grade}, 评价={comment}")
+        logger.info(f"已写入Word文档: 评分={grade}, 评价={comment or '无'}")
 
     else:
         # 文本文件处理
@@ -3454,11 +4363,11 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
             # 写入过滤后的内容
             f.writelines(filtered_lines)
 
-            # 添加新的评价和评分（确保只有一个）
-            if comment:
-                f.write(f"\n评价：{comment}\n")
+            # 添加新的评分和评价（评分在前，评价在后）
             if grade:
                 f.write(f"\n老师评分：{grade}\n")
+            if comment:
+                f.write(f"\n教师评价：{comment}\n")
 
         logger.info(f"已写入文本文件: 评分={grade}, 评价={comment}")
 
@@ -3500,6 +4409,9 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         except Exception as e:
             logger.error(f"登记评分到Excel失败: {e}")
             # 即使登记失败，也应该认为评分本身是成功的，所以不抛出异常
+    
+    # 返回警告信息（如果有）
+    return format_warning if 'format_warning' in locals() else None
 
 
 def save_teacher_comment_logic(full_path, comment):
@@ -4789,3 +5701,109 @@ def test_clean(request):
 def debug_simple(request):
     """调试页面"""
     return render(request, "debug_simple.html")
+
+
+
+@csrf_exempt
+def get_homework_type_api(request):
+    """获取作业类型API"""
+    if request.method != "GET":
+        return JsonResponse({"success": False, "message": "不支持的请求方法"})
+    
+    try:
+        course_name = request.GET.get("course_name")
+        folder_name = request.GET.get("folder_name")
+        
+        if not course_name or not folder_name:
+            return JsonResponse({"success": False, "message": "缺少必要参数"})
+        
+        logger.info(f"获取作业类型: course={course_name}, folder={folder_name}")
+        
+        # 查找课程
+        try:
+            course = Course.objects.get(name=course_name)
+        except Course.DoesNotExist:
+            return JsonResponse({"success": False, "message": "课程不存在"})
+        
+        # 查找作业
+        try:
+            homework = Homework.objects.get(course=course, folder_name=folder_name)
+            return JsonResponse({
+                "success": True,
+                "homework_type": homework.homework_type,
+                "homework_type_display": homework.get_homework_type_display()
+            })
+        except Homework.DoesNotExist:
+            # 如果作业不存在，根据课程类型返回默认类型
+            # 实验课、实践课、理论+实验课默认为实验报告
+            default_type = "lab_report" if course.course_type in ["lab", "practice", "mixed"] else "normal"
+            default_display = "实验报告" if default_type == "lab_report" else "普通作业"
+            
+            return JsonResponse({
+                "success": True,
+                "homework_type": default_type,
+                "homework_type_display": default_display,
+                "auto_created": True
+            })
+    
+    except Exception as e:
+        logger.error(f"获取作业类型失败: {str(e)}\n{traceback.format_exc()}")
+        return JsonResponse({"success": False, "message": f"获取作业类型失败: {str(e)}"})
+
+
+@csrf_exempt
+def update_homework_type_api(request):
+    """更新作业类型API"""
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "不支持的请求方法"})
+    
+    try:
+        course_name = request.POST.get("course_name")
+        folder_name = request.POST.get("folder_name")
+        homework_type = request.POST.get("homework_type")
+        
+        if not course_name or not folder_name or not homework_type:
+            return JsonResponse({"success": False, "message": "缺少必要参数"})
+        
+        # 验证作业类型
+        valid_types = ["normal", "lab_report"]
+        if homework_type not in valid_types:
+            return JsonResponse({"success": False, "message": "无效的作业类型"})
+        
+        logger.info(f"更新作业类型: course={course_name}, folder={folder_name}, type={homework_type}")
+        
+        # 查找或创建课程
+        course, created = Course.objects.get_or_create(
+            name=course_name,
+            defaults={
+                "teacher": request.user if request.user.is_authenticated else None,
+                "course_type": "theory"
+            }
+        )
+        
+        # 查找或创建作业
+        homework, created = Homework.objects.update_or_create(
+            course=course,
+            folder_name=folder_name,
+            defaults={
+                "title": folder_name,
+                "homework_type": homework_type
+            }
+        )
+        
+        logger.info(f"作业类型已{'创建' if created else '更新'}: {homework}")
+        
+        return JsonResponse({
+            "success": True,
+            "message": "作业类型已保存",
+            "homework": {
+                "id": homework.id,
+                "title": homework.title,
+                "homework_type": homework.homework_type,
+                "homework_type_display": homework.get_homework_type_display()
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"更新作业类型失败: {str(e)}\n{traceback.format_exc()}")
+        return JsonResponse({"success": False, "message": f"更新作业类型失败: {str(e)}"})

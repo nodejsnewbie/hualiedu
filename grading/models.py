@@ -560,6 +560,13 @@ class SemesterTemplate(models.Model):
 class Course(models.Model):
     """课程模型"""
 
+    COURSE_TYPE_CHOICES = [
+        ("theory", "理论课"),
+        ("lab", "实验课"),
+        ("practice", "实践课"),
+        ("mixed", "理论+实验"),
+    ]
+
     semester = models.ForeignKey(
         Semester, on_delete=models.CASCADE, related_name="courses", help_text="所属学期"
     )
@@ -567,6 +574,12 @@ class Course(models.Model):
         "auth.User", on_delete=models.CASCADE, related_name="courses", help_text="授课教师"
     )
     name = models.CharField(max_length=200, help_text="课程名称")
+    course_type = models.CharField(
+        max_length=20,
+        choices=COURSE_TYPE_CHOICES,
+        default="theory",
+        help_text="课程类型"
+    )
     description = models.TextField(blank=True, help_text="课程描述")
     location = models.CharField(max_length=100, help_text="上课地点")
     class_name = models.CharField(
@@ -708,3 +721,48 @@ class CourseWeekSchedule(models.Model):
     def __str__(self):
         status = "上课" if self.is_active else "不上课"
         return f"{self.course_schedule} - 第{self.week_number}周({status})"
+
+
+class Homework(models.Model):
+    """作业模型 - 管理每次作业"""
+
+    HOMEWORK_TYPE_CHOICES = [
+        ("normal", "普通作业"),
+        ("lab_report", "实验报告"),
+    ]
+
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="homeworks",
+        help_text="所属课程"
+    )
+    title = models.CharField(max_length=200, help_text="作业标题")
+    homework_type = models.CharField(
+        max_length=20,
+        choices=HOMEWORK_TYPE_CHOICES,
+        default="normal",
+        help_text="作业类型"
+    )
+    description = models.TextField(blank=True, help_text="作业描述")
+    due_date = models.DateTimeField(null=True, blank=True, help_text="截止日期")
+    folder_name = models.CharField(
+        max_length=200,
+        help_text="作业文件夹名称（用于匹配文件系统中的目录）"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_homework"
+        verbose_name = "作业"
+        verbose_name_plural = "作业"
+        ordering = ["course", "-created_at"]
+        unique_together = ["course", "folder_name"]
+
+    def __str__(self):
+        return f"{self.course.name} - {self.title} ({self.get_homework_type_display()})"
+
+    def is_lab_report(self):
+        """判断是否为实验报告"""
+        return self.homework_type == "lab_report"

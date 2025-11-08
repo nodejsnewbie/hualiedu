@@ -12,6 +12,10 @@ let currentRepoId = null;  // 当前选择的仓库ID
 let currentCourse = null;  // 当前选择的课程
 let isLabCourse = false;  // 是否为实验课
 
+// 将关键变量暴露到window对象，供其他脚本使用
+window.currentCourse = null;
+window.currentRepoId = null;
+
 // 获取 CSRF Token
 window.getCSRFToken = function() {
   const name = 'csrftoken';
@@ -612,19 +616,46 @@ window.saveGrade = function(grade) {
     addGradeToFile(grade);
 }
 
-// 获取所有文件节点
+// 获取所有文件节点（按目录树顺序）
 window.getAllFileNodes = function() {
     const tree = $('#directory-tree').jstree(true);
-    const allNodes = tree.get_json('#', { flat: true });
-    return allNodes.filter(node => node.type === 'file');
+    const fileNodes = [];
+    
+    // 深度优先遍历树，按显示顺序收集文件节点
+    function traverseNode(nodeId) {
+        const node = tree.get_node(nodeId);
+        if (!node) return;
+        
+        // 如果是文件节点，添加到列表
+        if (node.type === 'file') {
+            fileNodes.push(node);
+            console.log('收集文件节点:', node.id, node.text);
+        }
+        
+        // 递归遍历子节点
+        if (node.children && node.children.length > 0) {
+            node.children.forEach(childId => {
+                traverseNode(childId);
+            });
+        }
+    }
+    
+    // 从根节点开始遍历
+    traverseNode('#');
+    
+    console.log('总共收集到', fileNodes.length, '个文件节点');
+    return fileNodes;
 }
 
 // 获取当前文件在文件列表中的索引
 window.getCurrentFileIndex = function() {
     const fileNodes = getAllFileNodes();
     const currentFile = $('#directory-tree').jstree('get_selected', true)[0];
+    console.log('当前选中的文件:', currentFile ? currentFile.id : 'none');
     if (!currentFile) return -1;
-    return fileNodes.findIndex(node => node.id === currentFile.id);
+    const index = fileNodes.findIndex(node => node.id === currentFile.id);
+    console.log('当前文件索引:', index);
+    return index;
 }
 
 // 导航到上一个文件
@@ -685,8 +716,7 @@ window.addGradeToFile = function(grade) {
     // 准备请求数据
     const requestData = {
         path: currentFilePath,
-        grade: grade,
-        is_lab_report: isLabCourse  // 传递是否为实验课
+        grade: grade
     };
     
     // 如果有当前仓库ID和课程，添加到请求中
@@ -698,7 +728,7 @@ window.addGradeToFile = function(grade) {
     }
     
     console.log('Adding grade with data:', requestData);
-    console.log('实验课模式:', isLabCourse);
+    console.log('后端将自动判断作业类型');
     
     $.ajax({
         url: '/grading/add_grade_to_file/',
@@ -710,9 +740,19 @@ window.addGradeToFile = function(grade) {
         success: function(response) {
             console.log('Grade added successfully:', response);
             if (response.status === 'success') {
+                // 检查是否有警告信息
+                let alertClass = 'alert-success';
+                let alertMessage = '评分已成功保存';
+                
+                if (response.data && response.data.warning) {
+                    alertClass = 'alert-warning';
+                    alertMessage = response.data.warning;
+                    console.warn('Warning:', response.data.warning);
+                }
+                
                 const alertHtml = `
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        评分已添加到文件末尾
+                    <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                        ${alertMessage}
                         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
                 `;
@@ -727,11 +767,13 @@ window.addGradeToFile = function(grade) {
                 // 自动导航到下一个文件
                 if (currentIndex < fileNodes.length - 1) {
                     const nextNode = fileNodes[currentIndex + 1];
-                    console.log('Navigating to next file:', nextNode.id);
+                    console.log('当前索引:', currentIndex);
+                    console.log('下一个文件节点:', nextNode.id, nextNode.text);
+                    console.log('下一个文件路径:', nextNode.data ? nextNode.data.path : 'undefined');
+                    
                     // 使用 jstree 的 select_node 方法选中下一个文件
+                    // 这会触发 select_node 事件，自动调用 loadFile
                     $('#directory-tree').jstree('select_node', nextNode.id);
-                    // 加载下一个文件的内容
-                    loadFile(nextNode.id);
                 } else {
                     console.log('Last file reached, reloading current file');
                     // 如果是最后一个文件，重新加载当前文件以显示新添加的评分
@@ -759,15 +801,29 @@ window.cancelGrade = function() {
     }
 
     showLoading();
+    
+    // 准备请求数据
+    const requestData = {
+        path: currentFilePath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('撤销评分请求数据:', requestData);
+    
     $.ajax({
         url: '/grading/remove_grade/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: currentFilePath
-        },
+        data: requestData,
         success: function(response) {
             if (response.status === 'success') {
                 // 恢复之前的评分状态
@@ -910,6 +966,12 @@ window.initTree = function() {
         $('#directory-tree').jstree(treeConfig)
             .on('ready.jstree', function() {
                 console.log('Tree initialized');
+                
+                // 为作业文件夹添加类型标签
+                if (typeof window.addHomeworkTypeLabels === 'function') {
+                    window.addHomeworkTypeLabels();
+                }
+                
                 // 树初始化完成后，如果有初始选中的节点，加载其内容
                 const selectedNodes = $('#directory-tree').jstree('get_selected');
                 if (selectedNodes.length > 0) {
@@ -1027,40 +1089,35 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
 
-    // 绑定评分按钮点击事件
-    $(document).on('click', '.grade-button', function() {
+    // 绑定评分按钮点击事件（使用事件委托，避免重复绑定）
+    $(document).off('click', '.grade-button').on('click', '.grade-button', function() {
         const grade = $(this).data('grade');
+        console.log('评分按钮被点击:', grade);
+        
         // 更新按钮状态
         $('.grade-button').removeClass('active');
         $(this).addClass('active');
         selectedGrade = grade;
+        
         // 立即保存评分并转到下一个文件
         addGradeToFile(grade);
     });
 
-    // 绑定确定按钮点击事件
-    $('#add-grade-to-file').click(function() {
+    // 绑定确定按钮点击事件（使用事件委托，避免重复绑定）
+    $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function() {
+        console.log('确定按钮被点击，当前选中评分:', selectedGrade);
+        
         if (!currentFilePath) {
             showError('请先选择要评分的文件');
             return;
         }
 
-        // 获取当前选中的评分
-        const activeButton = $('.grade-button.active');
-        if (activeButton.length === 0) {
+        if (!selectedGrade) {
             showError('请先选择评分');
             return;
         }
 
-        const grade = activeButton.data('grade');
         // 保存评分并转到下一个文件
-        addGradeToFile(grade);
-    });
-
-    // 绑定确定按钮点击事件
-    $(document).on('click', '#add-grade-to-file', function() {
-        console.log('Confirm button clicked, using selected grade:', selectedGrade);
-        // 使用当前选中的评分
         addGradeToFile(selectedGrade);
     });
 
@@ -1201,12 +1258,25 @@ window.loadTeacherComment = function(filePath) {
         return;
     }
 
+    // 准备请求数据
+    const requestData = {
+        file_path: filePath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('获取教师评价请求数据:', requestData);
+
     $.ajax({
         url: '/grading/get_teacher_comment/',
         method: 'GET',
-        data: {
-            file_path: filePath
-        },
+        data: requestData,
         success: function(response) {
             console.log('=== 获取教师评价响应 ===');
             console.log('响应内容:', response);
@@ -1259,16 +1329,29 @@ window.saveTeacherComment = function() {
         return;
     }
 
+    // 准备请求数据
+    const requestData = {
+        file_path: currentFilePath,
+        comment: comment
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('保存教师评价请求数据:', requestData);
+
     $.ajax({
         url: '/grading/save_teacher_comment/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            file_path: currentFilePath,
-            comment: comment
-        },
+        data: requestData,
         success: function(response) {
             console.log('=== 保存教师评价响应 ===');
             console.log('响应内容:', response);
@@ -1299,6 +1382,163 @@ window.saveTeacherComment = function() {
             console.error('XHR状态:', xhr.status);
             console.error('XHR响应:', xhr.responseText);
             alert('保存失败，请重试');
+        }
+    });
+}
+
+
+// 为作业文件夹添加类型标签
+function addHomeworkTypeLabels() {
+    const tree = $('#directory-tree').jstree(true);
+    if (!tree) return;
+    
+    // 获取所有根节点（作业文件夹）
+    const rootNodes = tree.get_node('#').children;
+    
+    rootNodes.forEach(nodeId => {
+        const node = tree.get_node(nodeId);
+        if (node && node.type === 'folder' && node.data) {
+            const homeworkType = node.data.homework_type;
+            const homeworkTypeDisplay = node.data.homework_type_display;
+            
+            if (homeworkType && homeworkTypeDisplay) {
+                // 获取节点的DOM元素
+                const nodeElement = $('#' + nodeId.replace(/[^a-zA-Z0-9]/g, '\\$&') + '_anchor');
+                
+                if (nodeElement.length > 0) {
+                    // 添加类型标签
+                    const badgeClass = homeworkType === 'lab_report' ? 'bg-info' : 'bg-secondary';
+                    const badge = `<span class="badge ${badgeClass} ms-2 homework-type-badge" 
+                                        data-node-id="${nodeId}" 
+                                        data-homework-type="${homeworkType}"
+                                        style="font-size: 0.7em; cursor: pointer;"
+                                        title="点击修改作业类型">
+                                        ${homeworkTypeDisplay}
+                                   </span>`;
+                    
+                    // 检查是否已经添加过标签
+                    if (nodeElement.find('.homework-type-badge').length === 0) {
+                        nodeElement.append(badge);
+                    }
+                }
+            }
+        }
+    });
+    
+    // 绑定点击事件
+    $(document).off('click', '.homework-type-badge').on('click', '.homework-type-badge', function(e) {
+        e.stopPropagation();
+        const nodeId = $(this).data('node-id');
+        const currentType = $(this).data('homework-type');
+        showHomeworkTypeModal(nodeId, currentType);
+    });
+}
+
+// 显示作业类型修改模态框
+function showHomeworkTypeModal(nodeId, currentType) {
+    const tree = $('#directory-tree').jstree(true);
+    const node = tree.get_node(nodeId);
+    
+    if (!node) return;
+    
+    // 创建模态框HTML
+    const modalHtml = `
+        <div class="modal fade" id="homeworkTypeModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">修改作业类型</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>作业文件夹：</strong>${node.text}</p>
+                        <div class="mb-3">
+                            <label class="form-label">作业类型</label>
+                            <select class="form-select" id="homeworkTypeSelect">
+                                <option value="normal" ${currentType === 'normal' ? 'selected' : ''}>普通作业</option>
+                                <option value="lab_report" ${currentType === 'lab_report' ? 'selected' : ''}>实验报告</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" id="saveHomeworkType">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#homeworkTypeModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('homeworkTypeModal'));
+    modal.show();
+    
+    // 绑定保存按钮事件
+    $('#saveHomeworkType').off('click').on('click', function() {
+        const newType = $('#homeworkTypeSelect').val();
+        updateHomeworkType(nodeId, node.text, newType, modal);
+    });
+}
+
+// 更新作业类型
+function updateHomeworkType(nodeId, folderName, homeworkType, modal) {
+    if (!currentCourse) {
+        alert('请先选择课程');
+        return;
+    }
+    
+    console.log('更新作业类型:', {
+        course: currentCourse,
+        folder: folderName,
+        type: homeworkType
+    });
+    
+    $.ajax({
+        url: '/grading/api/update-homework-type/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            course_name: currentCourse,
+            folder_name: folderName,
+            homework_type: homeworkType
+        },
+        success: function(response) {
+            if (response.success) {
+                console.log('作业类型已更新:', response);
+                
+                // 更新节点数据
+                const tree = $('#directory-tree').jstree(true);
+                const node = tree.get_node(nodeId);
+                if (node) {
+                    node.data.homework_type = response.homework.homework_type;
+                    node.data.homework_type_display = response.homework.homework_type_display;
+                }
+                
+                // 关闭模态框
+                modal.hide();
+                
+                // 重新渲染标签
+                setTimeout(() => {
+                    addHomeworkTypeLabels();
+                }, 300);
+                
+                // 显示成功提示
+                alert('作业类型已更新为：' + response.homework.homework_type_display);
+            } else {
+                alert('更新失败：' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('更新作业类型失败:', error);
+            alert('更新失败，请重试');
         }
     });
 }
