@@ -343,7 +343,9 @@ window.handleFileContent = function(response) {
         switch (response.type) {
             case 'text':
                 // 文本文件
-                fileContent.html(`<pre class="border p-3 bg-light">${response.content}</pre>`);
+                // 对HTML内容进行转义以防止XSS攻击
+                const escapedContent = $('<div>').text(response.content).html();
+                fileContent.html(`<pre class="border p-3 bg-light" style="white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto;">${escapedContent}</pre>`);
                 break;
             case 'image':
                 // 图片文件
@@ -428,7 +430,10 @@ window.handleFileContent = function(response) {
 window.loadFile = function(path) {
     console.log('Loading file:', path);
     showLoading();
-    currentFilePath = path;
+    
+    // 统一路径格式，使用正斜杠
+    const normalizedPath = path.replace(/\\/g, '/');
+    currentFilePath = normalizedPath;
 
     // 禁用教师评价按钮，直到文件加载完成
     disableTeacherCommentButton();
@@ -440,9 +445,11 @@ window.loadFile = function(path) {
     $('#add-grade-to-file').prop('disabled', true);
 
     // 获取当前文件所在目录
-    const dirPath = path.substring(0, path.lastIndexOf('/'));
+    // 统一使用正斜杠处理路径
+    const normalizedPath = path.replace(/\\/g, '/');
+    const dirPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
     if (!dirPath) {
-        console.error('Invalid directory path');
+        console.error('Invalid directory path for:', path);
         $('#directory-file-count').text('0');
         return;
     }
@@ -525,7 +532,7 @@ window.loadFile = function(path) {
             'X-CSRFToken': getCSRFToken()
         },
         data: {
-            path: path
+            path: normalizedPath
         },
         success: function(response) {
             clearTimeout(timeout);

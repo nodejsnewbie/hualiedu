@@ -15,7 +15,7 @@ urlpatterns = [
     path("grading-simple/", views.grading_simple, name="grading_simple"),
     path("test-grading-no-auth/", views.test_grading_no_auth, name="test_grading_no_auth"),
     path("file/<path:file_path>", views.serve_file, name="serve_file"),
-    path("admin/", admin_site.urls),
+    # path("admin/", admin_site.urls),  # 使用主应用的admin
     path("writing/get_template_list", views.get_template_list, name="get_template_list"),
     path("get_directory_tree/", views.get_directory_tree_view, name="get_directory_tree"),
     path("get_file_content/", views.get_file_content, name="get_file_content"),

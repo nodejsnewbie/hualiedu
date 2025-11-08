@@ -222,16 +222,19 @@
                     'X-Requested-With': 'XMLHttpRequest',
                 },
             })
-            .then(response => {
-                if (response.ok) {
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
                     // 操作成功，刷新页面
                     window.location.reload();
                 } else {
-                    throw new Error('操作失败');
+                    // 操作失败，显示错误信息
+                    throw new Error(data.message || '操作失败');
                 }
             })
             .catch(error => {
                 console.error('操作失败:', error);
+                
                 // 恢复按钮状态
                 button.disabled = false;
                 button.style.cursor = 'pointer';
@@ -241,7 +244,7 @@
 
                 // 恢复状态显示
                 if (statusCell) {
-                    statusCell.innerHTML = '<span style="color: #999;">同步失败</span>';
+                    statusCell.innerHTML = '<span style="color: #999;">操作失败</span>';
                     statusCell.className = 'field-get_sync_status not_synced';
                 }
 
@@ -251,7 +254,27 @@
                 }
 
                 // 显示错误消息
-                alert('操作失败，请重试');
+                const errorMessage = error.message || '操作失败，请重试';
+                
+                // 创建错误消息框
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'alert alert-danger';
+                messageDiv.style.cssText = 'margin: 10px 0; padding: 15px; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; color: #721c24;';
+                messageDiv.innerHTML = errorMessage;
+                
+                // 将消息插入到页面顶部
+                const content = document.querySelector('#content') || document.body;
+                content.insertBefore(messageDiv, content.firstChild);
+                
+                // 5秒后自动隐藏消息
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, 10000);
+                
+                // 滚动到页面顶部显示消息
+                window.scrollTo(0, 0);
             });
         }
 
