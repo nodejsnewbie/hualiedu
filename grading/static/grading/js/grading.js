@@ -792,6 +792,12 @@ window.initTree = function() {
     // 清空目录树容器，确保没有残留内容影响初始化
     $treeContainer.empty();
     
+    // 如果没有数据，不初始化 jstree，只显示提示信息
+    if (initialData.length === 0) {
+        $treeContainer.html('<p class="text-muted">请选择仓库和课程</p>');
+        return;
+    }
+    
     // 显示加载状态
     $treeContainer.html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
 
@@ -822,8 +828,8 @@ window.initTree = function() {
                 'icon': 'jstree-folder'
             }
         },
-        'plugins': initialData.length > 0 ? ['types', 'wholerow', 'state', 'contextmenu'] : ['types', 'wholerow', 'state'],
-        'contextmenu': initialData.length > 0 ? {
+        'plugins': ['types', 'wholerow', 'state', 'contextmenu'],
+        'contextmenu': {
             'items': function(node) {
                 // 安全检查：确保 node 存在且有效
                 if (!node || !node.id) {
@@ -841,7 +847,7 @@ window.initTree = function() {
                 }
                 return items;
             }
-        } : {},
+        },
         'state': {
             'key': 'grading-tree',
             'filter': function(state) {
