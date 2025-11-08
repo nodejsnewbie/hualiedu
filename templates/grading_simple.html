@@ -21,7 +21,7 @@
         <div class="col-md-4">
             <div class="card">
                 <div class="card-header">
-                    <div class="row">
+                    <div class="row mb-2">
                         <div class="col-sm-8">
                             <select id="repositorySelect" class="form-select">
                                 <option value="">选择仓库...</option>
@@ -29,6 +29,13 @@
                         </div>
                         <div class="col-sm-4">
                             <a href="{% url 'grading:repository_management' %}" class="btn btn-sm btn-secondary">管理仓库</a>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-sm-12">
+                            <select id="courseSelect" class="form-select" disabled>
+                                <option value="">选择课程...</option>
+                            </select>
                         </div>
                     </div>
                 </div>
@@ -39,7 +46,7 @@
                     </div>
                     <!-- 文件目录树容器 -->
                     <div id="directory-tree" class="overflow-auto" style="max-height: 600px;">
-                        <p class="text-muted">请先选择仓库</p>
+                        <p class="text-muted">请先选择仓库和课程</p>
                     </div>
                 </div>
             </div>
@@ -187,10 +194,24 @@
         $('#repositorySelect').change(function() {
             const selectedRepo = $(this).val();
             if (selectedRepo) {
-                loadRepositoryFiles(selectedRepo);
+                loadCoursesList(selectedRepo);
+                // 清空课程选择和目录树
+                $('#courseSelect').val('').prop('disabled', false);
+                $('#directory-tree').html('<p class="text-muted">请选择课程</p>');
             } else {
-                $('#directory-tree').empty();
-                $('#directory-tree').html('<p class="text-muted">请先选择仓库</p>');
+                $('#courseSelect').val('').prop('disabled', true).html('<option value="">选择课程...</option>');
+                $('#directory-tree').html('<p class="text-muted">请先选择仓库和课程</p>');
+            }
+        });
+
+        // 课程选择变化事件
+        $('#courseSelect').change(function() {
+            const selectedRepo = $('#repositorySelect').val();
+            const selectedCourse = $(this).val();
+            if (selectedRepo && selectedCourse) {
+                loadCourseFiles(selectedRepo, selectedCourse);
+            } else {
+                $('#directory-tree').html('<p class="text-muted">请选择课程</p>');
             }
         });
     });
@@ -230,43 +251,80 @@
         });
     }
 
-    // 加载仓库文件
-    function loadRepositoryFiles(repositoryId) {
-        // 确保jQuery可用
-        if (typeof jQuery === 'undefined') {
-            console.error('jQuery 未加载，无法执行 loadRepositoryFiles');
-            return;
-        }
+    // 加载课程列表
+    function loadCoursesList(repositoryId) {
         const $ = jQuery;
         
         if (!repositoryId) {
-            $('#directory-tree').html('<p class="text-muted text-danger">请选择仓库</p>');
             return;
         }
 
-        $('#directory-tree').html('<p class="text-muted">加载文件树中...</p>');
+        $('#courseSelect').html('<option value="">加载中...</option>').prop('disabled', true);
 
-        // 使用仓库ID加载文件树
         $.ajax({
-            url: '{% url "grading:get_directory_tree" %}',
+            url: '{% url "grading:get_courses_list" %}',
             method: 'GET',
             data: {
                 'repo_id': repositoryId
             },
             success: function(response) {
+                const select = $('#courseSelect');
+                select.empty().append('<option value="">选择课程...</option>');
+                
+                if (response.status === 'success' && response.courses && response.courses.length > 0) {
+                    response.courses.forEach(function(course) {
+                        select.append(`<option value="${course.path}">${course.name}</option>`);
+                    });
+                    select.prop('disabled', false);
+                    
+                    // 如果只有一个课程，自动选择
+                    if (response.courses.length === 1) {
+                        select.val(response.courses[0].path).trigger('change');
+                    }
+                } else {
+                    select.append('<option value="">暂无课程</option>');
+                    $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无课程目录</p>');
+                }
+            },
+            error: function(xhr) {
+                $('#courseSelect').html('<option value="">加载失败</option>');
+                console.error('加载课程列表失败');
+            }
+        });
+    }
+
+    // 加载课程文件
+    function loadCourseFiles(repositoryId, courseName) {
+        const $ = jQuery;
+        
+        if (!repositoryId || !courseName) {
+            $('#directory-tree').html('<p class="text-muted text-danger">请选择仓库和课程</p>');
+            return;
+        }
+
+        $('#directory-tree').html('<p class="text-muted">加载文件树中...</p>');
+
+        // 使用仓库ID和课程名加载文件树
+        $.ajax({
+            url: '{% url "grading:get_directory_tree" %}',
+            method: 'GET',
+            data: {
+                'repo_id': repositoryId,
+                'course': courseName
+            },
+            success: function(response) {
                 if (response && response.children) {
                     // 使用jstree的API更新目录树
-                    // 更新initialTreeData
                     window.initialTreeData = response.children;
                     // 调用initTree重新初始化jstree
                     initTree();
                 } else {
-                    $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无文件</p>');
+                    $('#directory-tree').html('<p class="text-muted text-warning">该课程暂无文件</p>');
                 }
             },
             error: function(xhr) {
                 $('#directory-tree').html('<p class="text-muted text-danger">加载文件失败</p>');
-                console.error('加载仓库文件失败');
+                console.error('加载课程文件失败');
             }
         });
     }

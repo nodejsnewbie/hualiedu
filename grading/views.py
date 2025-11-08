@@ -883,16 +883,66 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None):
 
 
 @login_required
+def get_courses_list_view(request):
+    """获取仓库下的课程列表（第一级目录）
+    
+    参数：
+    - repo_id: 仓库ID
+    
+    返回：课程列表 JSON
+    """
+    try:
+        repo_id = request.GET.get("repo_id")
+        if not repo_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空", "courses": []})
+        
+        try:
+            repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+            base_dir = repo.get_full_path()
+        except Repository.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "仓库不存在", "courses": []})
+        
+        if not os.path.exists(base_dir):
+            return JsonResponse({"status": "error", "message": "仓库目录不存在", "courses": []})
+        
+        # 获取第一级目录（课程）
+        courses = []
+        try:
+            for item in sorted(os.listdir(base_dir)):
+                # 跳过隐藏文件和目录
+                if item.startswith("."):
+                    continue
+                
+                item_path = os.path.join(base_dir, item)
+                # 只获取目录
+                if os.path.isdir(item_path):
+                    courses.append({
+                        "name": item,
+                        "path": item
+                    })
+        except Exception as e:
+            logger.error(f"读取课程目录失败: {str(e)}")
+            return JsonResponse({"status": "error", "message": f"读取课程目录失败: {str(e)}", "courses": []})
+        
+        return JsonResponse({"status": "success", "courses": courses})
+    except Exception as e:
+        logger.error(f"get_courses_list_view error: {e}")
+        return JsonResponse({"status": "error", "message": str(e), "courses": []})
+
+
+@login_required
 def get_directory_tree_view(request):
     """返回目录树 JSON（GET）
 
-    支持按所选仓库加载：
-    - repo_id: 仓库ID（优先）
+    支持按所选仓库和课程加载：
+    - repo_id: 仓库ID（必需）
+    - course: 课程名称（可选，如果提供则只显示该课程的目录树）
     - path: 以基础目录为根的相对路径
     """
     try:
         # 权限：允许已登录用户加载自己的仓库目录
         repo_id = request.GET.get("repo_id")
+        course = request.GET.get("course", "").strip()
         rel_path = request.GET.get("path", "").strip()
 
         base_dir = None
@@ -901,6 +951,12 @@ def get_directory_tree_view(request):
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
                 base_dir = repo.get_full_path()
+                
+                # 如果指定了课程，则基础目录为课程目录
+                if course:
+                    base_dir = os.path.join(base_dir, course)
+                    if not os.path.exists(base_dir):
+                        return JsonResponse({"children": []}, safe=False)
             except Repository.DoesNotExist:
                 return JsonResponse({"children": []}, safe=False)
 
