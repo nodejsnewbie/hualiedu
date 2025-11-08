@@ -467,7 +467,7 @@ def grading_page(request):
             "page_title": "作业评分",
         }
 
-        return render(request, "grading_fixed.html", context)
+        return render(request, "grading_simple.html", context)
 
     except Exception as e:
         logger.error(f"处理评分页面请求失败: {str(e)}")
