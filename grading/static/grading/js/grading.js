@@ -822,8 +822,8 @@ window.initTree = function() {
                 'icon': 'jstree-folder'
             }
         },
-        'plugins': ['types', 'wholerow', 'state', 'contextmenu'],
-        'contextmenu': {
+        'plugins': initialData.length > 0 ? ['types', 'wholerow', 'state', 'contextmenu'] : ['types', 'wholerow', 'state'],
+        'contextmenu': initialData.length > 0 ? {
             'items': function(node) {
                 // 安全检查：确保 node 存在且有效
                 if (!node || !node.id) {
@@ -841,7 +841,7 @@ window.initTree = function() {
                 }
                 return items;
             }
-        },
+        } : {},
         'state': {
             'key': 'grading-tree',
             'filter': function(state) {
