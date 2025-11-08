@@ -32,10 +32,18 @@
                         </div>
                     </div>
                     <div class="row">
-                        <div class="col-sm-12">
+                        <div class="col-sm-8">
                             <select id="courseSelect" class="form-select" disabled>
                                 <option value="">选择课程...</option>
                             </select>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="isLabCourse" disabled>
+                                <label class="form-check-label" for="isLabCourse">
+                                    实验课
+                                </label>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -117,7 +125,7 @@
                     </div>
 
                     <!-- 文件内容容器 -->
-                    <div id="fileContentContainer">
+                    <div id="file-content">
                         <p class="text-muted">请从左侧选择一个文件查看内容</p>
                     </div>
                 </div>
@@ -194,11 +202,19 @@
         $('#repositorySelect').change(function() {
             const selectedRepo = $(this).val();
             if (selectedRepo) {
+                // 更新全局变量
+                currentRepoId = selectedRepo;
+                currentCourse = null;
+                
                 loadCoursesList(selectedRepo);
                 // 清空课程选择和目录树
                 $('#courseSelect').val('').prop('disabled', false);
                 $('#directory-tree').html('<p class="text-muted">请选择课程</p>');
             } else {
+                // 清空全局变量
+                currentRepoId = null;
+                currentCourse = null;
+                
                 $('#courseSelect').val('').prop('disabled', true).html('<option value="">选择课程...</option>');
                 $('#directory-tree').html('<p class="text-muted">请先选择仓库和课程</p>');
             }
@@ -209,10 +225,30 @@
             const selectedRepo = $('#repositorySelect').val();
             const selectedCourse = $(this).val();
             if (selectedRepo && selectedCourse) {
+                // 更新全局变量
+                currentRepoId = selectedRepo;
+                currentCourse = selectedCourse;
+                
+                // 启用实验课复选框
+                $('#isLabCourse').prop('disabled', false);
+                
                 loadCourseFiles(selectedRepo, selectedCourse);
             } else {
+                // 清空课程全局变量
+                currentCourse = null;
+                
+                // 禁用并取消选中实验课复选框
+                $('#isLabCourse').prop('disabled', true).prop('checked', false);
+                isLabCourse = false;
+                
                 $('#directory-tree').html('<p class="text-muted">请选择课程</p>');
             }
+        });
+        
+        // 实验课复选框变化事件
+        $('#isLabCourse').change(function() {
+            isLabCourse = $(this).is(':checked');
+            console.log('实验课模式:', isLabCourse ? '是' : '否');
         });
     });
 

@@ -66,7 +66,7 @@ def get_base_directory(request=None):
     return os.path.expanduser(config)
 
 
-def validate_file_path(file_path, base_dir=None, request=None):
+def validate_file_path(file_path, base_dir=None, request=None, repo_id=None, course=None):
     """
     验证文件路径的有效性和安全性
 
@@ -74,6 +74,8 @@ def validate_file_path(file_path, base_dir=None, request=None):
         file_path: 相对文件路径
         base_dir: 基础目录，如果为None则自动获取
         request: 请求对象，用于获取用户租户配置
+        repo_id: 仓库ID（可选）
+        course: 课程名称（可选）
 
     Returns:
         tuple: (is_valid, full_path, error_message)
@@ -82,9 +84,20 @@ def validate_file_path(file_path, base_dir=None, request=None):
         return False, None, "未提供文件路径"
 
     if base_dir is None:
-        base_dir = get_base_directory(request)
-        if base_dir is None:
-            return False, None, "未配置仓库基础目录"
+        # 如果提供了仓库ID，使用仓库路径
+        if repo_id and request:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                base_dir = repo.get_full_path()
+                # 如果指定了课程，则基础目录为课程目录
+                if course:
+                    base_dir = os.path.join(base_dir, course)
+            except Repository.DoesNotExist:
+                return False, None, "仓库不存在或无权限访问"
+        else:
+            base_dir = get_base_directory(request)
+            if base_dir is None:
+                return False, None, "未配置仓库基础目录"
 
     full_path = os.path.join(base_dir, file_path)
 
@@ -226,18 +239,30 @@ def validate_file_operation(file_path_param="file_path", require_write=True):
 
     def decorator(view_func):
         def wrapper(request, *args, **kwargs):
-            # 获取文件路径
+            # 获取文件路径和其他参数
             file_path = None
+            repo_id = None
+            course = None
+            
             if request.method == "GET":
                 file_path = request.GET.get(file_path_param)
+                repo_id = request.GET.get("repo_id")
+                course = request.GET.get("course", "").strip()
             else:
                 file_path = request.POST.get(file_path_param)
+                repo_id = request.POST.get("repo_id")
+                course = request.POST.get("course", "").strip()
 
             if not file_path:
                 return create_error_response("未提供文件路径")
 
             # 验证文件路径
-            is_valid, full_path, error_msg = validate_file_path(file_path)
+            is_valid, full_path, error_msg = validate_file_path(
+                file_path, 
+                request=request, 
+                repo_id=repo_id, 
+                course=course
+            )
             if not is_valid:
                 logger.error(f"文件路径验证失败: {error_msg}")
                 return create_error_response(error_msg)
@@ -1153,6 +1178,12 @@ def get_file_content(request):
         try:
             path = request.POST.get("path")
             repo_id = request.POST.get("repo_id")
+            course = request.POST.get("course", "").strip()
+            
+            logger.info(f"=== 获取文件内容请求 ===")
+            logger.info(f"路径: {path}")
+            logger.info(f"仓库ID: {repo_id}")
+            logger.info(f"课程: {course}")
             
             if not path:
                 logger.error("未提供文件路径")
@@ -1163,6 +1194,11 @@ def get_file_content(request):
                 try:
                     repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
                     base_dir = repo.get_full_path()
+                    
+                    # 如果指定了课程，则基础目录为课程目录
+                    if course:
+                        base_dir = os.path.join(base_dir, course)
+                    
                     full_path = os.path.join(base_dir, path)
                 except Repository.DoesNotExist:
                     return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
@@ -1176,10 +1212,12 @@ def get_file_content(request):
                 base_dir = os.path.expanduser(repo_base_dir)
                 full_path = os.path.join(base_dir, path)
 
+            logger.info(f"完整文件路径: {full_path}")
+            
             # 检查文件是否存在
             if not os.path.exists(full_path):
                 logger.error(f"文件不存在: {full_path}")
-                return JsonResponse({"status": "error", "message": "文件不存在"})
+                return JsonResponse({"status": "error", "message": f"文件不存在: {full_path}"})
 
             # 获取文件类型
             mime_type, _ = mimetypes.guess_type(full_path)
@@ -1262,6 +1300,9 @@ def get_file_content(request):
 
                         # 获取文件评分信息
                         grade_info = get_file_grade_info(full_path)
+                        
+                        logger.info(f"成功处理Word文档，内容长度: {len(final_content)}")
+                        logger.info(f"评分信息: {grade_info}")
 
                         return JsonResponse(
                             {
@@ -1791,17 +1832,19 @@ def add_grade_to_file(request):
 
     # 获取请求参数
     grade = request.POST.get("grade")
+    is_lab_report = request.POST.get("is_lab_report", "false").lower() == "true"
+    
     if not grade:
         logger.error("未提供评分")
         return create_error_response("未提供评分")
 
-    logger.info(f"请求添加评分到文件，路径: {request.POST.get('path')}, 评分: {grade}")
+    logger.info(f"请求添加评分到文件，路径: {request.POST.get('path')}, 评分: {grade}, 实验报告: {is_lab_report}")
 
     # 使用统一函数添加评分
     try:
         full_path = request.validated_file_path
         base_dir = get_base_directory()
-        write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir)
+        write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir, is_lab_report=is_lab_report)
         logger.info(f"成功添加评分: {full_path}")
 
         file_type = get_file_extension(full_path)
@@ -3102,7 +3145,218 @@ def _process_directory_recursively_for_ai_scoring(directory_path, base_dir, user
     return results, success_count, error_count
 
 
-def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_dir=None):
+def generate_random_comment(grade):
+    """根据评分生成随机评价"""
+    import random
+    
+    comments_map = {
+        'A': [
+            '作业完成得非常出色，思路清晰，代码规范。',
+            '优秀！实验报告内容详实，分析透彻。',
+            '非常好！实验过程记录完整，结论准确。',
+            '表现优异，实验设计合理，数据分析到位。',
+        ],
+        'B': [
+            '作业完成较好，基本达到要求。',
+            '良好！实验报告内容完整，分析合理。',
+            '不错！实验过程清晰，结论基本正确。',
+            '完成得很好，实验步骤规范，有一定的分析深度。',
+        ],
+        'C': [
+            '作业基本完成，还有提升空间。',
+            '中等水平，实验报告内容基本完整。',
+            '实验过程记录尚可，建议加强分析。',
+            '基本达标，建议在数据分析方面多下功夫。',
+        ],
+        'D': [
+            '作业完成情况一般，需要改进。',
+            '及格水平，实验报告内容不够完整。',
+            '实验过程记录不够详细，需要补充。',
+            '勉强及格，建议认真对待实验报告。',
+        ],
+        'E': [
+            '作业完成情况不理想，需要重做。',
+            '不及格，实验报告内容严重不足。',
+            '实验过程记录缺失，需要重新完成。',
+            '未达标，请认真完成实验并重新提交。',
+        ],
+        '优秀': [
+            '作业完成得非常出色，思路清晰，代码规范。',
+            '优秀！实验报告内容详实，分析透彻。',
+            '非常好！实验过程记录完整，结论准确。',
+        ],
+        '良好': [
+            '作业完成较好，基本达到要求。',
+            '良好！实验报告内容完整，分析合理。',
+            '不错！实验过程清晰，结论基本正确。',
+        ],
+        '中等': [
+            '作业基本完成，还有提升空间。',
+            '中等水平，实验报告内容基本完整。',
+            '实验过程记录尚可，建议加强分析。',
+        ],
+        '及格': [
+            '作业完成情况一般，需要改进。',
+            '及格水平，实验报告内容不够完整。',
+            '实验过程记录不够详细，需要补充。',
+        ],
+        '不及格': [
+            '作业完成情况不理想，需要重做。',
+            '不及格，实验报告内容严重不足。',
+            '实验过程记录缺失，需要重新完成。',
+        ],
+    }
+    
+    comments = comments_map.get(grade, ['作业已评阅。'])
+    return random.choice(comments)
+
+
+def write_grade_to_lab_report(doc, grade, comment=None):
+    """
+    将评分写入实验报告的表格中
+    在"成绩评定"单元格旁边找到"教师"，在其上方填写成绩，然后换行写评价
+    
+    Args:
+        doc: Document对象
+        grade: 评分
+        comment: 评价（可选，如果为None则自动生成）
+    
+    Returns:
+        bool: 是否成功写入
+    """
+    try:
+        from docx.shared import Pt
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        
+        # 如果没有提供评价，自动生成
+        if not comment:
+            comment = generate_random_comment(grade)
+        
+        logger.info(f"=== 开始处理实验报告评分 ===")
+        logger.info(f"评分: {grade}, 评价: {comment}")
+        logger.info(f"文档中表格数量: {len(doc.tables)}")
+        
+        # 遍历所有表格
+        for table_idx, table in enumerate(doc.tables):
+            logger.info(f"检查表格 {table_idx + 1}, 行数: {len(table.rows)}, 列数: {len(table.columns)}")
+            
+            # 遍历表格的所有行和单元格
+            for row_idx, row in enumerate(table.rows):
+                logger.info(f"  检查行 {row_idx + 1}, 单元格数: {len(row.cells)}")
+                
+                # 首先检查这一行是否包含"成绩评定"
+                has_grade_cell = False
+                grade_cell = None
+                
+                for cell in row.cells:
+                    if '成绩评定' in cell.text.strip():
+                        has_grade_cell = True
+                        grade_cell = cell
+                        break
+                
+                if not has_grade_cell:
+                    # 这一行不包含"成绩评定"，跳过
+                    for cell_idx, cell in enumerate(row.cells):
+                        cell_text = cell.text.strip()
+                        logger.info(f"    单元格 [{row_idx + 1}, {cell_idx + 1}]: '{cell_text}'")
+                    continue
+                
+                # 找到了包含"成绩评定"的行
+                logger.info(f"*** 找到包含'成绩评定'的行: 行{row_idx + 1}")
+                logger.info(f"      开始查找包含'教师'的单元格...")
+                logger.info(f"      当前行共有 {len(row.cells)} 个单元格")
+                
+                # 输出所有单元格内容
+                for cell_idx, cell in enumerate(row.cells):
+                    cell_text = cell.text.strip()
+                    logger.info(f"    单元格 [{row_idx + 1}, {cell_idx + 1}]: '{cell_text}'")
+                
+                # 在同一行中查找包含"教师"的单元格
+                target_cell = None
+                target_cell_idx = None
+                
+                # 遍历同一行的所有单元格
+                for search_idx, search_cell in enumerate(row.cells):
+                    # 跳过"成绩评定"单元格本身
+                    if id(search_cell) == id(grade_cell):
+                        logger.info(f"      跳过'成绩评定'单元格 [{row_idx + 1}, {search_idx + 1}]")
+                        continue
+                    
+                    search_cell_text = search_cell.text.strip()
+                    logger.info(f"      检查单元格 [{row_idx + 1}, {search_idx + 1}]: '{search_cell_text}'")
+                    logger.info(f"      '教师' in search_cell_text = {'教师' in search_cell_text}")
+                    
+                    if '教师' in search_cell_text:
+                        target_cell = search_cell
+                        target_cell_idx = search_idx
+                        logger.info(f"*** 找到'教师'单元格，位置: 行{row_idx + 1}, 列{target_cell_idx + 1}")
+                        break
+                
+                # 检查是否找到了目标单元格
+                if target_cell is not None:
+                            logger.info(f"原始内容: '{target_cell.text.strip()}'")
+                            logger.info(f"单元格段落数: {len(target_cell.paragraphs)}")
+                            
+                            # 保存原始的"教师（签字）：时间： 年 月 日"文本
+                            original_text = target_cell.text.strip()
+                            logger.info(f"保存的原始文本: '{original_text}'")
+                            
+                            # 清空单元格的所有段落
+                            logger.info("开始清空单元格段落...")
+                            for paragraph in target_cell.paragraphs:
+                                paragraph.clear()
+                            
+                            # 删除多余的段落，只保留一个
+                            logger.info(f"清空后段落数: {len(target_cell.paragraphs)}")
+                            while len(target_cell.paragraphs) > 1:
+                                p = target_cell.paragraphs[-1]._element
+                                p.getparent().remove(p)
+                            logger.info(f"删除多余段落后剩余: {len(target_cell.paragraphs)}")
+                            
+                            # 获取第一个段落
+                            p = target_cell.paragraphs[0]
+                            logger.info("准备写入成绩...")
+                            
+                            # 添加成绩（第一行，居中，加粗）
+                            run = p.add_run(grade)
+                            run.font.size = Pt(14)
+                            run.bold = True
+                            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                            logger.info(f"成绩已写入: {grade}")
+                            
+                            # 添加新段落：评价
+                            logger.info("准备写入评价...")
+                            p2 = target_cell.add_paragraph()
+                            run2 = p2.add_run(comment)
+                            run2.font.size = Pt(11)
+                            p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            logger.info(f"评价已写入: {comment}")
+                            
+                            # 添加新段落：保留原始的"教师（签字）"文本
+                            logger.info("准备写入原始文本...")
+                            p3 = target_cell.add_paragraph()
+                            run3 = p3.add_run(original_text)
+                            run3.font.size = Pt(10)
+                            p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                            logger.info(f"原始文本已写入: {original_text}")
+                            
+                            logger.info(f"*** 成功写入评分: {grade}, 评价: {comment}")
+                            logger.info(f"最终单元格段落数: {len(target_cell.paragraphs)}")
+                            logger.info(f"新内容: '{target_cell.text}'")
+                            return True
+        
+        logger.warning("*** 未找到'成绩评定'和'教师'单元格")
+        logger.warning("请检查实验报告格式是否正确")
+        return False
+        
+    except Exception as e:
+        logger.error(f"写入实验报告评分失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return False
+
+
+def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_dir=None, is_lab_report=False):
     """
     统一的函数：向文件写入评分和评价
     支持AI评分和人工评分，使用相同的逻辑
@@ -3117,13 +3371,25 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         grade: 评分（必须提供，如果为None则不写入评分）
         comment: 评价内容（可选）
         base_dir: 基础目录（用于Excel登记，可选）
+        is_lab_report: 是否为实验报告（实验报告有特殊的表格格式）
     """
     _, ext = os.path.splitext(full_path)
 
     if ext.lower() == ".docx":
         # Word文档处理
         doc = Document(full_path)
-
+        
+        # 如果是实验报告，使用特殊的表格格式
+        if is_lab_report and grade:
+            success = write_grade_to_lab_report(doc, grade, comment)
+            if success:
+                doc.save(full_path)
+                logger.info(f"已写入实验报告: 评分={grade}, 评价={comment}")
+                return
+            else:
+                logger.warning("实验报告格式写入失败，回退到普通格式")
+        
+        # 普通作业或实验报告格式写入失败时的处理
         # 首先删除所有现有的评分和评价段落
         paragraphs_to_remove = []
         for i, paragraph in enumerate(doc.paragraphs):

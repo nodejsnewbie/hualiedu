@@ -8,6 +8,9 @@ let selectedGrade = 'B';  // 设置默认评分为 B
 let gradeMode = 'letter';  // 评分方式：'letter' 或 'text'
 var currentFilePath = null;
 let pendingGrade = null;  // 待确认的评分
+let currentRepoId = null;  // 当前选择的仓库ID
+let currentCourse = null;  // 当前选择的课程
+let isLabCourse = false;  // 是否为实验课
 
 // 获取 CSRF Token
 window.getCSRFToken = function() {
@@ -336,9 +339,15 @@ window.handleGradeInfo = function(gradeInfo) {
 
 // 处理文件内容显示
 window.handleFileContent = function(response) {
+    console.log('=== handleFileContent 开始 ===');
+    console.log('响应对象:', response);
+    console.log('文件内容容器元素数量:', $('#file-content').length);
+    
     if (response.status === 'success') {
         const fileContent = $('#file-content');
+        console.log('找到文件内容容器，准备清空');
         fileContent.empty();
+        console.log('文件内容容器已清空，准备显示内容，类型:', response.type);
 
         switch (response.type) {
             case 'text':
@@ -523,18 +532,36 @@ window.loadFile = function(path) {
         showError('加载文件超时，请重试');
     }, 30000); // 30秒超时
 
+    // 准备请求数据
+    const requestData = {
+        path: normalizedPath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('Loading file with data:', requestData);
+
     $.ajax({
         url: '/grading/get_file_content/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: normalizedPath
-        },
+        data: requestData,
         success: function(response) {
             clearTimeout(timeout);
-            console.log('File content response:', response);
+            console.log('=== 文件内容加载成功 ===');
+            console.log('响应状态:', response.status);
+            console.log('响应类型:', response.type);
+            console.log('响应内容长度:', response.content ? response.content.length : 0);
+            console.log('完整响应:', response);
+            
             handleFileContent(response);
 
             // 启用教师评价按钮
@@ -654,16 +681,32 @@ window.addGradeToFile = function(grade) {
     }
 
     showLoading();
+    
+    // 准备请求数据
+    const requestData = {
+        path: currentFilePath,
+        grade: grade,
+        is_lab_report: isLabCourse  // 传递是否为实验课
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('Adding grade with data:', requestData);
+    console.log('实验课模式:', isLabCourse);
+    
     $.ajax({
         url: '/grading/add_grade_to_file/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: currentFilePath,
-            grade: grade
-        },
+        data: requestData,
         success: function(response) {
             console.log('Grade added successfully:', response);
             if (response.status === 'success') {
