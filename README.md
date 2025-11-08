@@ -80,7 +80,10 @@ python manage.py test grading.tests.test_models
 
 ## 📖 详细文档
 
+- [文档索引](docs/README.md) - 完整文档目录
+- [项目结构](docs/PROJECT_STRUCTURE.md) - 项目目录结构说明
 - [团队协作指南](docs/TEAM_COLLABORATION.md) - 开发规范和最佳实践
+- [测试指南](tests/README.md) - 测试规范和运行方法
 
 ## 🤝 贡献
 

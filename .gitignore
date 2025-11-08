@@ -44,3 +44,20 @@ htmlcov/
 # Testing
 .pytest_cache/
 .tox/
+
+# Temporary files
+*_backup
+*_old
+*_temp
+*_tmp
+*.backup
+*.bak
+*.tmp
+
+# Debug and test templates
+templates/debug_*.html
+templates/test_*.html
+templates/*_test.html
+templates/*_debug.html
+templates/*_temp.html
+templates/*_old.html
