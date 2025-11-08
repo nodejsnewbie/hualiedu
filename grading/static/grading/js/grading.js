@@ -445,8 +445,6 @@ window.loadFile = function(path) {
     $('#add-grade-to-file').prop('disabled', true);
 
     // 获取当前文件所在目录
-    // 统一使用正斜杠处理路径
-    const normalizedPath = path.replace(/\\/g, '/');
     const dirPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
     if (!dirPath) {
         console.error('Invalid directory path for:', path);
