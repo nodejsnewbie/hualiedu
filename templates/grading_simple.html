@@ -390,46 +390,4 @@
 <script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
 <!-- 自定义脚本 -->
 <script src="{% static 'grading/js/grading.js' %}"></script>
-
-<script>
-// 等待jQuery加载完成
-function initGradingPage() {
-    if (typeof jQuery === 'undefined') {
-        console.log('jQuery not loaded yet, retrying...');
-        setTimeout(initGradingPage, 100);
-        return;
-    }
-    
-    console.log('jQuery loaded, version:', jQuery.fn.jquery);
-    
-    $(document).ready(function() {
-        console.log('DOM ready');
-        
-        // 设置 CSRF token
-        $.ajaxSetup({
-            beforeSend: function(xhr, settings) {
-                if (!this.crossDomain) {
-                    xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
-                }
-            }
-        });
-
-        // 加载用户仓库列表
-        loadRepositoryList();
-
-        // 仓库选择变化事件
-        $('#repositorySelect').change(function() {
-            const selectedRepo = $(this).val();
-            if (selectedRepo) {
-                loadRepositoryFiles(selectedRepo);
-            } else {
-                $('#directory-tree').html('<p class="text-muted">请先选择仓库</p>');
-            }
-        });
-    });
-}
-
-// 启动初始化
-initGradingPage();
-</script>
 {% endblock %}
