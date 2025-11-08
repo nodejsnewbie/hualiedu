@@ -35,8 +35,15 @@
                                 <i class="fas fa-folder-open"></i>
                                 源目录路径
                             </label>
-                            <input type="text" class="form-control" id="source_directory" name="source_directory"
-                                   placeholder="请输入包含PPT文件的目录路径，如: /path/to/ppt/files" required>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="source_directory" name="source_directory"
+                                       placeholder="请输入包含PPT文件的目录路径，如: /path/to/ppt/files" required>
+                                <div class="input-group-append">
+                                    <button type="button" class="btn btn-outline-secondary" id="browse_source_btn">
+                                        <i class="fas fa-folder-open"></i> 选择目录
+                                    </button>
+                                </div>
+                            </div>
                             <small class="form-text text-muted">
                                 支持 .ppt 和 .pptx 格式的文件
                             </small>
@@ -47,8 +54,15 @@
                                 <i class="fas fa-folder-plus"></i>
                                 输出目录路径
                             </label>
-                            <input type="text" class="form-control" id="output_directory" name="output_directory"
-                                   placeholder="请输入PDF文件的输出目录路径" required>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="output_directory" name="output_directory"
+                                       placeholder="请输入PDF文件的输出目录路径" required>
+                                <div class="input-group-append">
+                                    <button type="button" class="btn btn-outline-secondary" id="browse_output_btn">
+                                        <i class="fas fa-folder-plus"></i> 选择目录
+                                    </button>
+                                </div>
+                            </div>
                             <small class="form-text text-muted">
                                 如果目录不存在，系统会自动创建
                             </small>
@@ -132,11 +146,66 @@
     </div>
 </div>
 
+<!-- 目录选择模态框 -->
+<div class="modal fade" id="directoryModal" tabindex="-1" role="dialog" aria-labelledby="directoryModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="directoryModalLabel">
+                    <i class="fas fa-folder-open"></i> 选择目录
+                </h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <div class="input-group">
+                        <div class="input-group-prepend">
+                            <span class="input-group-text">
+                                <i class="fas fa-folder"></i>
+                            </span>
+                        </div>
+                        <input type="text" class="form-control" id="current_path" readonly>
+                        <div class="input-group-append">
+                            <button type="button" class="btn btn-outline-secondary" id="go_up_btn" title="上级目录">
+                                <i class="fas fa-level-up-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="directory_content" style="max-height: 400px; overflow-y: auto;">
+                    <div class="text-center">
+                        <div class="spinner-border text-primary" role="status">
+                            <span class="sr-only">加载中...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" id="select_directory_btn" disabled>选择此目录</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
-// 自动填充示例路径
+// 目录选择功能
+let currentTargetInput = null;
+let currentPath = '/';
+
 document.addEventListener('DOMContentLoaded', function() {
     const sourceInput = document.getElementById('source_directory');
     const outputInput = document.getElementById('output_directory');
+    const browseSourceBtn = document.getElementById('browse_source_btn');
+    const browseOutputBtn = document.getElementById('browse_output_btn');
+    const directoryModal = document.getElementById('directoryModal');
+    const directoryContent = document.getElementById('directory_content');
+    const currentPathInput = document.getElementById('current_path');
+    const goUpBtn = document.getElementById('go_up_btn');
+    const selectDirectoryBtn = document.getElementById('select_directory_btn');
 
     // 添加示例路径提示
     sourceInput.addEventListener('focus', function() {
@@ -150,6 +219,126 @@ document.addEventListener('DOMContentLoaded', function() {
             this.placeholder = '例如: /Users/username/Documents/PDF输出';
         }
     });
+
+    // 源目录选择按钮
+    browseSourceBtn.addEventListener('click', function() {
+        currentTargetInput = sourceInput;
+        currentPath = sourceInput.value || '/';
+        showDirectoryModal();
+    });
+
+    // 输出目录选择按钮
+    browseOutputBtn.addEventListener('click', function() {
+        currentTargetInput = outputInput;
+        currentPath = outputInput.value || '/';
+        showDirectoryModal();
+    });
+
+    // 上级目录按钮
+    goUpBtn.addEventListener('click', function() {
+        if (currentPath !== '/') {
+            currentPath = currentPath.substring(0, currentPath.lastIndexOf('/')) || '/';
+            loadDirectory(currentPath);
+        }
+    });
+
+    // 选择目录按钮
+    selectDirectoryBtn.addEventListener('click', function() {
+        if (currentTargetInput) {
+            currentTargetInput.value = currentPath;
+        }
+        $(directoryModal).modal('hide');
+    });
+
+    // 加载目录内容
+    function loadDirectory(path) {
+        directoryContent.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="sr-only">加载中...</span></div></div>';
+        
+        fetch(`{% url 'toolbox:browse_directory_api' %}?path=${encodeURIComponent(path)}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    currentPath = data.data.current_path;
+                    currentPathInput.value = currentPath;
+                    
+                    let html = '';
+                    if (data.data.parent_path) {
+                        html += `
+                            <div class="list-group-item list-group-item-action directory-item" data-path="${data.data.parent_path}" data-type="parent">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas fa-level-up-alt text-muted mr-2"></i>
+                                    <span>.. (上级目录)</span>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    data.data.items.forEach(item => {
+                        const icon = item.type === 'directory' ? 'fa-folder' : 'fa-file';
+                        const textClass = item.type === 'directory' ? 'text-primary' : 'text-muted';
+                        html += `
+                            <div class="list-group-item list-group-item-action directory-item" data-path="${item.path}" data-type="${item.type}">
+                                <div class="d-flex align-items-center">
+                                    <i class="fas ${icon} ${textClass} mr-2"></i>
+                                    <span>${item.name}</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    directoryContent.innerHTML = html;
+                    
+                    // 添加点击事件
+                    document.querySelectorAll('.directory-item').forEach(item => {
+                        item.addEventListener('click', function() {
+                            const path = this.dataset.path;
+                            const type = this.dataset.type;
+                            
+                            if (type === 'directory' || type === 'parent') {
+                                loadDirectory(path);
+                            } else {
+                                // 选择文件时，选择其所在目录
+                                const dirPath = path.substring(0, path.lastIndexOf('/'));
+                                currentPath = dirPath;
+                                currentPathInput.value = currentPath;
+                                selectDirectoryBtn.disabled = false;
+                            }
+                        });
+                        
+                        item.addEventListener('mouseenter', function() {
+                            if (this.dataset.type === 'directory' || this.dataset.type === 'parent') {
+                                this.classList.add('active');
+                            }
+                        });
+                        
+                        item.addEventListener('mouseleave', function() {
+                            this.classList.remove('active');
+                        });
+                    });
+                    
+                    // 双击目录进入
+                    document.querySelectorAll('.directory-item[data-type="directory"]').forEach(item => {
+                        item.addEventListener('dblclick', function() {
+                            loadDirectory(this.dataset.path);
+                        });
+                    });
+                    
+                    selectDirectoryBtn.disabled = false;
+                } else {
+                    directoryContent.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
+                    selectDirectoryBtn.disabled = true;
+                }
+            })
+            .catch(error => {
+                directoryContent.innerHTML = `<div class="alert alert-danger">加载目录失败: ${error.message}</div>`;
+                selectDirectoryBtn.disabled = true;
+            });
+    }
+
+    function showDirectoryModal() {
+        $(directoryModal).modal('show');
+        loadDirectory(currentPath);
+    }
 });
 </script>
 {% endblock %}

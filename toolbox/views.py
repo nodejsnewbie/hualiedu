@@ -136,6 +136,61 @@ def task_status_api(request, task_id):
         return JsonResponse({"status": "error", "message": "任务不存在"})
 
 
+@login_required
+def browse_directory_api(request):
+    """浏览目录的API"""
+    try:
+        path = request.GET.get('path', '/')
+        
+        # 安全检查：确保路径在允许的范围内
+        if not os.path.exists(path) or not os.path.isdir(path):
+            return JsonResponse({
+                "status": "error", 
+                "message": "目录不存在或不是有效目录"
+            })
+        
+        # 获取目录内容
+        items = []
+        try:
+            for item in os.listdir(path):
+                item_path = os.path.join(path, item)
+                if os.path.isdir(item_path):
+                    items.append({
+                        "name": item,
+                        "type": "directory",
+                        "path": item_path
+                    })
+                elif item.lower().endswith(('.ppt', '.pptx')):
+                    items.append({
+                        "name": item,
+                        "type": "file",
+                        "path": item_path
+                    })
+        except PermissionError:
+            return JsonResponse({
+                "status": "error",
+                "message": "没有权限访问该目录"
+            })
+        
+        # 按类型和名称排序
+        items.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
+        
+        return JsonResponse({
+            "status": "success",
+            "data": {
+                "current_path": path,
+                "parent_path": os.path.dirname(path) if path != '/' else None,
+                "items": items
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            "status": "error",
+            "message": f"浏览目录失败: {str(e)}"
+        })
+
+
 def convert_ppt_to_pdf_task(task_id):
     """后台PPT转PDF任务"""
     try:

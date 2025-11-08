@@ -116,7 +116,14 @@ def get_user_profile(request):
 
 def get_tenant_repo_base_dir(request):
     """获取租户的基础仓库目录"""
+    # 仅超级管理员可设置全局 base_dir；租户可设置基础仓库名，拼接规则放在 Repository.get_full_path
     profile = get_user_profile(request)
-    if profile:
+    if profile and profile.repo_base_dir:
         return profile.get_repo_base_dir()
-    return None
+    # 回退为全局默认
+    try:
+        from .models import GlobalConfig
+
+        return os.path.expanduser(GlobalConfig.get_value("default_repo_base_dir", "~/jobs"))
+    except Exception:
+        return os.path.expanduser("~/jobs")

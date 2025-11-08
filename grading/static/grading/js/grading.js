@@ -761,13 +761,34 @@ window.initTree = function() {
     const initialData = Array.isArray(window.initialTreeData) ? window.initialTreeData : [];
     console.log('Processed initial data:', initialData);
 
+    // 确保jQuery可用
+    if (typeof jQuery === 'undefined') {
+        console.error('jQuery 未加载，无法初始化文件树');
+        return;
+    }
+    const $ = jQuery;
+    
+    // 首先检查目录树容器是否存在
+    const $treeContainer = $('#directory-tree');
+    if ($treeContainer.length === 0) {
+        console.error('目录树容器 #directory-tree 未找到');
+        return;
+    }
+    
     // 销毁现有的树（如果存在）
-    if ($('#directory-tree').jstree(true)) {
-        $('#directory-tree').jstree(true).destroy();
+    if ($treeContainer.jstree(true)) {
+        try {
+            $treeContainer.jstree(true).destroy();
+        } catch (e) {
+            console.error('销毁现有树时出错:', e);
+        }
     }
 
+    // 清空目录树容器，确保没有残留内容影响初始化
+    $treeContainer.empty();
+    
     // 显示加载状态
-    $('#directory-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+    $treeContainer.html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
 
     // 配置 jstree
     const treeConfig = {

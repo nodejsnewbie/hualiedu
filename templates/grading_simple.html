@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="{% static 'grading/vendor/bootstrap/bootstrap.min.css' %}">
 <!-- Bootstrap Icons -->
 <link rel="stylesheet" href="{% static 'grading/vendor/bootstrap-icons/font/bootstrap-icons.css' %}">
+<!-- JSTree CSS -->
+<link rel="stylesheet" href="{% static 'grading/vendor/jstree/themes/default/style.min.css' %}">
 <!-- Custom CSS -->
 <link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
 {% endblock %}
@@ -15,108 +17,55 @@
 {% block content %}
 <div class="container-fluid">
     <div class="row">
-        <!-- 左侧文件树 -->
-        <div class="col-md-3">
-            <!-- 仓库选择 -->
-            <div class="card mb-3">
-                <div class="card-header">
-                    <h6 class="card-title mb-0">
-                        <i class="bi bi-folder2-open"></i> 仓库选择
-                    </h6>
-                </div>
-                <div class="card-body">
-                    <select class="form-select" id="repositorySelect">
-                        <option value="">选择仓库...</option>
-                    </select>
-                    <div class="mt-2">
-                        <a href="{% url 'grading:repository_management' %}" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-gear"></i> 管理仓库
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 文件目录 -->
+        <!-- 左侧仓库选择和文件目录 -->
+        <div class="col-md-4">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">文件目录</h5>
-                    <div class="mt-2">
-                        <a href="{% url 'grading:batch_grade_page' %}" class="btn btn-success btn-sm me-2">
-                            <i class="bi bi-tasks"></i> 批量登分
-                        </a>
-                        <a href="{% url 'grading:batch_ai_score_page' %}" class="btn btn-warning btn-sm">
-                            <i class="bi bi-robot"></i> 批量AI评分
-                        </a>
+                    <div class="row">
+                        <div class="col-sm-8">
+                            <select id="repositorySelect" class="form-select">
+                                <option value="">选择仓库...</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-4">
+                            <a href="{% url 'grading:repository_management' %}" class="btn btn-sm btn-secondary">管理仓库</a>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div id="directory-tree">
+                    <div class="mb-3">
+                        <button id="batchGradeBtn" class="btn btn-sm btn-primary me-2">批量登分</button>
+                        <button id="batchAiGradeBtn" class="btn btn-sm btn-info">批量AI评分</button>
+                    </div>
+                    <!-- 文件目录树容器 -->
+                    <div id="directory-tree" class="overflow-auto" style="max-height: 600px;">
                         <p class="text-muted">请先选择仓库</p>
                     </div>
                 </div>
             </div>
         </div>
-
+        
         <!-- 右侧内容区 -->
-        <div class="col-md-9">
+        <div class="col-md-8">
             <div class="card">
                 <div class="card-header">
-                    <h5 class="card-title mb-0">文件内容</h5>
+                    <h3 id="fileNameHeader">选择文件</h3>
                     <div class="file-count-display text-muted small">
-                        <span id="directory-file-count">0</span> 个文件
+                        文件: <span id="current-file-index">0</span>/<span id="total-files">0</span>
                     </div>
                 </div>
                 <div class="card-body">
-                    <!-- 加载指示器 -->
-                    <div id="loading" style="display: none;">
-                        <div class="spinner-border text-primary" role="status">
-                            <span class="visually-hidden">加载中...</span>
-                        </div>
-                    </div>
-
-                    <!-- 文件内容显示区域 -->
-                    <div id="file-content" class="mt-3">
-                        {% if error %}
-                            <div class="alert alert-danger">
-                                {{ error }}
-                            </div>
-                        {% else %}
-                            <div class="alert alert-info">
-                                请从左侧选择要评分的文件
-                            </div>
-                        {% endif %}
-                    </div>
-                </div>
-            </div>
-
-            <!-- 评分区域 -->
-            <div class="card mt-3">
-                <div class="card-header">
-                    <h5 class="card-title mb-0">评分</h5>
-                </div>
-                <div class="card-body">
-                    <!-- 文件导航按钮 -->
-                    <div class="d-flex justify-content-between mb-3">
-                        <button type="button" class="btn btn-outline-secondary" id="prev-file">
-                            <i class="bi bi-arrow-left"></i> 上一个文件
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" id="next-file">
-                            下一个文件 <i class="bi bi-arrow-right"></i>
-                        </button>
-                    </div>
                     <!-- 评分按钮组 -->
-                    <div class="d-flex align-items-center">
+                    <div class="mb-3">
                         <!-- 评分方式切换 -->
-                        <div class="btn-group me-3" role="group" aria-label="评分方式">
+                        <div class="btn-group mb-3" role="group" aria-label="评分方式选择">
                             <button type="button" class="btn btn-outline-secondary grade-mode-btn active" data-mode="letter">
-                                字母等级
+                                <i class="bi bi-fonts"></i> 字母评分
                             </button>
                             <button type="button" class="btn btn-outline-secondary grade-mode-btn" data-mode="text">
-                                文字等级
+                                <i class="bi bi-text-paragraph"></i> 文字评分
                             </button>
                         </div>
-
-
 
                         <!-- 字母等级按钮组 -->
                         <div class="btn-group me-3" role="group" aria-label="字母评分选项" id="letter-grade-buttons">
@@ -139,133 +88,98 @@
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
                             确定
                         </button>
-                        <button type="button" class="btn btn-info me-2" id="ai-score-btn" disabled>
-                            <i class="bi bi-robot"></i> AI评分
-                        </button>
                         <button type="button" class="btn btn-outline-secondary" id="cancel-grade">
                             撤销
                         </button>
                         <button type="button" class="btn btn-outline-info ms-2" id="teacher-comment-btn" disabled>
                             <i class="bi bi-chat-text"></i> 教师评价
                         </button>
+                        <button type="button" class="btn btn-outline-success ms-2" id="ai-score-btn" disabled data-ai-grading-disabled="False">
+                            <i class="bi bi-robot"></i> AI评分
+                        </button>
+                    </div>
+
+                    <!-- 导航按钮 -->
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-outline-secondary me-2" id="prev-file" disabled>
+                            <i class="bi bi-arrow-left"></i> 上一个
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" id="next-file" disabled>
+                            下一个 <i class="bi bi-arrow-right"></i>
+                        </button>
+                    </div>
+
+                    <!-- 文件内容容器 -->
+                    <div id="fileContentContainer">
+                        <p class="text-muted">请从左侧选择一个文件查看内容</p>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-</div>
 
-<!-- 批量AI评分结果模态框 -->
-<div class="modal fade" id="batchScoreResultModal" tabindex="-1" aria-labelledby="batchScoreResultModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="batchScoreResultModalLabel">批量AI评分结果</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <p id="batch-score-summary" class="fw-bold"></p>
-                <div id="batch-score-results-body"></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- AI评分提示模态框 -->
-<div class="modal fade" id="aiScoreAlertModal" tabindex="-1" aria-labelledby="aiScoreAlertModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="aiScoreAlertModalLabel">
-                    <i class="bi bi-exclamation-triangle text-warning"></i> AI评分提示
-                </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-warning" role="alert">
-                    <h6 class="alert-heading">
-                        <i class="bi bi-info-circle"></i> 提示信息
-                    </h6>
-                    <p id="aiScoreAlertMessage" class="mb-0"></p>
-                </div>
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6 class="mb-3">
-                            <i class="bi bi-file-text"></i> 文件内容预览
-                        </h6>
-                        <div id="fileContentPreview" class="border rounded p-3" style="max-height: 400px; overflow-y: auto; background-color: #f8f9fa; font-family: monospace; font-size: 0.9em;">
-                            <div class="text-muted">正在加载文件内容...</div>
+            <!-- 教师评价模态框 -->
+            <div class="modal fade" id="teacherCommentModal" tabindex="-1" aria-labelledby="teacherCommentModalLabel" aria-hidden="true">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="teacherCommentModalLabel">教师评价</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                    </div>
-                    <div class="col-md-6">
-                        <h6 class="mb-3">
-                            <i class="bi bi-search"></i> 评分信息
-                        </h6>
-                        <div id="gradeInfoPreview" class="border rounded p-3" style="max-height: 400px; overflow-y: auto; background-color: #f8f9fa;">
-                            <div class="text-muted">正在检查评分信息...</div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label for="teacherCommentText" class="form-label">评价内容</label>
+                                <textarea class="form-control" id="teacherCommentText" rows="5"></textarea>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                            <button type="button" class="btn btn-primary" id="saveTeacherComment">保存评价</button>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                <button type="button" class="btn btn-primary" id="forceAiScore" style="display: none;">强制AI评分</button>
-            </div>
         </div>
     </div>
 </div>
-
-<!-- 教师评价模态框 -->
-<div class="modal fade" id="teacherCommentModal" tabindex="-1" aria-labelledby="teacherCommentModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="teacherCommentModalLabel">教师评价</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label for="teacherCommentText" class="form-label">评价内容：</label>
-                    <textarea class="form-control" id="teacherCommentText" rows="8" placeholder="请输入或修改教师评价内容..."></textarea>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-primary" id="saveTeacherComment">保存评价</button>
-            </div>
-        </div>
-    </div>
-</div>
-{% endblock %}
-
-{% block extra_js %}
-<!-- jQuery -->
-<script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
-<!-- Bootstrap Bundle with Popper -->
-<script src="{% static 'grading/vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
-<!-- 自定义脚本 -->
-<script src="{% static 'grading/js/grading.js' %}"></script>
 
 <!-- 初始化数据 -->
 <script>
-    // 将初始数据传递给 JavaScript
-    window.initialTreeData = {{ initial_tree_data|safe }};
-    console.log('Initial tree data in template:', window.initialTreeData);
-
-    // 设置 CSRF token
-    $.ajaxSetup({
-        beforeSend: function(xhr, settings) {
-            if (!this.crossDomain) {
-                xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
-            }
+    // 等待DOM完全加载和jQuery可用
+    document.addEventListener('DOMContentLoaded', function() {
+        // 检查jQuery是否已加载
+        if (typeof jQuery === 'undefined') {
+            console.error('jQuery 未加载，请检查jQuery的引入路径');
+            return;
         }
-    });
+        
+        // 使用jQuery的别名
+        const $ = jQuery;
+        
+        // 检查是否有目录树容器
+        if ($('#directory-tree').length === 0) {
+            console.error('目录树容器 #directory-tree 未找到');
+            return;
+        }
+        
+        // 初始化treeData变量
+        window.initialTreeData = window.initialTreeData || [];
+        
+        // 将初始数据传递给 JavaScript
+        const initialTreeDataFromTemplate = {{ initial_tree_data|safe }} || [];
+        if (Array.isArray(initialTreeDataFromTemplate) && initialTreeDataFromTemplate.length > 0) {
+            window.initialTreeData = initialTreeDataFromTemplate;
+        }
+        console.log('Initial tree data in template:', window.initialTreeData);
 
-    // 仓库管理相关功能
-    $(document).ready(function() {
+        // 设置 CSRF token
+        $.ajaxSetup({
+            beforeSend: function(xhr, settings) {
+                if (!this.crossDomain) {
+                    xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
+                }
+            }
+        });
+
+        // 仓库管理相关功能
         // 加载用户仓库列表
         loadRepositoryList();
 
@@ -275,6 +189,7 @@
             if (selectedRepo) {
                 loadRepositoryFiles(selectedRepo);
             } else {
+                $('#directory-tree').empty();
                 $('#directory-tree').html('<p class="text-muted">请先选择仓库</p>');
             }
         });
@@ -282,6 +197,13 @@
 
     // 加载仓库列表
     function loadRepositoryList() {
+        // 确保jQuery可用
+        if (typeof jQuery === 'undefined') {
+            console.error('jQuery 未加载，无法执行 loadRepositoryList');
+            return;
+        }
+        const $ = jQuery;
+        
         $.ajax({
             url: '{% url "grading:get_repository_list_api" %}',
             method: 'GET',
@@ -310,27 +232,34 @@
 
     // 加载仓库文件
     function loadRepositoryFiles(repositoryId) {
-        const selectedOption = $('#repositorySelect option:selected');
-        const repositoryPath = selectedOption.data('path');
-
-        if (!repositoryPath) {
-            $('#directory-tree').html('<p class="text-muted text-danger">仓库路径未配置</p>');
+        // 确保jQuery可用
+        if (typeof jQuery === 'undefined') {
+            console.error('jQuery 未加载，无法执行 loadRepositoryFiles');
+            return;
+        }
+        const $ = jQuery;
+        
+        if (!repositoryId) {
+            $('#directory-tree').html('<p class="text-muted text-danger">请选择仓库</p>');
             return;
         }
 
         $('#directory-tree').html('<p class="text-muted">加载文件树中...</p>');
 
-        // 使用现有的文件树加载逻辑，但传入仓库路径
+        // 使用仓库ID加载文件树
         $.ajax({
             url: '{% url "grading:get_directory_tree" %}',
             method: 'GET',
             data: {
-                'path': repositoryPath
+                'repo_id': repositoryId
             },
             success: function(response) {
                 if (response && response.children) {
-                    // 使用现有的文件树渲染逻辑
-                    renderDirectoryTree(response, '#directory-tree');
+                    // 使用jstree的API更新目录树
+                    // 更新initialTreeData
+                    window.initialTreeData = response.children;
+                    // 调用initTree重新初始化jstree
+                    initTree();
                 } else {
                     $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无文件</p>');
                 }
@@ -344,6 +273,13 @@
 
     // 渲染文件树（简化版本，可以根据需要扩展）
     function renderDirectoryTree(data, container) {
+        // 确保jQuery可用
+        if (typeof jQuery === 'undefined') {
+            console.error('jQuery 未加载，无法执行 renderDirectoryTree');
+            return;
+        }
+        const $ = jQuery;
+        
         const $container = $(container);
         $container.empty();
 
@@ -379,6 +315,165 @@
         } else {
             $container.html('<p class="text-muted">该目录为空</p>');
         }
+{% endblock %}
+
+{% block extra_js %}
+<!-- 确保jQuery先加载 -->
+<script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
+<!-- JSTree JS -->
+<script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
+<!-- 自定义脚本 -->
+<script src="{% static 'grading/js/grading.js' %}"></script>
+
+<script>
+// 等待jQuery加载完成
+function initGradingPage() {
+    if (typeof jQuery === 'undefined') {
+        console.log('jQuery not loaded yet, retrying...');
+        setTimeout(initGradingPage, 100);
+        return;
     }
+    
+    console.log('jQuery loaded, version:', jQuery.fn.jquery);
+    
+    $(document).ready(function() {
+        console.log('DOM ready');
+        
+        // 设置 CSRF token
+        $.ajaxSetup({
+            beforeSend: function(xhr, settings) {
+                if (!this.crossDomain) {
+                    xhr.setRequestHeader("X-CSRFToken", "{{ csrf_token }}");
+                }
+            }
+        });
+
+        // 加载用户仓库列表
+        loadRepositoryList();
+
+        // 仓库选择变化事件
+        $('#repositorySelect').change(function() {
+            const selectedRepo = $(this).val();
+            if (selectedRepo) {
+                loadRepositoryFiles(selectedRepo);
+            } else {
+                $('#directory-tree').html('<p class="text-muted">请先选择仓库</p>');
+            }
+        });
+    });
+}
+
+// 启动初始化
+initGradingPage();
+
+// 加载仓库列表
+function loadRepositoryList() {
+    $.ajax({
+        url: '{% url "grading:get_repository_list_api" %}',
+        method: 'GET',
+        success: function(response) {
+            if (response.status === 'success') {
+                const select = $('#repositorySelect');
+                select.empty().append('<option value="">选择仓库...</option>');
+
+                response.repositories.forEach(function(repo) {
+                    select.append(`<option value="${repo.id}">${repo.name} (${repo.type === 'git' ? 'Git' : '本地'})</option>`);
+                });
+
+                // 如果只有一个仓库，自动选择
+                if (response.repositories.length === 1) {
+                    select.val(response.repositories[0].id).trigger('change');
+                }
+            } else {
+                console.error('加载仓库列表失败:', response.message);
+            }
+        },
+        error: function(xhr) {
+            console.error('加载仓库列表失败');
+        }
+    });
+}
+
+// 加载仓库文件
+function loadRepositoryFiles(repositoryId) {
+    $('#directory-tree').html('<p class="text-muted">正在加载文件...</p>');
+    
+    $.ajax({
+        url: '{% url "grading:get_directory_tree" %}',
+        method: 'GET',
+        data: {
+            repo_id: repositoryId
+        },
+        success: function(response) {
+            console.log('目录树API响应:', response);
+            if (response && response.children && Array.isArray(response.children)) {
+                if (response.children.length > 0) {
+                    if (typeof window.initTree === 'function') {
+                        console.log('调用 initTree 函数渲染目录树');
+                        window.initTree(response.children);
+                    } else {
+                        console.log('使用备用方法渲染目录树');
+                        renderDirectoryTree(response.children);
+                    }
+                } else {
+                    $('#directory-tree').html('<p class="text-muted text-warning">该仓库暂无文件</p>');
+                }
+            } else {
+                $('#directory-tree').html('<p class="text-danger">加载文件失败: 无效的目录结构</p>');
+            }
+        },
+        error: function(xhr) {
+            $('#directory-tree').html('<p class="text-danger">加载文件失败</p>');
+            console.error('加载仓库文件失败');
+        }
+    });
+}
+
+// 渲染目录树（备用方法）
+function renderDirectoryTree(files) {
+    const $container = $('#directory-tree');
+    $container.empty();
+    
+    if (!files || files.length === 0) {
+        $container.html('<p class="text-muted">该仓库没有文件</p>');
+        return;
+    }
+    
+    const $list = $('<ul class="list-group"></ul>');
+    
+    files.forEach(function(file) {
+        const isDir = file.type === 'folder';
+        const iconClass = isDir ? 'bi-folder' : 'bi-file-text';
+        const $item = $(`<li class="list-group-item ${isDir ? 'bg-light' : ''}">
+            <i class="bi ${iconClass} me-2"></i>${file.text || file.name}
+        </li>`);
+        
+        if (!isDir) {
+            $item.addClass('file-link').data('path', file.id);
+            $item.css('cursor', 'pointer');
+        }
+        
+        $list.append($item);
+    });
+    
+    $container.append($list);
+    
+    // 绑定文件点击事件
+    $container.find('.file-link').click(function(e) {
+        e.preventDefault();
+        const filePath = $(this).data('path');
+        loadFileContent(filePath);
+    });
+}
+
+// 文件点击事件
+function loadFileContent(filePath) {
+    console.log('Loading file:', filePath);
+    if (typeof window.loadFile === 'function') {
+        window.loadFile(filePath);
+    } else {
+        console.error('window.loadFile 函数未定义');
+    }
+}
 </script>
 {% endblock %}

@@ -93,4 +93,8 @@ urlpatterns = [
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
     path("sync-repository/", views.sync_repository_view, name="sync_repository"),
     path("api/repositories/", views.get_repository_list_api, name="get_repository_list_api"),
+    # 测试页面
+    path("jquery-test/", views.jquery_test, name="jquery_test"),
+    path("test-clean/", views.test_clean, name="test_clean"),
+    path("debug-simple/", views.debug_simple, name="debug_simple"),
 ]

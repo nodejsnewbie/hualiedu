@@ -1,4 +1,5 @@
 import logging
+import os
 
 from django.contrib.auth.models import User
 from django.db import models
@@ -205,15 +206,47 @@ class Repository(models.Model):
     def __str__(self):
         return f"{self.owner.username} - {self.name}"
 
+    def _get_user_root_base_dir(self) -> str:
+        """根据全局基础目录 + 用户名 计算用户仓库根目录。
+
+        最终目录结构：<global_base_dir>/<username>/
+        - 全局基础目录仅超级管理员可配置（default_repo_base_dir）
+        - 不再使用租户级基础仓库名
+        """
+        global_base = GlobalConfig.get_value("default_repo_base_dir", "~/jobs") or "~/jobs"
+        global_base = os.path.expanduser(global_base)
+        username = self.owner.username if self.owner and self.owner.username else "unknown"
+        return os.path.join(global_base, username)
+
+    def get_repo_dir_name(self) -> str:
+        """获取仓库目录名：
+        - 若为 Git 仓库并配置了 URL，则使用远程仓库名（去掉 .git）
+        - 否则使用 self.path（去首尾 /），为空时回退 self.name
+        """
+        if self.is_git_repository():
+            try:
+                from urllib.parse import urlparse
+
+                parsed = urlparse(self.url)
+                # 取路径最后一段
+                tail = parsed.path.rstrip('/').split('/')[-1]
+                if tail.endswith('.git'):
+                    tail = tail[:-4]
+                if tail:
+                    return tail
+            except Exception:
+                pass
+        if self.path:
+            return self.path.strip('/')
+        return self.name
+
     def get_full_path(self):
-        """获取完整路径"""
-        try:
-            user_profile = self.owner.profile
-            if user_profile and user_profile.repo_base_dir:
-                return f"{user_profile.repo_base_dir}/{self.path}"
-        except:
-            pass
-        return self.path
+        """获取仓库在本机的完整路径。
+        规则：<global_base>/<username>/<repo_dir_name>
+        """
+        root = self._get_user_root_base_dir()
+        sub_path = self.get_repo_dir_name()
+        return os.path.join(root, sub_path)
 
     def get_display_path(self):
         """获取显示路径"""

@@ -361,12 +361,13 @@ class RepositoryAdmin(admin.ModelAdmin):
         "path",
         "description",
         "is_active",
+        "local_path_preview",
         "created_at",
     )
     list_filter = ("is_active", "created_at")
     search_fields = ("name", "path", "description")
     ordering = ("-created_at",)
-    readonly_fields = ("created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at", "local_path_preview")
 
     def get_site_header(self):
         """自定义站点标题"""
@@ -470,7 +471,23 @@ class RepositoryAdmin(admin.ModelAdmin):
                     },
                 ),
             )
-        return self.fieldsets  # 编辑页面显示所有字段
+        # 编辑页面：展示只读的本地路径预览
+        return (
+            (
+                None,
+                {
+                    "fields": ("name", "path", "description", "is_active", "local_path_preview"),
+                    "description": "仓库的本地路径预览基于全局基础目录与用户名自动计算。",
+                },
+            ),
+            (
+                "系统信息",
+                {
+                    "fields": ("created_at", "updated_at"),
+                    "classes": ("collapse",),
+                },
+            ),
+        )
 
     def get_last_sync_time(self, obj):
         return obj.last_sync_time if hasattr(obj, "last_sync_time") else None
@@ -520,6 +537,14 @@ class RepositoryAdmin(admin.ModelAdmin):
         )
 
     get_action_buttons.short_description = "操作"
+
+    def local_path_preview(self, obj):
+        try:
+            return obj.get_full_path()
+        except Exception:
+            return ""
+
+    local_path_preview.short_description = "本地路径预览"
 
     def clone_repository(self, request, repo_id):
         """克隆仓库"""

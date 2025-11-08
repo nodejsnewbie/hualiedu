@@ -11,4 +11,5 @@ urlpatterns = [
     path("tasks/<int:task_id>/", views.task_detail_view, name="task_detail"),
     path("tasks/<int:task_id>/delete/", views.delete_task_view, name="delete_task"),
     path("api/tasks/<int:task_id>/status/", views.task_status_api, name="task_status_api"),
+    path("api/browse-directory/", views.browse_directory_api, name="browse_directory_api"),
 ]

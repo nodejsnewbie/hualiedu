@@ -48,9 +48,27 @@ def get_class_identifier_from_path(file_path: str, base_dir: str) -> str:
 def get_or_create_grade_type_config(class_identifier: str, tenant=None) -> GradeTypeConfig:
     """获取或创建班级的评分类型配置"""
     try:
+        # 如果没有租户，尝试查找或创建一个默认配置
         if tenant is None:
-            logger.error("租户不能为空")
-            return None
+            logger.warning("租户为空，使用默认配置")
+            # 查找是否有该班级的默认配置
+            try:
+                config = GradeTypeConfig.objects.get(
+                    tenant__isnull=True,
+                    class_identifier=class_identifier
+                )
+                logger.info(f"找到班级 {class_identifier} 的默认评分类型配置: {config.grade_type}")
+                return config
+            except GradeTypeConfig.DoesNotExist:
+                # 创建默认配置
+                config = GradeTypeConfig.objects.create(
+                    tenant=None,
+                    class_identifier=class_identifier,
+                    grade_type="letter",
+                    is_locked=False
+                )
+                logger.info(f"为班级 {class_identifier} 创建默认评分类型配置: {config.grade_type}")
+                return config
 
         config, created = GradeTypeConfig.objects.get_or_create(
             tenant=tenant,
@@ -107,8 +125,9 @@ def lock_grade_type_for_class(class_identifier: str, tenant=None) -> bool:
         if config is None:
             return False
         config.lock_grade_type()
+        tenant_name = tenant.name if tenant else "默认"
         logger.info(
-            f"已锁定租户 {tenant.name} 的班级 {class_identifier} 的评分类型: {config.grade_type}"
+            f"已锁定租户 {tenant_name} 的班级 {class_identifier} 的评分类型: {config.grade_type}"
         )
         return True
     except Exception as e:

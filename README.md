@@ -1,169 +1,94 @@
-# Huali Edu 项目
+# 华立教育项目
 
-## 简介
-本项目为华立教育成绩管理与批量评分系统，基于Django开发，支持多班级、多作业自动登记成绩。
+## 🚀 快速开始
 
-## 目录结构
-- grading/         主应用，包含视图、模板、静态资源
-- huali_edu/       核心业务逻辑与工具
-- hualiEdu/        Django项目配置
-- tests/           自动化测试用例
-- static/          静态资源（JS/CSS/图片）
-- staticfiles/     Django收集的静态文件
-- media/           运行时上传/生成文件
-- scripts/         自动化脚本
-- docs/            项目文档
+### 环境要求
+- Python 3.13 (conda py313环境)
+- Django 4.2.20
 
-## 快速开始
-
-### 1. 环境变量配置
-本项目使用环境变量保护敏感信息，请先配置环境变量：
-
+### 安装和运行
 ```bash
-# 方法1：使用自动设置脚本
-python scripts/setup_env.py
+# 1. 激活环境
+conda activate py313
 
-# 方法2：手动复制并编辑
-cp env.example .env
-# 然后编辑 .env 文件，填入实际的配置值
-```
-
-**重要配置项：**
-- `SECRET_KEY`: Django 密钥
-- `VOLCENGINE_API_KEY`: 火山引擎 AI API 密钥
-- `DEBUG`: 调试模式 (True/False)
-
-### 2. 验证配置
-```bash
-python scripts/verify_env.py
-```
-
-### 3. 安装依赖
-```bash
+# 2. 安装依赖
 pip install -r requirements.txt
-```
+pip install -r requirements-dev.txt  # 开发环境
 
-### 4. 初始化数据库
-```bash
-python manage.py migrate
-```
-
-### 5. 创建管理员账号
-```bash
-python manage.py createsuperuser
-```
-
-### 6. 启动开发服务器
-```bash
+# 3. 运行项目
 python manage.py runserver
 ```
 
-### 7. 访问应用
-访问 http://localhost:8000/
+## 📚 项目结构
 
-**详细文档请查看 `docs/` 目录：**
-- 📚 [文档索引](docs/README.md) - 完整的文档导航
-- 🔧 [环境配置](docs/environment.md) - 环境变量和部署配置
-- 🤖 [AI评分功能](docs/features/ai-scoring.md) - 智能评分系统
-- 📁 [仓库管理](docs/features/repository-management.md) - 用户级仓库管理系统
-- 🏢 [多租户系统](docs/features/multi-tenant.md) - 多租户架构
-- 📅 [校历功能](docs/features/calendar.md) - 学期和课程管理
-- 🔒 [安全指南](docs/security/api-security.md) - API安全最佳实践
-- 🧪 [测试指南](docs/testing.md) - 完整的测试框架
-
-## 测试
-
-### 测试结构
 ```
-grading/tests/
-├── base.py                  # 测试基类和工具
-├── test_models.py           # 模型测试
-├── test_views.py            # 视图测试
-├── test_forms.py            # 表单测试
-├── test_utils.py            # 工具函数测试
-├── test_middleware.py       # 中间件测试
-├── test_settings.py         # 测试配置
-└── test_fixtures.py         # 测试数据固件
-
-tests/
-├── test_integration.py      # 集成测试
-└── test_utils.py           # 通用工具测试
+huali-edu/
+├── grading/           # 核心应用 - 评分系统
+├── toolbox/           # 工具箱应用
+├── templates/         # 全局模板
+├── static/            # 静态文件
+├── docs/              # 项目文档
+├── tests/             # 测试文件
+└── scripts/           # 工具脚本
 ```
 
-### 运行测试
+## 🎯 核心功能
+
+- **智能评分系统** - AI驱动的作业评分
+- **多租户架构** - 支持多个教育机构
+- **仓库管理** - Git和本地仓库管理
+- **学期管理** - 自动学期检测和状态显示
+- **批量处理** - 批量评分和文档处理
+
+## 🔧 技术栈
+
+- **后端**: Django 4.2.20, Python 3.13
+- **数据库**: SQLite (开发) / PostgreSQL (生产)
+- **AI服务**: 火山引擎 Ark SDK
+- **文件处理**: python-docx, openpyxl, pandas
+- **版本控制**: GitPython
+- **前端**: Bootstrap + Django Crispy Forms
+
+## 🛠️ 开发指南
+
+### 代码规范
+项目使用 pre-commit 确保代码质量：
+```bash
+# 安装 pre-commit 钩子
+pre-commit install
+
+# 手动运行检查
+black . --line-length=100
+isort . --profile=black
+flake8 .
+```
+
+### 测试
 ```bash
 # 运行所有测试
-python scripts/run_tests.py
+python manage.py test
 
-# 运行特定类型的测试
-python scripts/run_tests.py --type models     # 模型测试
-python scripts/run_tests.py --type views      # 视图测试
-python scripts/run_tests.py --type forms      # 表单测试
-python scripts/run_tests.py --type unit       # 单元测试
-python scripts/run_tests.py --type integration # 集成测试
-
-# 高级选项
-python scripts/run_tests.py --coverage        # 生成覆盖率报告
-python scripts/run_tests.py --verbose         # 详细输出
-python scripts/run_tests.py --failfast        # 遇到失败立即停止
-python scripts/run_tests.py --parallel 4      # 并行运行
-
-# 原生Django/pytest命令
-python manage.py test                          # Django测试
-python -m pytest                              # pytest测试
+# 运行特定测试
+python manage.py test grading.tests.test_models
 ```
 
-### 测试覆盖率
-- 模型测试覆盖率: > 90%
-- 视图测试覆盖率: > 85%
-- 工具函数覆盖率: > 95%
-- 总体覆盖率: > 80%
+### 环境管理
+项目支持多种环境管理方式：
+- direnv (推荐)
+- conda-project
+- VS Code 集成
 
-详细测试指南请查看：`docs/testing.md`
+## 📖 详细文档
 
-## 开发规范
+- [团队协作指南](docs/TEAM_COLLABORATION.md) - 开发规范和最佳实践
 
-- 代码格式化与检查：使用 black + isort + flake8，并通过 pre-commit 自动校验。
-- 安装开发依赖与安装钩子：
-  ```bash
-  pip install -r requirements-dev.txt
-  pre-commit install
-  # 首次可对全库执行一遍
-  pre-commit run --all-files
-  ```
+## 🤝 贡献
 
-## 部署
-- 推荐使用 Docker 部署，见 `Dockerfile` 和 `docker-compose.yml`
-- 生产环境请配置环境变量，分离敏感信息
+1. Fork 项目
+2. 创建功能分支
+3. 提交更改
+4. 创建 Pull Request
 
-## 常见问题
-- **静态文件未加载？**
-  - 请运行 `python manage.py collectstatic` 并确保 `STATIC_ROOT` 配置正确
-- **数据库迁移失败？**
-  - 检查 `migrations/` 目录，尝试 `python manage.py makemigrations` 后再 migrate
-- **成绩未写入Excel？**
-  - 检查日志输出、文件权限、学生名与Excel一致性
+## 📄 许可证
 
-## 贡献
-- 欢迎提交PR和Issue，建议先阅读 `docs/project_rules.md`
-
-## 项目维护
-
-### 清理项目文件
-```bash
-# 清理缓存文件、日志文件和临时文件
-python scripts/cleanup.py
-```
-
-### 更新依赖
-```bash
-# 更新requirements.txt
-pip-compile requirements.in
-
-# 安装更新的依赖
-pip install -r requirements.txt
-```
-
-## 其它
-- 日志文件默认输出到 logs/ 目录
-- 环境变量配置请参考 `.env.example`
+本项目采用 MIT 许可证。

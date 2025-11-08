@@ -1,44 +1,46 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
+*$py.class
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Static files
+/static/
+/staticfiles/
+
+# Media files
+/media/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Virtual environments (if using virtualenv instead of conda)
 .venv/
 venv/
-.env
-.env.backup
-
-# Django
-staticfiles/
-media/grades/
-media/ssh_keys/
-logs/
-*.sqlite3
-
-# Tools
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-.DS_Store
-
-# History and backup files
-.history/
-*.backup
-*~
+env/
 
 # IDE
+.vscode/
 .idea/
 *.swp
 *.swo
 
-# 保留VS Code配置但忽略用户特定设置
-.vscode/c_cpp_properties.json
-.vscode/extensions.json
+# OS
+.DS_Store
+Thumbs.db
 
-# 环境配置（保留项目配置，忽略用户特定配置）
-.direnv/
-.autoenv_leave
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Testing
+.pytest_cache/
+.tox/

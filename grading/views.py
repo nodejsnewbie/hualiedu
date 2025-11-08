@@ -260,14 +260,15 @@ def validate_file_operation(file_path_param="file_path", require_write=True):
     return decorator
 
 
-def get_directory_file_count_cached(dir_path):
+def get_directory_file_count_cached(dir_path, base_dir=None):
     """获取目录文件数量（带缓存）"""
     if dir_path in directory_file_count_cache:
         return directory_file_count_cache[dir_path]
 
     try:
         # 获取基础目录
-        base_dir = get_base_directory()
+        if base_dir is None:
+            base_dir = get_base_directory()
         if base_dir is None:
             return 0
 
@@ -393,34 +394,15 @@ def grading_simple(request):
             logger.error(f"无权限访问目录: {base_dir}")
             return HttpResponseForbidden("无权限访问目录")
 
-        # 获取目录树
-        try:
-            initial_tree_data = get_directory_tree()
-        except Exception as e:
-            logger.error(f"获取目录树失败: {str(e)}")
-            return render(
-                request,
-                "grading_simple.html",
-                {
-                    "files": [],
-                    "error": f"获取目录树失败: {str(e)}",
-                    "config": None,
-                    "base_dir": base_dir,
-                    "initial_tree_data": "[]",
-                },
-            )
+        # 准备初始数据
+        context = {
+            "repositories": Repository.objects.filter(owner=request.user, is_active=True),
+            "initial_tree_data": "[]",  # 初始为空，通过AJAX加载
+            "page_title": "简化评分页面",
+            "base_dir": base_dir,
+        }
 
-        return render(
-            request,
-            "grading_simple.html",
-            {
-                "files": [],
-                "error": None,
-                "config": None,
-                "base_dir": base_dir,
-                "initial_tree_data": json.dumps(initial_tree_data, ensure_ascii=False),
-            },
-        )
+        return render(request, "grading_simple.html", context)
 
     except Exception as e:
         logger.error(f"处理简化评分页面请求失败: {str(e)}")
@@ -428,11 +410,11 @@ def grading_simple(request):
             request,
             "grading_simple.html",
             {
-                "files": [],
+                "repositories": [],
                 "error": f"处理请求失败: {str(e)}",
-                "config": None,
-                "base_dir": base_dir if "base_dir" in locals() else None,
                 "initial_tree_data": "[]",
+                "page_title": "简化评分页面",
+                "base_dir": None,
             },
         )
 
@@ -458,8 +440,11 @@ def get_dir_file_count(request):
         if not dir_path:
             return HttpResponse("缺少path参数", status=400)
 
+        # 获取与请求相关的基础目录
+        base_dir = get_base_directory(request)
+        
         # 使用缓存获取文件数量
-        file_count = get_directory_file_count_cached(dir_path)
+        file_count = get_directory_file_count_cached(dir_path, base_dir=base_dir)
 
         # 直接返回文件数量字符串
         return HttpResponse(str(file_count))
@@ -484,7 +469,7 @@ def grading_page(request):
             "page_title": "作业评分",
         }
 
-        return render(request, "grading_simple.html", context)
+        return render(request, "grading_fixed.html", context)
 
     except Exception as e:
         logger.error(f"处理评分页面请求失败: {str(e)}")
@@ -785,11 +770,17 @@ def grading_view(request):
         )
 
 
-def get_directory_tree(file_path=""):
-    """获取目录树结构（返回Python对象列表）"""
+def get_directory_tree(file_path: str = "", base_dir: str | None = None):
+    """获取目录树结构（返回Python对象列表）
+
+    Args:
+        file_path: 相对路径（相对于 base_dir）
+        base_dir: 基础目录，若为空则读取全局默认目录
+    """
     try:
-        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
-        base_dir = os.path.expanduser(repo_base_dir)
+        if not base_dir:
+            repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
+            base_dir = os.path.expanduser(repo_base_dir)
         logger.info(f"Base directory: {base_dir}")
 
         if not os.path.exists(base_dir):
@@ -848,7 +839,7 @@ def get_directory_tree(file_path=""):
 
                 # 如果是目录，递归获取子目录并统计文件数量
                 if is_dir:
-                    children = get_directory_tree(relative_path)
+                    children = get_directory_tree(relative_path, base_dir=base_dir)
                     if children:
                         node["children"] = children
                     else:
@@ -856,7 +847,7 @@ def get_directory_tree(file_path=""):
                         node["state"]["disabled"] = True
 
                     # 统计并缓存目录文件数量
-                    file_count = get_directory_file_count_cached(relative_path)
+                    file_count = get_directory_file_count_cached(relative_path, base_dir=base_dir)
                     node["data"] = {"file_count": file_count}
                 # 如果是文件，添加文件特定的属性
                 else:
@@ -891,15 +882,32 @@ def get_directory_tree(file_path=""):
 
 @login_required
 def get_directory_tree_view(request):
-    """返回目录树 JSON（GET）"""
+    """返回目录树 JSON（GET）
+
+    支持按所选仓库加载：
+    - repo_id: 仓库ID（优先）
+    - path: 以基础目录为根的相对路径
+    """
     try:
-        if not request.user.is_staff:
-            return HttpResponseForbidden("无权限访问")
-        data = get_directory_tree("")
-        return JsonResponse(data, safe=False)
+        # 权限：允许已登录用户加载自己的仓库目录
+        repo_id = request.GET.get("repo_id")
+        rel_path = request.GET.get("path", "").strip()
+
+        base_dir = None
+        if repo_id:
+            # 按仓库ID定位用户仓库
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                base_dir = repo.get_full_path()
+            except Repository.DoesNotExist:
+                return JsonResponse({"children": []}, safe=False)
+
+        data = get_directory_tree(rel_path, base_dir=base_dir)
+        # 转换为前端模板期望的格式（包含children属性）
+        return JsonResponse({"children": data}, safe=False)
     except Exception as e:
         logger.error(f"get_directory_tree_view error: {e}")
-        return JsonResponse([], safe=False)
+        return JsonResponse({"children": []}, safe=False)
 
 
 def get_file_grade_info(full_path):
@@ -1085,19 +1093,29 @@ def get_file_content(request):
     if request.method == "POST":
         try:
             path = request.POST.get("path")
+            repo_id = request.POST.get("repo_id")
+            
             if not path:
                 logger.error("未提供文件路径")
                 return JsonResponse({"status": "error", "message": "未提供文件路径"})
 
-            # 从全局配置获取仓库基础目录
-            repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
-            if not repo_base_dir:
-                logger.error("未配置仓库基础目录")
-                return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
+            # 如果提供了仓库ID，使用仓库特定的路径
+            if repo_id:
+                try:
+                    repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                    base_dir = repo.get_full_path()
+                    full_path = os.path.join(base_dir, path)
+                except Repository.DoesNotExist:
+                    return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+            else:
+                # 使用全局配置的基础目录（向后兼容）
+                repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+                if not repo_base_dir:
+                    logger.error("未配置仓库基础目录")
+                    return JsonResponse({"status": "error", "message": "未配置仓库基础目录"})
 
-            # 展开路径中的用户目录符号（~）
-            base_dir = os.path.expanduser(repo_base_dir)
-            full_path = os.path.join(base_dir, path)
+                base_dir = os.path.expanduser(repo_base_dir)
+                full_path = os.path.join(base_dir, path)
 
             # 检查文件是否存在
             if not os.path.exists(full_path):
@@ -1702,33 +1720,68 @@ def save_teacher_comment(request):
 
 
 @login_required
-@require_http_methods(["GET"])
-@validate_file_operation(file_path_param="file_path", require_write=False)
+@require_http_methods(["GET", "POST"])
 def get_file_grade_info_api(request):
     """获取文件评分信息的API"""
     try:
-        full_path = request.validated_file_path
+        # 获取参数
+        if request.method == "GET":
+            path = request.GET.get("path")
+            repo_id = request.GET.get("repo_id")
+        else:
+            path = request.POST.get("path")
+            repo_id = request.POST.get("repo_id")
+        
+        if not path:
+            logger.error("未提供文件路径")
+            return JsonResponse({"has_grade": False, "error": "未提供文件路径"}, status=400)
+
+        logger.info(f"获取文件评分信息: path={path}, repo_id={repo_id}")
+
+        # 如果提供了仓库ID，使用仓库特定的路径
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                base_dir = repo.get_full_path()
+                full_path = os.path.join(base_dir, path)
+            except Repository.DoesNotExist:
+                return JsonResponse({"has_grade": False, "error": "仓库不存在或无权限访问"}, status=400)
+        else:
+            # 使用全局配置的基础目录（向后兼容）
+            repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+            if not repo_base_dir:
+                logger.error("未配置仓库基础目录")
+                return JsonResponse({"has_grade": False, "error": "未配置仓库基础目录"}, status=400)
+
+            base_dir = os.path.expanduser(repo_base_dir)
+            full_path = os.path.join(base_dir, path)
+
+        # 检查文件是否存在
+        if not os.path.exists(full_path):
+            logger.error(f"文件不存在: {full_path}")
+            return JsonResponse({"has_grade": False, "error": "文件不存在"}, status=400)
+
+        if not os.path.isfile(full_path):
+            logger.error(f"路径不是文件: {full_path}")
+            return JsonResponse({"has_grade": False, "error": "路径不是文件"}, status=400)
 
         # 获取评分信息
         grade_info = get_file_grade_info(full_path)
+        logger.info(f"评分信息: {grade_info}")
 
-        # 获取文件内容用于分析
-        content = read_file_content(full_path)
+        # 构造前端期望的响应格式
+        response_data = {
+            "has_grade": bool(grade_info.get("grade")),
+            "grade": grade_info.get("grade", ""),
+            "grade_type": grade_info.get("grade_type", ""),
+        }
 
-        # 截断内容用于预览
-        content_preview = content[:500] + "..." if len(content) > 500 else content
-
-        return create_success_response(
-            {
-                "grade_info": grade_info,
-                "content_preview": content_preview,
-                "content_length": len(content),
-            }
-        )
+        return JsonResponse(response_data)
 
     except Exception as e:
         logger.error(f"获取文件评分信息API异常: {str(e)}")
-        return create_error_response("服务器内部错误", status_code=500)
+        logger.error(f"异常详情: {traceback.format_exc()}")
+        return JsonResponse({"has_grade": False, "error": str(e)}, status=500)
 
 
 @login_required
@@ -2211,7 +2264,7 @@ def convert_score_to_grade(score, grade_type="letter"):
             return "E"
 
 
-def _perform_ai_scoring_for_file(full_path, base_dir):
+def _perform_ai_scoring_for_file(full_path, base_dir, user=None):
     """对单个文件执行AI评分的核心逻辑"""
     try:
         logger.info(f"=== 开始AI评分文件: {os.path.basename(full_path)} ===")
@@ -2280,9 +2333,29 @@ def _perform_ai_scoring_for_file(full_path, base_dir):
         )
 
         class_identifier = get_class_identifier_from_path(full_path, base_dir)
+        logger.info(f"班级标识: {class_identifier}")
+        
         # 获取用户的租户
         tenant = None
+        if user:
+            logger.info(f"用户: {user.username} (ID: {user.id})")
+            try:
+                # 通过UserProfile获取租户
+                profile = user.profile
+                tenant = profile.tenant
+                logger.info(f"获取到用户Profile: {profile}")
+                logger.info(f"获取到用户租户: {tenant.name if tenant else 'None'} (ID: {tenant.id if tenant else 'None'})")
+            except AttributeError as e:
+                logger.error(f"用户 {user.username} 没有关联的Profile: {e}")
+                tenant = None
+            except Exception as e:
+                logger.error(f"获取用户租户时发生错误: {e}")
+                tenant = None
+        else:
+            logger.error("用户对象为None")
+        
         grade_config = get_or_create_grade_type_config(class_identifier, tenant)
+        logger.info(f"评分配置: {grade_config}")
 
         # 使用班级配置的评分类型转换分数
         grade = convert_score_to_grade(score, grade_config.grade_type)
@@ -2315,19 +2388,30 @@ def ai_score_view(request):
         logger.info(f"请求POST数据: {request.POST}")
 
         path = request.POST.get("path")
-        logger.info(f"文件路径: {path}")
+        repo_id = request.POST.get("repo_id")
+        logger.info(f"文件路径: {path}, 仓库ID: {repo_id}")
 
         if not path:
             logger.error("未提供文件路径")
             return JsonResponse({"status": "error", "message": "未提供文件路径"}, status=400)
 
-        repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
-        if not repo_base_dir:
-            logger.error("未配置仓库基础目录")
-            return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
+        # 如果提供了仓库ID，使用仓库特定的路径
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                base_dir = repo.get_full_path()
+                full_path = os.path.join(base_dir, path)
+            except Repository.DoesNotExist:
+                return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"}, status=400)
+        else:
+            # 使用全局配置的基础目录（向后兼容）
+            repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
+            if not repo_base_dir:
+                logger.error("未配置仓库基础目录")
+                return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
 
-        base_dir = os.path.expanduser(repo_base_dir)
-        full_path = os.path.join(base_dir, path)
+            base_dir = os.path.expanduser(repo_base_dir)
+            full_path = os.path.join(base_dir, path)
 
         logger.info(f"基础目录: {base_dir}")
         logger.info(f"完整文件路径: {full_path}")
@@ -2352,7 +2436,7 @@ def ai_score_view(request):
             )
 
         logger.info("开始执行AI评分...")
-        result = _perform_ai_scoring_for_file(full_path, base_dir)
+        result = _perform_ai_scoring_for_file(full_path, base_dir, request.user)
         logger.info(f"AI评分结果: {result}")
 
         if result["success"]:
@@ -2426,7 +2510,7 @@ def batch_ai_score_view(request):
                     )
                     error_count += 1
                 else:
-                    result = _perform_ai_scoring_for_file(file_path, base_dir)
+                    result = _perform_ai_scoring_for_file(file_path, base_dir, request.user)
                     if result["success"]:
                         success_count += 1
                     else:
@@ -2543,7 +2627,7 @@ def _execute_batch_ai_scoring(request):
         logger.info(f"找到 {len(file_list)} 个文件需要处理")
 
         # 使用队列处理批量AI评分
-        results = process_batch_ai_scoring_with_queue(file_list, base_dir)
+        results = process_batch_ai_scoring_with_queue(file_list, base_dir, request.user)
         success_count = results["success"]
         error_count = results["failed"]
 
@@ -2560,7 +2644,7 @@ def _execute_batch_ai_scoring(request):
         return JsonResponse({"status": "error", "message": f"执行批量AI评分失败: {str(e)}"})
 
 
-def process_batch_ai_scoring_with_queue(file_list, base_dir):
+def process_batch_ai_scoring_with_queue(file_list, base_dir, user=None):
     """使用队列处理批量AI评分"""
     logger.info(f"=== 开始批量AI评分，共 {len(file_list)} 个文件 ===")
 
@@ -2586,7 +2670,7 @@ def process_batch_ai_scoring_with_queue(file_list, base_dir):
                 continue
 
             # 处理单个文件
-            result = _process_single_file_for_ai_scoring(file_path, base_dir, filename)
+            result = _process_single_file_for_ai_scoring(file_path, base_dir, filename, user)
 
             if result["success"]:
                 results["success"] += 1
@@ -2616,7 +2700,7 @@ def process_batch_ai_scoring_with_queue(file_list, base_dir):
     return results
 
 
-def _process_single_file_for_ai_scoring(file_path, base_dir, filename):
+def _process_single_file_for_ai_scoring(file_path, base_dir, filename, user=None):
     """处理单个文件进行AI评分"""
     try:
         # 检查文件是否已有评分
@@ -2629,7 +2713,7 @@ def _process_single_file_for_ai_scoring(file_path, base_dir, filename):
                 "error": f"该作业已有评分：{grade_info['grade']}，无需重复评分",
             }
         else:
-            result = _perform_ai_scoring_for_file(file_path, base_dir)
+            result = _perform_ai_scoring_for_file(file_path, base_dir, user)
             return {"file": filename, **result}
     except Exception as e:
         logger.error(f"处理文件 {filename} 失败: {str(e)}")
@@ -2640,7 +2724,7 @@ def _process_single_file_for_ai_scoring(file_path, base_dir, filename):
         }
 
 
-def _process_directory_recursively_for_ai_scoring(directory_path, base_dir):
+def _process_directory_recursively_for_ai_scoring(directory_path, base_dir, user=None):
     """递归处理目录进行AI评分"""
     results = []
     success_count = 0
@@ -2654,7 +2738,7 @@ def _process_directory_recursively_for_ai_scoring(directory_path, base_dir):
                     # 计算相对路径用于显示
                     rel_path = os.path.relpath(file_path, base_dir)
 
-                    result = _process_single_file_for_ai_scoring(file_path, base_dir, rel_path)
+                    result = _process_single_file_for_ai_scoring(file_path, base_dir, rel_path, user)
                     if result["success"]:
                         success_count += 1
                     else:
@@ -3997,8 +4081,14 @@ def sync_repository_view(request):
 
         # 使用GitHandler进行同步
         from .utils import GitHandler
+        import os  # 确保os模块可用
 
+        # 计算用户级根目录，确保目录存在
         full_path = repository.get_full_path()
+        try:
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        except Exception as e:
+            logger.warning(f"创建仓库根目录失败: {e}")
 
         # 检查本地是否已存在
         if os.path.exists(full_path):
@@ -4075,3 +4165,18 @@ def get_repository_list_api(request):
     except Exception as e:
         logger.error(f"获取仓库列表失败: {str(e)}")
         return JsonResponse({"status": "error", "message": f"获取仓库列表失败: {str(e)}"})
+
+
+def jquery_test(request):
+    """jQuery测试页面"""
+    return render(request, "jquery_test.html")
+
+
+def test_clean(request):
+    """干净的测试页面"""
+    return render(request, "test_clean.html")
+
+
+def debug_simple(request):
+    """调试页面"""
+    return render(request, "debug_simple.html")

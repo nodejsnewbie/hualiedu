@@ -1,0 +1,25 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>jQuery Test</title>
+</head>
+<body>
+    <h1>jQuery Test</h1>
+    <div id="test">Loading...</div>
+    
+    <!-- jQuery -->
+    <script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
+    <script>
+        console.log('jQuery loaded:', typeof jQuery !== 'undefined');
+        if (typeof jQuery !== 'undefined') {
+            console.log('jQuery version:', jQuery.fn.jquery);
+            $(document).ready(function() {
+                $('#test').text('jQuery is working!');
+            });
+        } else {
+            document.getElementById('test').textContent = 'jQuery failed to load';
+        }
+    </script>
+</body>
+</html>
