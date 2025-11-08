@@ -6,10 +6,10 @@
 tests/
 ├── README.md                    # 本文件
 ├── __init__.py                  # 测试包初始化
-├── test_integration.py          # 集成测试
-├── test_utils.py                # 工具函数测试
-└── test_ssh_key_upload.py       # SSH密钥上传测试
+└── test_git_handler.py          # Git处理工具测试
 ```
+
+**注意：** 手动测试脚本已移至 `scripts/` 目录。
 
 ## 运行测试
 
