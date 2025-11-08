@@ -825,6 +825,11 @@ window.initTree = function() {
         'plugins': ['types', 'wholerow', 'state', 'contextmenu'],
         'contextmenu': {
             'items': function(node) {
+                // 安全检查：确保 node 存在且有效
+                if (!node || !node.id) {
+                    return {};
+                }
+                
                 var items = {};
                 if (node.type === 'folder') {
                     items.batchAiScore = {
@@ -852,17 +857,20 @@ window.initTree = function() {
     };
 
     // 初始化 jstree
-    $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
-        console.log('Tree initialized');
-        // 树初始化完成后，如果有初始选中的节点，加载其内容
-        const selectedNodes = $('#directory-tree').jstree('get_selected');
-        if (selectedNodes.length > 0) {
-            const node = $('#directory-tree').jstree('get_node', selectedNodes[0]);
-            if (node && node.type === 'file') {
-                loadFile(node.id);
-            }
-        }
-    }).on('select_node.jstree', function(e, data) {
+    try {
+        $('#directory-tree').jstree(treeConfig)
+            .on('ready.jstree', function() {
+                console.log('Tree initialized');
+                // 树初始化完成后，如果有初始选中的节点，加载其内容
+                const selectedNodes = $('#directory-tree').jstree('get_selected');
+                if (selectedNodes.length > 0) {
+                    const node = $('#directory-tree').jstree('get_node', selectedNodes[0]);
+                    if (node && node.type === 'file') {
+                        loadFile(node.id);
+                    }
+                }
+            })
+            .on('select_node.jstree', function(e, data) {
         // 确保只处理文件节点
         if (data.node.type === 'file') {
             // 取消其他节点的选中状态
@@ -879,6 +887,10 @@ window.initTree = function() {
             updateNavigationButtons();
         }
     });
+    } catch (error) {
+        console.error('初始化 jstree 时出错:', error);
+        $('#directory-tree').html('<div class="alert alert-warning">目录树初始化失败，请刷新页面重试</div>');
+    }
 }
 
 // 页面加载完成后初始化
