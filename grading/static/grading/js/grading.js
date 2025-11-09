@@ -288,6 +288,21 @@ window.handleGradeInfo = function(gradeInfo) {
     console.log('当前评分方式:', gradeMode);
     console.log('当前评分:', selectedGrade);
 
+    // 检查文件是否被锁定
+    if (gradeInfo.locked) {
+        console.log('文件已被锁定，禁用所有评分功能');
+        // 禁用所有评分按钮
+        $('.grade-button').prop('disabled', true).addClass('disabled');
+        $('#add-grade-to-file').prop('disabled', true);
+        $('#cancel-grade').prop('disabled', true);
+        $('#teacher-comment-btn').prop('disabled', true);
+        
+        // 显示锁定提示
+        const lockMessage = '<div class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> 此文件因格式错误已被锁定，不允许修改评分和评价</div>';
+        $('#file-content').prepend(lockMessage);
+        return;
+    }
+
     if (gradeInfo.has_grade && gradeInfo.grade) {
         // 文件已有评分，设置按钮状态
         console.log('文件已有评分:', gradeInfo.grade, '类型:', gradeInfo.grade_type);

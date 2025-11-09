@@ -1531,6 +1531,7 @@ def get_file_grade_info(full_path):
             "grade_type": None,  # 'letter' 或 'text'
             "in_table": False,
             "ai_grading_disabled": False,
+            "locked": False,  # 是否被锁定（格式错误的实验报告）
         }
 
         if ext == ".docx":
@@ -1605,8 +1606,15 @@ def get_file_grade_info(full_path):
                 # 如果表格中没有找到，检查段落中是否有评分
                 if not grade_info["has_grade"]:
                     for paragraph in doc.paragraphs:
-                        if paragraph.text.startswith("老师评分："):
-                            grade_text = paragraph.text.replace("老师评分：", "").strip()
+                        text = paragraph.text.strip()
+                        
+                        # 检查是否被锁定
+                        if "【格式错误-已锁定】" in text or "格式错误-已锁定" in text:
+                            grade_info["locked"] = True
+                            logger.info("检测到文件已被锁定")
+                        
+                        if text.startswith("老师评分："):
+                            grade_text = text.replace("老师评分：", "").strip()
                             if grade_text:
                                 grade_info["has_grade"] = True
                                 grade_info["grade"] = grade_text
@@ -1621,7 +1629,9 @@ def get_file_grade_info(full_path):
                                     "不及格",
                                 ]:
                                     grade_info["grade_type"] = "text"
-                                break
+                        
+                        if grade_info["has_grade"] and grade_info["locked"]:
+                            break
 
             except Exception as e:
                 logger.error(f"检查 Word 文档评分失败: {str(e)}")
@@ -4200,6 +4210,13 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         # Word文档处理
         doc = Document(full_path)
         
+        # 检查文件是否已被锁定（格式错误的实验报告）
+        for paragraph in doc.paragraphs:
+            text = paragraph.text.strip()
+            if "【格式错误-已锁定】" in text or "格式错误-已锁定" in text:
+                logger.warning(f"文件已锁定，不允许修改: {full_path}")
+                return "此文件因格式错误已被锁定，不允许修改评分和评价"
+        
         # 如果是实验报告，使用特殊的表格格式
         format_warning = None
         if is_lab_report and grade:
@@ -4209,12 +4226,12 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
                 logger.info(f"已写入实验报告: 评分={grade}, 评价={comment}")
                 return None  # 返回None表示没有警告
             else:
-                # 实验报告格式不正确，给C评分并提示
+                # 实验报告格式不正确，给D评分并提示，且锁定不允许修改
                 logger.warning("实验报告格式写入失败：未找到'教师（签字）'表格")
-                logger.warning("将给予C评分并提示学生按要求格式写实验报告")
-                format_warning = "实验报告格式不正确（未找到'教师（签字）'表格），已自动给予C评分"
-                grade = "C"
-                comment = "请按要求的格式写实验报告"
+                logger.warning("将给予D评分并锁定，不允许后续修改")
+                format_warning = "实验报告格式不正确（未找到'教师（签字）'表格），已自动给予D评分并锁定"
+                grade = "D"
+                comment = "【格式错误-已锁定】请按要求的格式写实验报告，此评分不可修改"
                 # 格式错误时，改为按普通作业处理
                 is_lab_report = False
                 logger.info("实验报告格式错误，改为按普通作业处理")
