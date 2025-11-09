@@ -2498,8 +2498,7 @@ def save_grade(request):
 
 def clear_lab_report_grade_and_comment(doc):
     """
-    清除实验报告表格中的评分和评价
-    查找包含"教师（签字）："的单元格，清空评分和评价，保留"教师（签字）"文本
+    清除实验报告表格中的评分和评价，只保留"教师（签字）"文本
     
     Args:
         doc: Document对象
@@ -2511,48 +2510,35 @@ def clear_lab_report_grade_and_comment(doc):
         from docx.shared import Pt
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         
-        logger.info(f"=== 开始清除实验报告评分和评价 ===")
+        logger.info("=== 开始清除实验报告评分和评价 ===")
         
-        # 遍历所有表格
-        for table_idx, table in enumerate(doc.tables):
-            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
-            for row_idx, row in enumerate(table.rows):
-                for col_idx, cell in enumerate(row.cells):
-                    cell_text = cell.text.strip()
-                    
-                    # 查找包含"教师（签字）："的单元格
-                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
-                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
-                        logger.info(f"原始内容: '{cell_text}'")
-                        
-                        # 提取并保留"教师（签字）："文本
-                        teacher_signature_text = ""
-                        for line in cell_text.split('\n'):
-                            if '教师（签字）' in line or '教师(签字)' in line:
-                                teacher_signature_text = line
-                                logger.info(f"保留教师签字文本: '{teacher_signature_text}'")
-                                break
-                        
-                        # 清空单元格
-                        for paragraph in cell.paragraphs:
-                            paragraph.clear()
-                        while len(cell.paragraphs) > 1:
-                            p = cell.paragraphs[-1]._element
-                            p.getparent().remove(p)
-                        
-                        # 只写入"教师（签字）"文本
-                        if teacher_signature_text:
-                            p = cell.paragraphs[0]
-                            run = p.add_run(teacher_signature_text)
-                            run.font.size = Pt(10)
-                            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            logger.info(f"已恢复教师签字文本: '{teacher_signature_text}'")
-                        
-                        logger.info(f"*** 成功清除评分和评价")
-                        return True
+        # 查找"教师（签字）"单元格
+        cell, _, _, _ = find_teacher_signature_cell(doc)
         
-        logger.warning("*** 未找到'教师（签字）'单元格")
-        return False
+        if not cell:
+            logger.warning("未找到'教师（签字）'单元格")
+            return False
+        
+        # 提取签字文本
+        _, _, signature_text = extract_grade_and_comment_from_cell(cell)
+        
+        # 清空单元格
+        for paragraph in cell.paragraphs:
+            paragraph.clear()
+        while len(cell.paragraphs) > 1:
+            p = cell.paragraphs[-1]._element
+            p.getparent().remove(p)
+        
+        # 只写入"教师（签字）"文本
+        if signature_text:
+            p = cell.paragraphs[0]
+            run = p.add_run(signature_text)
+            run.font.size = Pt(10)
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            logger.info(f"已恢复教师签字文本: {signature_text[:50]}...")
+        
+        logger.info("成功清除评分和评价")
+        return True
         
     except Exception as e:
         logger.error(f"清除实验报告评分和评价失败: {str(e)}")
@@ -2963,32 +2949,13 @@ def get_teacher_comment(request):
                 logger.info(f"开始分析文档，共 {len(doc.tables)} 个表格，{len(doc.paragraphs)} 个段落")
 
                 # 首先检查表格中的"教师（签字）"单元格（实验报告格式）
-                for table in doc.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            cell_text = cell.text.strip()
-                            # 查找包含"教师（签字）"的单元格
-                            if "教师（签字）" in cell_text or "教师(签字)" in cell_text:
-                                logger.info(f"找到'教师（签字）'单元格，内容: '{cell_text}'")
-                                # 从单元格文本中提取评价（第二行）
-                                lines = cell_text.split('\n')
-                                if len(lines) >= 2:
-                                    # 第一行是评分，第二行是评价
-                                    first_line = lines[0].strip()
-                                    second_line = lines[1].strip()
-                                    
-                                    # 检查第一行是否是有效的评分
-                                    if first_line in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
-                                        # 确保第二行不是"教师（签字）"这样的文本
-                                        if second_line and "教师" not in second_line and "签字" not in second_line:
-                                            teacher_comment = second_line
-                                            found_comment = True
-                                            logger.info(f"从表格中提取评价: '{teacher_comment}'")
-                                            break
-                        if found_comment:
-                            break
-                    if found_comment:
-                        break
+                cell, _, _, _ = find_teacher_signature_cell(doc)
+                if cell:
+                    _, comment_from_cell, _ = extract_grade_and_comment_from_cell(cell)
+                    if comment_from_cell:
+                        teacher_comment = comment_from_cell
+                        found_comment = True
+                        logger.info(f"从实验报告表格中提取评价: '{teacher_comment}'")
 
                 # 如果表格中没有找到，检查段落中的评价
                 if not found_comment:
@@ -4025,7 +3992,6 @@ def generate_random_comment(grade):
 def update_lab_report_comment(doc, comment):
     """
     更新实验报告表格中的评价（保留评分）
-    查找包含"教师（签字）："的单元格，只更新第二行的评价内容
     
     Args:
         doc: Document对象
@@ -4035,83 +4001,28 @@ def update_lab_report_comment(doc, comment):
         bool: 是否成功更新
     """
     try:
-        from docx.shared import Pt
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        
-        logger.info(f"=== 开始更新实验报告评价 ===")
+        logger.info("=== 开始更新实验报告评价 ===")
         logger.info(f"新评价: {comment}")
         
-        # 遍历所有表格
-        for table_idx, table in enumerate(doc.tables):
-            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
-            for row_idx, row in enumerate(table.rows):
-                for col_idx, cell in enumerate(row.cells):
-                    cell_text = cell.text.strip()
-                    
-                    # 查找包含"教师（签字）："的单元格
-                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
-                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
-                        logger.info(f"原始内容: '{cell_text}'")
-                        
-                        # 提取现有的评分和教师签字文本
-                        lines = cell_text.split('\n')
-                        existing_grade = None
-                        teacher_signature_text = ""
-                        
-                        if lines:
-                            first_line = lines[0].strip()
-                            # 检查第一行是否是有效的评分
-                            if first_line in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
-                                existing_grade = first_line
-                                logger.info(f"保留现有评分: {existing_grade}")
-                            
-                            # 查找并保留"教师（签字）"文本
-                            for line in lines:
-                                if '教师（签字）' in line or '教师(签字)' in line:
-                                    teacher_signature_text = line
-                                    logger.info(f"保留教师签字文本: '{teacher_signature_text}'")
-                                    break
-                        
-                        if not existing_grade:
-                            logger.warning("未找到现有评分，无法更新评价")
-                            return False
-                        
-                        # 清空单元格
-                        for paragraph in cell.paragraphs:
-                            paragraph.clear()
-                        while len(cell.paragraphs) > 1:
-                            p = cell.paragraphs[-1]._element
-                            p.getparent().remove(p)
-                        
-                        # 重新写入内容
-                        # 第一行：保留原有评分
-                        p1 = cell.paragraphs[0]
-                        run1 = p1.add_run(existing_grade)
-                        run1.font.size = Pt(14)
-                        run1.bold = True
-                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        logger.info(f"评分已写入: {existing_grade}")
-                        
-                        # 第二行：新的评价
-                        p2 = cell.add_paragraph()
-                        run2 = p2.add_run(comment)
-                        run2.font.size = Pt(11)
-                        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        logger.info(f"新评价已写入: {comment}")
-                        
-                        # 第三行：保留教师签字文本
-                        if teacher_signature_text:
-                            p3 = cell.add_paragraph()
-                            run3 = p3.add_run(teacher_signature_text)
-                            run3.font.size = Pt(10)
-                            p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            logger.info(f"教师签字文本已写入: '{teacher_signature_text}'")
-                        
-                        logger.info(f"*** 成功更新评价")
-                        return True
+        # 查找"教师（签字）"单元格
+        cell, _, _, _ = find_teacher_signature_cell(doc)
         
-        logger.warning("*** 未找到'教师（签字）'单元格")
-        return False
+        if not cell:
+            logger.warning("未找到'教师（签字）'单元格")
+            return False
+        
+        # 提取现有的评分和签字文本
+        existing_grade, _, signature_text = extract_grade_and_comment_from_cell(cell)
+        
+        if not existing_grade:
+            logger.warning("未找到现有评分，无法更新评价")
+            return False
+        
+        # 写入评分和新评价
+        write_to_teacher_signature_cell(cell, existing_grade, comment, signature_text)
+        
+        logger.info(f"成功更新评价: {comment}")
+        return True
         
     except Exception as e:
         logger.error(f"更新实验报告评价失败: {str(e)}")
@@ -4120,20 +4031,124 @@ def update_lab_report_comment(doc, comment):
         return False
 
 
-def write_grade_to_lab_report(doc, grade, comment=None):
+def find_teacher_signature_cell(doc):
     """
-    将评分写入实验报告的表格中
-    查找包含"教师（签字）："的单元格，清空其内容后写入评分和评价
+    查找实验报告中包含"教师（签字）"的单元格
     
-    实验报告表格结构：
-    | 教师（签字）：时间： 年 月 日 |  <- 在这里写入评分和评价（可能是合并单元格）
-    | 成绩评定                      |
+    Returns:
+        tuple: (cell, table_idx, row_idx, col_idx) 如果找到，否则返回 (None, None, None, None)
+    """
+    for table_idx, table in enumerate(doc.tables):
+        for row_idx, row in enumerate(table.rows):
+            for col_idx, cell in enumerate(row.cells):
+                cell_text = cell.text.strip()
+                if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
+                    logger.info(f"找到'教师（签字）'单元格: 表格{table_idx+1}, 行{row_idx+1}, 列{col_idx+1}")
+                    return cell, table_idx, row_idx, col_idx
+    return None, None, None, None
+
+
+def extract_grade_and_comment_from_cell(cell):
+    """
+    从"教师（签字）"单元格中提取评分和评价
+    
+    单元格格式：
+    第一行：评分（如"A"）
+    第二行：评价（如"作业完成得非常出色..."）
+    第三行及之后：教师（签字）：时间：...
+    
+    Returns:
+        tuple: (grade, comment, signature_text)
+    """
+    cell_text = cell.text.strip()
+    lines = cell_text.split('\n')
+    
+    grade = None
+    comment = None
+    signature_text = ""
+    
+    # 查找"教师（签字）"所在行的索引
+    signature_line_idx = -1
+    for i, line in enumerate(lines):
+        if '教师（签字）' in line or '教师(签字)' in line:
+            signature_line_idx = i
+            # 保留从这行开始的所有内容
+            signature_text = '\n'.join(lines[i:])
+            break
+    
+    if signature_line_idx == -1:
+        logger.warning("单元格中未找到'教师（签字）'文本")
+        return None, None, ""
+    
+    # 提取评分和评价（在"教师（签字）"之前的内容）
+    before_signature = lines[:signature_line_idx]
+    
+    # 第一行是评分
+    if len(before_signature) >= 1:
+        potential_grade = before_signature[0].strip()
+        # 验证是否是有效的评分
+        if potential_grade in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
+            grade = potential_grade
+            logger.info(f"提取到评分: {grade}")
+    
+    # 第二行是评价
+    if len(before_signature) >= 2:
+        comment = before_signature[1].strip()
+        logger.info(f"提取到评价: {comment}")
+    
+    logger.info(f"提取到签字文本: {signature_text}")
+    return grade, comment, signature_text
+
+
+def write_to_teacher_signature_cell(cell, grade, comment, signature_text):
+    """
+    向"教师（签字）"单元格写入评分和评价
     
     写入格式：
     第一行：评分（如"A"）
     第二行：评价（如"作业完成得非常出色..."）
+    第三行及之后：教师（签字）：时间：...（保留原有内容）
+    """
+    from docx.shared import Pt
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     
-    注意：单元格可能是合并单元格，需要正确处理
+    # 清空单元格的所有段落
+    for paragraph in cell.paragraphs:
+        paragraph.clear()
+    
+    # 删除多余的段落，只保留一个
+    while len(cell.paragraphs) > 1:
+        p = cell.paragraphs[-1]._element
+        p.getparent().remove(p)
+    
+    # 第一行：评分（居中显示）
+    p1 = cell.paragraphs[0]
+    run1 = p1.add_run(grade)
+    run1.font.size = Pt(14)
+    run1.bold = True
+    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    logger.info(f"写入评分: {grade}")
+    
+    # 第二行：评价（左对齐）
+    if comment:
+        p2 = cell.add_paragraph()
+        run2 = p2.add_run(comment)
+        run2.font.size = Pt(11)
+        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        logger.info(f"写入评价: {comment}")
+    
+    # 第三行及之后：保留原始的"教师（签字）"文本
+    if signature_text:
+        p3 = cell.add_paragraph()
+        run3 = p3.add_run(signature_text)
+        run3.font.size = Pt(10)
+        p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        logger.info(f"写入签字文本: {signature_text[:50]}...")
+
+
+def write_grade_to_lab_report(doc, grade, comment=None):
+    """
+    将评分写入实验报告的表格中
     
     Args:
         doc: Document对象
@@ -4144,104 +4159,28 @@ def write_grade_to_lab_report(doc, grade, comment=None):
         bool: 是否成功写入
     """
     try:
-        from docx.shared import Pt
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        
         # 如果没有提供评价，自动生成
         if not comment:
             comment = generate_random_comment(grade)
         
         logger.info(f"=== 开始处理实验报告评分 ===")
         logger.info(f"评分: {grade}, 评价: {comment}")
-        logger.info(f"文档中表格数量: {len(doc.tables)}")
         
-        # 遍历所有表格
-        for table_idx, table in enumerate(doc.tables):
-            logger.info(f"检查表格 {table_idx + 1}, 行数: {len(table.rows)}, 列数: {len(table.columns)}")
-            
-            # 遍历表格的所有行和单元格，查找包含"教师（签字）："的单元格
-            for row_idx, row in enumerate(table.rows):
-                logger.info(f"  检查行 {row_idx + 1}, 单元格数: {len(row.cells)}")
-                
-                for col_idx, cell in enumerate(row.cells):
-                    cell_text = cell.text.strip()
-                    logger.info(f"    单元格 [{row_idx + 1}, {col_idx + 1}]: '{cell_text[:50]}...'")
-                    
-                    # 查找包含"教师（签字）："或"教师（签字）"的单元格
-                    if '教师（签字）' in cell_text or '教师(签字)' in cell_text:
-                        logger.info(f"*** 找到'教师（签字）'单元格，位置: 行{row_idx + 1}, 列{col_idx + 1}")
-                        logger.info(f"原始内容: '{cell_text}'")
-                        logger.info(f"单元格段落数: {len(cell.paragraphs)}")
-                        
-                        # 提取并保留"教师（签字）："及其后面的内容
-                        teacher_signature_text = ""
-                        for paragraph in cell.paragraphs:
-                            para_text = paragraph.text
-                            if '教师（签字）' in para_text or '教师(签字)' in para_text:
-                                # 找到包含"教师（签字）"的段落，保留整个段落
-                                teacher_signature_text = para_text
-                                logger.info(f"保留的教师签字文本: '{teacher_signature_text}'")
-                                break
-                        
-                        # 如果没有找到，尝试从整个单元格文本中提取
-                        if not teacher_signature_text:
-                            # 查找"教师（签字）"的位置
-                            if '教师（签字）' in cell_text:
-                                idx = cell_text.find('教师（签字）')
-                                teacher_signature_text = cell_text[idx:]
-                            elif '教师(签字)' in cell_text:
-                                idx = cell_text.find('教师(签字)')
-                                teacher_signature_text = cell_text[idx:]
-                            logger.info(f"从单元格文本提取的教师签字: '{teacher_signature_text}'")
-                        
-                        # 清空单元格的所有段落内容
-                        logger.info("开始清空单元格段落...")
-                        for paragraph in cell.paragraphs:
-                            paragraph.clear()
-                        
-                        # 删除多余的段落，只保留一个
-                        logger.info(f"清空后段落数: {len(cell.paragraphs)}")
-                        while len(cell.paragraphs) > 1:
-                            p = cell.paragraphs[-1]._element
-                            p.getparent().remove(p)
-                        logger.info(f"删除多余段落后剩余: {len(cell.paragraphs)}")
-                        
-                        # 获取第一个段落，写入评分
-                        p1 = cell.paragraphs[0]
-                        logger.info("准备写入评分...")
-                        
-                        # 第一行：评分（居中显示）
-                        run1 = p1.add_run(grade)
-                        run1.font.size = Pt(14)
-                        run1.bold = True
-                        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                        logger.info(f"评分已写入: {grade}")
-                        
-                        # 第二行：评价（左对齐）
-                        logger.info("准备写入评价...")
-                        p2 = cell.add_paragraph()
-                        run2 = p2.add_run(comment)
-                        run2.font.size = Pt(11)
-                        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                        logger.info(f"评价已写入: {comment}")
-                        
-                        # 第三行：保留原始的"教师（签字）"文本
-                        if teacher_signature_text:
-                            logger.info("准备写入教师签字文本...")
-                            p3 = cell.add_paragraph()
-                            run3 = p3.add_run(teacher_signature_text)
-                            run3.font.size = Pt(10)
-                            p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-                            logger.info(f"教师签字文本已写入: '{teacher_signature_text}'")
-                        
-                        logger.info(f"*** 成功写入评分: {grade}, 评价: {comment}")
-                        logger.info(f"最终单元格段落数: {len(cell.paragraphs)}")
-                        logger.info(f"新内容: '{cell.text}'")
-                        return True
+        # 查找"教师（签字）"单元格
+        cell, _, _, _ = find_teacher_signature_cell(doc)
         
-        logger.warning("*** 未找到'教师（签字）'单元格")
-        logger.warning("请检查实验报告格式是否正确")
-        return False
+        if not cell:
+            logger.warning("未找到'教师（签字）'单元格")
+            return False
+        
+        # 提取原有的签字文本
+        _, _, signature_text = extract_grade_and_comment_from_cell(cell)
+        
+        # 写入新的评分和评价
+        write_to_teacher_signature_cell(cell, grade, comment, signature_text)
+        
+        logger.info(f"成功写入评分: {grade}, 评价: {comment}")
+        return True
         
     except Exception as e:
         logger.error(f"写入实验报告评分失败: {str(e)}")

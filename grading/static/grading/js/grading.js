@@ -1214,7 +1214,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 
-    // 模态框显示时自动加载评价内容
+    // 模态框显示时自动加载评价内容和历史记录
     $('#teacherCommentModal').on('show.bs.modal', function() {
         console.log('=== 教师评价模态框显示 ===');
         console.log('当前文件路径:', currentFilePath);
@@ -1228,6 +1228,9 @@ document.addEventListener('DOMContentLoaded', function() {
             console.log('没有当前文件路径，清空输入框');
             $('#teacherCommentText').val('');
         }
+        
+        // 渲染历史评价
+        CommentHistory.renderHistory('commentHistoryContainer');
     });
 
     // AI评分提示模态框事件处理
@@ -1315,6 +1318,79 @@ window.loadTeacherComment = function(filePath) {
     });
 }
 
+// 评价历史管理
+window.CommentHistory = {
+    storageKey: 'teacher_comment_history',
+    maxItems: 5,
+    
+    // 获取历史评价
+    getHistory: function() {
+        try {
+            const history = localStorage.getItem(this.storageKey);
+            return history ? JSON.parse(history) : [];
+        } catch (e) {
+            console.error('读取评价历史失败:', e);
+            return [];
+        }
+    },
+    
+    // 添加评价到历史
+    addComment: function(comment) {
+        if (!comment || !comment.trim()) return;
+        
+        let history = this.getHistory();
+        
+        // 移除重复的评价
+        history = history.filter(item => item !== comment);
+        
+        // 添加到开头
+        history.unshift(comment);
+        
+        // 只保留最近5条
+        history = history.slice(0, this.maxItems);
+        
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(history));
+            console.log('评价已添加到历史:', comment);
+        } catch (e) {
+            console.error('保存评价历史失败:', e);
+        }
+    },
+    
+    // 渲染历史评价按钮
+    renderHistory: function(containerId) {
+        const history = this.getHistory();
+        const container = $(`#${containerId}`);
+        
+        if (!container.length) {
+            console.error('历史评价容器不存在:', containerId);
+            return;
+        }
+        
+        container.empty();
+        
+        if (history.length === 0) {
+            container.html('<small class="text-muted">暂无历史评价</small>');
+            return;
+        }
+        
+        container.append('<small class="text-muted d-block mb-2">最近使用的评价（点击快速填入）：</small>');
+        
+        history.forEach((comment, index) => {
+            const btn = $('<button>')
+                .addClass('btn btn-sm btn-outline-secondary me-2 mb-2')
+                .attr('type', 'button')
+                .text(comment.length > 20 ? comment.substring(0, 20) + '...' : comment)
+                .attr('title', comment)
+                .on('click', function() {
+                    $('#teacherCommentText').val(comment);
+                    console.log('已填入历史评价:', comment);
+                });
+            container.append(btn);
+        });
+    }
+};
+
 window.saveTeacherComment = function() {
     const comment = $('#teacherCommentText').val().trim();
     console.log('保存教师评价，内容:', comment);
@@ -1360,6 +1436,9 @@ window.saveTeacherComment = function() {
 
             if (response.success) {
                 console.log('保存成功，准备刷新评价显示');
+                
+                // 添加到历史记录
+                CommentHistory.addComment(comment);
 
                 // 延迟一点时间再加载评价，确保文件写入完成
                 setTimeout(function() {
