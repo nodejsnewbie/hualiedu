@@ -4131,16 +4131,12 @@ def write_grade_to_lab_report(doc, grade, comment=None):
     Args:
         doc: Document对象
         grade: 评分
-        comment: 评价（可选，如果为None则自动生成）
+        comment: 评价（可选，如果为None则保留原有评价或自动生成）
     
     Returns:
         bool: 是否成功写入
     """
     try:
-        # 如果没有提供评价，自动生成
-        if not comment:
-            comment = generate_random_comment(grade)
-        
         logger.info(f"=== 开始处理实验报告评分 ===")
         logger.info(f"评分: {grade}, 评价: {comment}")
         
@@ -4151,8 +4147,17 @@ def write_grade_to_lab_report(doc, grade, comment=None):
             logger.warning("未找到'教师（签字）'单元格")
             return False
         
-        # 提取原有的签字文本
-        _, _, signature_text = extract_grade_and_comment_from_cell(cell)
+        # 提取原有的评分、评价和签字文本
+        existing_grade, existing_comment, signature_text = extract_grade_and_comment_from_cell(cell)
+        
+        # 如果没有提供新评价，使用原有评价或自动生成
+        if not comment:
+            if existing_comment:
+                comment = existing_comment
+                logger.info(f"保留原有评价: {comment}")
+            else:
+                comment = generate_random_comment(grade)
+                logger.info(f"自动生成评价: {comment}")
         
         # 写入新的评分和评价
         write_to_teacher_signature_cell(cell, grade, comment, signature_text)
@@ -4228,9 +4233,10 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
             doc.add_paragraph(f"老师评分：{grade}")
             logger.info(f"添加新评分段落: 老师评分：{grade}")
         
-        # 检查是否已有评价段落
-        has_existing_comment = False
+        # 处理评价：只有明确提供了评价时才更新
         if comment:
+            # 检查是否已有评价段落
+            has_existing_comment = False
             for paragraph in doc.paragraphs:
                 text = paragraph.text.strip()
                 if text.startswith(("教师评价：", "AI评价：", "评价：")):
@@ -4244,6 +4250,8 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
             if not has_existing_comment:
                 doc.add_paragraph(f"教师评价：{comment}")
                 logger.info(f"添加新评价段落: 教师评价：{comment}")
+        else:
+            logger.info("未提供评价，保留原有评价（如果存在）")
 
         doc.save(full_path)
         logger.info(f"已写入Word文档: 评分={grade}, 评价={comment or '无'}")
