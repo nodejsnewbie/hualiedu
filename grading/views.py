@@ -4215,46 +4215,54 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
                 format_warning = "实验报告格式不正确（未找到'教师（签字）'表格），已自动给予C评分"
                 grade = "C"
                 comment = "请按要求的格式写实验报告"
+                # 格式错误时，改为按普通作业处理
+                is_lab_report = False
+                logger.info("实验报告格式错误，改为按普通作业处理")
         
-        # 普通作业或实验报告格式写入失败时的处理
-        # 检查是否已有评分段落
-        has_existing_grade = False
-        for paragraph in doc.paragraphs:
-            text = paragraph.text.strip()
-            if text.startswith(("老师评分：", "评定分数：")):
-                has_existing_grade = True
-                # 更新现有评分段落的内容
-                paragraph.text = f"老师评分：{grade}" if grade else ""
-                logger.info(f"更新现有评分段落: {paragraph.text}")
-                break
-        
-        # 如果没有现有评分，添加新的
-        if not has_existing_grade and grade:
-            doc.add_paragraph(f"老师评分：{grade}")
-            logger.info(f"添加新评分段落: 老师评分：{grade}")
-        
-        # 处理评价：只有明确提供了评价时才更新
-        if comment:
-            # 检查是否已有评价段落
-            has_existing_comment = False
+        # 普通作业处理（或实验报告格式错误时的降级处理）
+        # 只有在非实验报告或实验报告写入失败时才执行
+        if not is_lab_report:
+            # 检查是否已有评分段落
+            has_existing_grade = False
             for paragraph in doc.paragraphs:
                 text = paragraph.text.strip()
-                if text.startswith(("教师评价：", "AI评价：", "评价：")):
-                    has_existing_comment = True
-                    # 更新现有评价段落的内容
-                    paragraph.text = f"教师评价：{comment}"
-                    logger.info(f"更新现有评价段落: {paragraph.text}")
+                if text.startswith(("老师评分：", "评定分数：")):
+                    has_existing_grade = True
+                    # 更新现有评分段落的内容
+                    paragraph.text = f"老师评分：{grade}" if grade else ""
+                    logger.info(f"更新现有评分段落: {paragraph.text}")
                     break
             
-            # 如果没有现有评价，添加新的
-            if not has_existing_comment:
-                doc.add_paragraph(f"教师评价：{comment}")
-                logger.info(f"添加新评价段落: 教师评价：{comment}")
-        else:
-            logger.info("未提供评价，保留原有评价（如果存在）")
+            # 如果没有现有评分，添加新的
+            if not has_existing_grade and grade:
+                doc.add_paragraph(f"老师评分：{grade}")
+                logger.info(f"添加新评分段落: 老师评分：{grade}")
+            
+            # 处理评价：只有明确提供了评价时才更新
+            if comment:
+                # 检查是否已有评价段落
+                has_existing_comment = False
+                for paragraph in doc.paragraphs:
+                    text = paragraph.text.strip()
+                    if text.startswith(("教师评价：", "AI评价：", "评价：")):
+                        has_existing_comment = True
+                        # 更新现有评价段落的内容
+                        paragraph.text = f"教师评价：{comment}"
+                        logger.info(f"更新现有评价段落: {paragraph.text}")
+                        break
+                
+                # 如果没有现有评价，添加新的
+                if not has_existing_comment:
+                    doc.add_paragraph(f"教师评价：{comment}")
+                    logger.info(f"添加新评价段落: 教师评价：{comment}")
+            else:
+                logger.info("未提供评价，保留原有评价（如果存在）")
 
-        doc.save(full_path)
-        logger.info(f"已写入Word文档: 评分={grade}, 评价={comment or '无'}")
+            doc.save(full_path)
+            logger.info(f"已写入Word文档: 评分={grade}, 评价={comment or '无'}")
+        
+        # 返回格式警告（如果有）
+        return format_warning
 
     else:
         # 文本文件处理
