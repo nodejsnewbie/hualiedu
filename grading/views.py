@@ -2957,47 +2957,25 @@ def get_teacher_comment(request):
                         found_comment = True
                         logger.info(f"从实验报告表格中提取评价: '{teacher_comment}'")
 
-                # 如果表格中没有找到，检查段落中的评价
+                # 如果表格中没有找到，检查段落中的评价（普通作业）
                 if not found_comment:
                     logger.info("表格中未找到评价，开始检查段落")
                     
-                    # 先查找所有段落，收集可能的评价
-                    possible_comments = []
-                    
-                    for i, paragraph in enumerate(doc.paragraphs):
+                    for paragraph in doc.paragraphs:
                         text = paragraph.text.strip()
                         if not text:
                             continue
                         
-                        logger.info(f"段落 {i+1}: '{text[:50]}...'")
-
-                        # 优先查找以"评价："开头的段落（最高优先级）
-                        if text.startswith("评价："):
-                            teacher_comment = text[3:].strip()  # 去掉"评价："前缀
+                        # 查找以评价关键词开头的段落（与写入逻辑一致）
+                        if text.startswith(("教师评价：", "AI评价：", "评价：")):
+                            # 提取评价内容（去掉前缀）
+                            if "：" in text:
+                                teacher_comment = text.split("：", 1)[1].strip()
+                            else:
+                                teacher_comment = text
                             found_comment = True
-                            logger.info(f"找到标准格式评价: '{teacher_comment}'")
+                            logger.info(f"找到评价段落: '{teacher_comment}'")
                             break
-                        
-                        # 跳过评分行
-                        if text.startswith(("老师评分：", "评定分数：")):
-                            continue
-                        
-                        # 跳过只包含评分等级的行
-                        if text in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
-                            continue
-                        
-                        # 收集可能的评价（长度大于10且不包含评分关键词）
-                        if len(text) > 10 and not any(
-                            keyword in text for keyword in ["分数", "评分", "等级", "签字", "时间"]
-                        ):
-                            possible_comments.append(text)
-                            logger.info(f"收集可能的评价: '{text[:50]}...'")
-                    
-                    # 如果没有找到标准格式的评价，使用第一个可能的评价
-                    if not found_comment and possible_comments:
-                        teacher_comment = possible_comments[0]
-                        found_comment = True
-                        logger.info(f"使用第一个可能的评价: '{teacher_comment[:50]}...'")
 
 
                 if not found_comment:
