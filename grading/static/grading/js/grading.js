@@ -1333,12 +1333,12 @@ window.loadTeacherComment = function(filePath) {
     });
 }
 
-// 评价历史管理
+// 评价历史管理（缓存评分和评价的组合）
 window.CommentHistory = {
-    storageKey: 'teacher_comment_history',
-    maxItems: 5,
+    storageKey: 'teacher_grade_comment_history',
+    maxItems: 10,  // 增加到10条
     
-    // 获取历史评价
+    // 获取历史记录
     getHistory: function() {
         try {
             const history = localStorage.getItem(this.storageKey);
@@ -1349,24 +1349,36 @@ window.CommentHistory = {
         }
     },
     
-    // 添加评价到历史
-    addComment: function(comment) {
+    // 添加评分和评价到历史
+    addGradeComment: function(grade, comment) {
         if (!comment || !comment.trim()) return;
+        
+        // 如果没有提供评分，使用当前选中的评分
+        if (!grade) {
+            grade = selectedGrade || 'B';
+        }
         
         let history = this.getHistory();
         
-        // 移除重复的评价
-        history = history.filter(item => item !== comment);
+        // 创建记录对象
+        const record = {
+            grade: grade,
+            comment: comment.trim(),
+            timestamp: new Date().getTime()
+        };
+        
+        // 移除重复的评价（相同评价内容）
+        history = history.filter(item => item.comment !== comment.trim());
         
         // 添加到开头
-        history.unshift(comment);
+        history.unshift(record);
         
-        // 只保留最近5条
+        // 只保留最近的记录
         history = history.slice(0, this.maxItems);
         
         try {
             localStorage.setItem(this.storageKey, JSON.stringify(history));
-            console.log('评价已添加到历史:', comment);
+            console.log('评分和评价已添加到历史:', grade, comment);
         } catch (e) {
             console.error('保存评价历史失败:', e);
         }
@@ -1389,17 +1401,22 @@ window.CommentHistory = {
             return;
         }
         
-        container.append('<small class="text-muted d-block mb-2">最近使用的评价（点击快速填入）：</small>');
+        container.append('<small class="text-muted d-block mb-2">最近使用的评价（点击快速填入评价和评分）：</small>');
         
-        history.forEach((comment, index) => {
+        history.forEach((record, index) => {
+            const displayText = record.comment.length > 30 ? record.comment.substring(0, 30) + '...' : record.comment;
             const btn = $('<button>')
                 .addClass('btn btn-sm btn-outline-secondary me-2 mb-2')
                 .attr('type', 'button')
-                .text(comment.length > 20 ? comment.substring(0, 20) + '...' : comment)
-                .attr('title', comment)
+                .html(`<span class="badge bg-primary me-1">${record.grade}</span>${displayText}`)
+                .attr('title', `评分: ${record.grade}\n评价: ${record.comment}`)
                 .on('click', function() {
-                    $('#teacherCommentText').val(comment);
-                    console.log('已填入历史评价:', comment);
+                    // 填入评价
+                    $('#teacherCommentText').val(record.comment);
+                    // 设置评分（按评论对应的评分打分）
+                    selectedGrade = record.grade;
+                    setGradeButtonState(record.grade);
+                    console.log('已填入历史记录 - 评分:', record.grade, '评价:', record.comment);
                 });
             container.append(btn);
         });
@@ -1420,10 +1437,18 @@ window.saveTeacherComment = function() {
         return;
     }
 
+    // 如果没有选择评分，使用默认评分
+    if (!selectedGrade) {
+        selectedGrade = gradeMode === 'letter' ? 'B' : '良好';
+        setGradeButtonState(selectedGrade);
+        console.log('未选择评分，使用默认评分:', selectedGrade);
+    }
+
     // 准备请求数据
     const requestData = {
         file_path: currentFilePath,
-        comment: comment
+        comment: comment,
+        grade: selectedGrade  // 添加评分到请求中
     };
     
     // 如果有当前仓库ID和课程，添加到请求中
@@ -1452,8 +1477,8 @@ window.saveTeacherComment = function() {
             if (response.success) {
                 console.log('保存成功，准备刷新评价显示');
                 
-                // 添加到历史记录
-                CommentHistory.addComment(comment);
+                // 添加到历史记录（包含评分和评价）
+                CommentHistory.addGradeComment(selectedGrade, comment);
 
                 // 延迟一点时间再加载评价，确保文件写入完成
                 setTimeout(function() {
@@ -1466,6 +1491,9 @@ window.saveTeacherComment = function() {
                 }, 500);
 
                 $('#teacherCommentModal').modal('hide');
+                
+                // 自动跳转到下一个文件
+                navigateToNextFile();
             } else {
                 console.error('保存失败:', response.message);
                 alert('保存失败: ' + response.message);

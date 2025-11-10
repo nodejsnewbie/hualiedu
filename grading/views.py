@@ -2748,12 +2748,13 @@ def remove_grade(request):
 
 @csrf_exempt
 def save_teacher_comment(request):
-    """保存教师评价到文件末尾"""
+    """保存教师评价到文件末尾（同时保存评分和评价）"""
     logger.info("开始处理保存教师评价请求")
 
     # 获取请求参数
     file_path = request.POST.get("file_path")
     comment = request.POST.get("comment")
+    grade = request.POST.get("grade")  # 获取评分
     repo_id = request.POST.get("repo_id")
     course = request.POST.get("course", "").strip()
     
@@ -2764,7 +2765,12 @@ def save_teacher_comment(request):
         logger.error("未提供评价内容")
         return create_error_response("缺少必要参数", response_format="success")
     
-    logger.info(f"保存教师评价请求: file_path={file_path}, repo_id={repo_id}, course={course}")
+    # 如果没有提供评分，使用默认评分B
+    if not grade:
+        grade = "B"
+        logger.info(f"未提供评分，使用默认评分: {grade}")
+    
+    logger.info(f"保存教师评价请求: file_path={file_path}, grade={grade}, repo_id={repo_id}, course={course}")
     
     # 验证文件路径
     is_valid, full_path, error_msg = validate_file_path(
@@ -2786,36 +2792,27 @@ def save_teacher_comment(request):
     
     logger.info(f"验证通过，完整路径: {full_path}")
 
-    # 使用统一函数保存评价
+    # 使用统一函数保存评分和评价
     try:
-        
         # 从文件路径自动判断作业类型（会查询数据库中的作业批次类型）
         base_dir = get_base_directory(request)
         is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
         
-        logger.info(f"请求保存教师评价，路径: {full_path}, 评价: {comment}, 课程: {course}, 实验报告: {is_lab_report}")
+        logger.info(f"请求保存教师评价和评分，路径: {full_path}, 评分: {grade}, 评价: {comment}, 课程: {course}, 实验报告: {is_lab_report}")
         
-        # 获取文件扩展名
-        _, ext = os.path.splitext(full_path)
+        # 使用统一函数同时写入评分和评价
+        warning = write_grade_and_comment_to_file(full_path, grade=grade, comment=comment, base_dir=base_dir, is_lab_report=is_lab_report)
         
-        # 如果是Word文档的实验报告，需要特殊处理
-        if is_lab_report and ext.lower() == ".docx":
-            doc = Document(full_path)
-            success = update_lab_report_comment(doc, comment)
-            if success:
-                doc.save(full_path)
-                logger.info(f"成功更新实验报告评价: {full_path}")
-                return create_success_response(message="教师评价已保存", response_format="success")
-            else:
-                logger.warning("实验报告格式更新失败，回退到普通格式")
+        if warning:
+            logger.warning(f"保存时有警告: {warning}")
+            return create_success_response(message=f"教师评价和评分已保存（警告：{warning}）", response_format="success")
         
-        # 普通作业或实验报告格式更新失败时的处理
-        # 注意：这里不传递is_lab_report，让函数自己判断
-        write_grade_and_comment_to_file(full_path, comment=comment)
-        logger.info(f"成功保存教师评价: {full_path}")
-        return create_success_response(message="教师评价已保存", response_format="success")
+        logger.info(f"成功保存教师评价和评分: {full_path}")
+        return create_success_response(message="教师评价和评分已保存", response_format="success")
     except Exception as e:
         logger.error(f"保存教师评价失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return create_error_response(f"保存教师评价失败: {str(e)}", response_format="success")
 
 
@@ -4204,7 +4201,9 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
     # 如果没有明确指定is_lab_report，则自动判断
     if is_lab_report is None:
         is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
-        logger.info(f"自动判断文件类型: is_lab_report={is_lab_report}")
+        logger.info(f"=== 自动判断文件类型: is_lab_report={is_lab_report} ===")
+    else:
+        logger.info(f"=== 明确指定文件类型: is_lab_report={is_lab_report} ===")
 
     if ext.lower() == ".docx":
         # Word文档处理
@@ -4220,25 +4219,27 @@ def write_grade_and_comment_to_file(full_path, grade=None, comment=None, base_di
         # 如果是实验报告，使用特殊的表格格式
         format_warning = None
         if is_lab_report and grade:
+            logger.info(f">>> 尝试按实验报告格式写入: 评分={grade}, 评价={comment}")
             success = write_grade_to_lab_report(doc, grade, comment)
             if success:
                 doc.save(full_path)
-                logger.info(f"已写入实验报告: 评分={grade}, 评价={comment}")
+                logger.info(f"✅ 实验报告写入成功: 评分={grade}, 评价={comment}")
                 return None  # 返回None表示没有警告
             else:
                 # 实验报告格式不正确，给D评分并提示，且锁定不允许修改
-                logger.warning("实验报告格式写入失败：未找到'教师（签字）'表格")
-                logger.warning("将给予D评分并锁定，不允许后续修改")
+                logger.warning("❌ 实验报告格式写入失败：未找到'教师（签字）'表格")
+                logger.warning("🔒 将给予D评分并锁定，不允许后续修改")
                 format_warning = "实验报告格式不正确（未找到'教师（签字）'表格），已自动给予D评分并锁定"
                 grade = "D"
                 comment = "【格式错误-已锁定】请按要求的格式写实验报告，此评分不可修改"
                 # 格式错误时，改为按普通作业处理
                 is_lab_report = False
-                logger.info("实验报告格式错误，改为按普通作业处理")
+                logger.info("🔄 实验报告格式错误，改为按普通作业处理（写入段落）")
         
         # 普通作业处理（或实验报告格式错误时的降级处理）
         # 只有在非实验报告或实验报告写入失败时才执行
         if not is_lab_report:
+            logger.info(f">>> 按普通作业格式写入段落: 评分={grade}, 评价={comment}")
             # 检查是否已有评分段落
             has_existing_grade = False
             for paragraph in doc.paragraphs:
