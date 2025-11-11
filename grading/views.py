@@ -15,6 +15,7 @@ import mammoth
 import pandas as pd
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseServerError, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -34,6 +35,7 @@ except ImportError:
 
 from .models import (
     Course,
+    CourseSchedule,
     GlobalConfig,
     GradeTypeConfig,
     Homework,
@@ -317,6 +319,7 @@ def auto_create_or_update_course(course_name, user=None):
             return None
         
         # 使用当前用户作为教师，如果没有用户则使用第一个staff用户
+        User = get_user_model()
         teacher = user if user else User.objects.filter(is_staff=True).first()
         if not teacher:
             logger.error("没有可用的教师用户，无法创建课程")
