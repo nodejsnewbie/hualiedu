@@ -6,6 +6,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
+        ("grading", "0004_repository_owner"),
         ("grading", "0009_course_class_name_courseweekschedule"),
     ]
 

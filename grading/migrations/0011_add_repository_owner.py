@@ -1,4 +1,4 @@
-# Generated manually to add owner field to repository
+# Generated manually to add repository fields
 
 import django.db.models.deletion
 from django.conf import settings
@@ -13,10 +13,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.AlterUniqueTogether(
-            name="repository",
-            unique_together=set(),
-        ),
+        # owner field already added in 0004_repository_owner.py, so we skip it here
         migrations.AddField(
             model_name="repository",
             name="branch",
@@ -26,18 +23,6 @@ class Migration(migrations.Migration):
             model_name="repository",
             name="last_sync",
             field=models.DateTimeField(blank=True, help_text="最后同步时间", null=True),
-        ),
-        migrations.AddField(
-            model_name="repository",
-            name="owner",
-            field=models.ForeignKey(
-                help_text="仓库所有者",
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="repositories",
-                to=settings.AUTH_USER_MODEL,
-                null=True,
-                blank=True,
-            ),
         ),
         migrations.AddField(
             model_name="repository",
@@ -53,9 +38,5 @@ class Migration(migrations.Migration):
             model_name="repository",
             name="url",
             field=models.URLField(blank=True, help_text="仓库URL（Git仓库）"),
-        ),
-        migrations.AlterUniqueTogether(
-            name="repository",
-            unique_together={("owner", "name")},
         ),
     ]
