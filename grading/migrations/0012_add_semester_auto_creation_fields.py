@@ -41,16 +41,6 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AlterField(
-            model_name="repository",
-            name="owner",
-            field=models.ForeignKey(
-                help_text="仓库所有者",
-                on_delete=django.db.models.deletion.CASCADE,
-                related_name="repositories",
-                to=settings.AUTH_USER_MODEL,
-            ),
-        ),
-        migrations.AlterField(
             model_name="semester",
             name="is_active",
             field=models.BooleanField(default=False, help_text="是否为当前学期"),

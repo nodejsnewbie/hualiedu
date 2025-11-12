@@ -26,6 +26,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from docx import Document
 
+# Initialize logger first
+logger = logging.getLogger(__name__)
+
 try:
     from volcenginesdkarkruntime import Ark
     ARK_AVAILABLE = True
@@ -43,8 +46,6 @@ from .models import (
     Semester,
 )
 from .utils import FileHandler, GitHandler
-
-logger = logging.getLogger(__name__)
 
 # Create your views here.
 
@@ -2409,22 +2410,47 @@ def get_file_content(request):
 @require_staff_user
 @validate_file_operation(file_path_param="path", require_write=True)
 def add_grade_to_file(request):
-    """添加评分到文件末尾"""
-    logger.info("开始处理添加评分到文件请求")
+    """
+    手动评分功能 - 添加评分到文件
+    
+    支持：
+    - 字母评分（A/B/C/D/E）
+    - 文字评分（优秀/良好/中等/及格/不及格）
+    - 评分方式切换
+    - 统一文件写入接口
+    
+    需求: 4.1, 4.2, 4.3, 4.8
+    """
+    logger.info("=== 开始处理手动评分请求 ===")
 
     # 获取请求参数
     grade = request.POST.get("grade")
+    grade_type = request.POST.get("grade_type", "letter")  # 评分方式：letter 或 text
     course = request.POST.get("course", "").strip()
     is_lab_report = request.POST.get("is_lab_report", "false").lower() == "true"
+    
+    logger.info(f"评分参数: grade={grade}, grade_type={grade_type}, course={course}, is_lab_report={is_lab_report}")
     
     if not grade:
         logger.error("未提供评分")
         return create_error_response("未提供评分")
+    
+    # 验证评分类型和评分值的匹配
+    letter_grades = ["A", "B", "C", "D", "E"]
+    text_grades = ["优秀", "良好", "中等", "及格", "不及格"]
+    
+    if grade_type == "letter" and grade not in letter_grades:
+        logger.error(f"无效的字母评分: {grade}")
+        return create_error_response(f"无效的字母评分: {grade}")
+    
+    if grade_type == "text" and grade not in text_grades:
+        logger.error(f"无效的文字评分: {grade}")
+        return create_error_response(f"无效的文字评分: {grade}")
 
     # 使用统一函数添加评分
     try:
         full_path = request.validated_file_path
-        base_dir = get_base_directory()
+        base_dir = get_base_directory(request)
         
         # 如果没有明确指定is_lab_report，则自动判断
         # 优先从文件路径判断（会查询数据库中的作业类型）
@@ -2432,22 +2458,37 @@ def add_grade_to_file(request):
             is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
             logger.info(f"自动判断文件类型: is_lab_report={is_lab_report}")
         
-        logger.info(f"请求添加评分到文件，路径: {request.POST.get('path')}, 评分: {grade}, 课程: {course}, 实验报告: {is_lab_report}")
+        logger.info(f"调用统一写入接口: 路径={request.POST.get('path')}, 评分={grade}, 评分方式={grade_type}, 实验报告={is_lab_report}")
         
-        warning = write_grade_and_comment_to_file(full_path, grade=grade, base_dir=base_dir, is_lab_report=is_lab_report)
-        logger.info(f"成功添加评分: {full_path}")
+        # 调用统一的文件写入接口
+        warning = write_grade_and_comment_to_file(
+            full_path, 
+            grade=grade, 
+            base_dir=base_dir, 
+            is_lab_report=is_lab_report
+        )
+        
+        logger.info(f"✅ 成功添加评分: {full_path}, 评分={grade}, 评分方式={grade_type}")
 
         file_type = get_file_extension(full_path)
-        response_data = {"file_type": file_type}
+        response_data = {
+            "file_type": file_type,
+            "grade": grade,
+            "grade_type": grade_type
+        }
         
         # 如果有警告信息，添加到响应中
         if warning:
             response_data["warning"] = warning
+            logger.warning(f"评分添加成功但有警告: {warning}")
             return create_success_response(data=response_data, message=f"评分已添加（警告：{warning}）")
         
         return create_success_response(data=response_data, message="评分已添加")
+        
     except Exception as e:
-        logger.error(f"添加评分失败: {str(e)}")
+        logger.error(f"❌ 添加评分失败: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
         return create_error_response(f"添加评分失败: {str(e)}")
 
 
@@ -3008,11 +3049,13 @@ def get_teacher_comment(request):
                     if cell:
                         # 需求 16.3: 使用统一提取函数获取评价内容（第二行）
                         logger.info("找到'教师（签字）'单元格，使用统一提取函数获取评价")
-                        _, comment_from_cell, _ = extract_grade_and_comment_from_cell(cell)
+                        grade_from_cell, comment_from_cell, _ = extract_grade_and_comment_from_cell(cell)
                         
                         if comment_from_cell:
                             teacher_comment = comment_from_cell
                             logger.info(f"✓ 从实验报告表格中提取评价: '{teacher_comment}'")
+                            if grade_from_cell:
+                                logger.info(f"✓ 同时提取到评分: '{grade_from_cell}'")
                         else:
                             logger.info("单元格中未找到评价内容")
                     else:

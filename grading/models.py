@@ -175,7 +175,12 @@ class Repository(models.Model):
     """仓库模型 - 用户级仓库管理"""
 
     owner = models.ForeignKey(
-        "auth.User", on_delete=models.CASCADE, related_name="repositories", help_text="仓库所有者"
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="repositories",
+        null=True,
+        blank=True,
+        help_text="仓库所有者",
     )
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="repositories", null=True, blank=True
@@ -279,8 +284,8 @@ class Submission(models.Model):
     file_size = models.BigIntegerField(default=0, help_text="文件大小")
     submitted_at = models.DateTimeField(auto_now_add=True, help_text="提交时间")
     graded_at = models.DateTimeField(null=True, blank=True, help_text="评分时间")
-    grade = models.CharField(max_length=50, blank=True, help_text="评分")
-    comment = models.TextField(blank=True, help_text="评语")
+    grade = models.CharField(max_length=50, blank=True, default="", help_text="评分")
+    comment = models.TextField(blank=True, default="", help_text="评语")
 
     class Meta:
         db_table = "grading_submission"

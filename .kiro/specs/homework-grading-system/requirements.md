@@ -254,20 +254,12 @@
 3. WHEN 文件内容显示时，THE System SHALL在2秒内完成加载和渲染
 4. WHERE 缓存数据存在，THE System SHALL优先使用缓存数据
 5. WHEN 用户刷新页面时，THE System SHALL清除相关缓存
+6. WHEN 目录树首次加载时，THE System SHALL在3秒内显示根目录结构
+7. WHERE 单个文件大小超过50MB，THE System SHALL显示警告信息并限制预览功能
+8. WHERE 批量操作涉及超过500个文件，THE System SHALL显示警告并要求用户确认
+9. WHEN 缓存命中时，THE System SHALL在500毫秒内返回结果
 
-### 需求 15: 统一的实验报告单元格定位
-
-**用户故事**: 作为开发者，我希望所有功能使用统一的定位函数，以便保持代码一致性和可维护性
-
-#### 验收标准
-
-1. WHEN 任何功能需要定位"教师（签字）"单元格时，THE System SHALL使用统一的`find_teacher_signature_cell`函数
-2. WHEN 需要提取单元格内容时，THE System SHALL使用统一的`extract_grade_and_comment_from_cell`函数
-3. WHEN 需要写入单元格内容时，THE System SHALL使用统一的`write_to_teacher_signature_cell`函数
-4. WHERE 多个功能需要相同的逻辑，THE System SHALL通过共享函数避免代码重复
-5. WHEN 修改定位逻辑时，THE System SHALL只需修改统一函数而不影响调用方
-
-### 需求 16: 获取教师评价功能
+### 需求 15: 获取教师评价功能
 
 **用户故事**: 作为Teacher，我希望能够查看文件中已有的评价，以便了解之前的评价内容
 
@@ -279,8 +271,9 @@
 4. WHERE 文件为普通作业，THE System SHALL在段落中查找以"教师评价："、"AI评价："或"评价："开头的内容
 5. WHERE 找到评价，THE System SHALL返回评价内容
 6. WHERE 未找到评价，THE System SHALL返回"暂无评价"
+7. WHERE 评价内容超过1000个字符，THE System SHALL截断并显示"...查看更多"链接
 
-### 需求 17: 撤销评分功能
+### 需求 16: 撤销评分功能
 
 **用户故事**: 作为Teacher，我希望能够撤销已打的分数，以便纠正错误
 
@@ -294,7 +287,7 @@
 6. WHERE 文件为普通作业，THE System SHALL删除所有评分和评价段落
 7. WHEN 撤销成功时，THE System SHALL显示成功提示信息
 
-### 需求 18: 错误处理和日志
+### 需求 17: 错误处理和日志
 
 **用户故事**: 作为系统管理员，我希望系统能够妥善处理错误并记录日志，以便排查问题
 
@@ -305,3 +298,6 @@
 3. WHEN API请求失败时，THE System SHALL返回包含错误代码和消息的JSON响应
 4. WHERE 错误可恢复，THE System SHALL提供重试选项
 5. WHEN 关键操作执行时，THE System SHALL记录操作日志包含用户、时间和操作内容
+6. WHERE 网络连接中断，THE System SHALL在5秒后自动重试最多3次
+7. WHERE 文件损坏无法读取，THE System SHALL记录错误并跳过该文件
+8. WHEN 并发编辑冲突发生时，THE System SHALL提示用户刷新页面重新加载最新内容

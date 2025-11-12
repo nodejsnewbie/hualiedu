@@ -11,6 +11,7 @@ let pendingGrade = null;  // 待确认的评分
 let currentRepoId = null;  // 当前选择的仓库ID
 let currentCourse = null;  // 当前选择的课程
 let isLabCourse = false;  // 是否为实验课
+let isFileLocked = false;  // 当前文件是否被锁定（格式错误）
 
 // 将关键变量暴露到window对象，供其他脚本使用
 window.currentCourse = null;
@@ -197,6 +198,11 @@ function checkTeacherCommentButton() {
 // 启用教师评价按钮
 function enableTeacherCommentButton() {
   console.log('Enabling teacher comment button');
+  // 检查文件是否被锁定
+  if (isFileLocked) {
+    console.log('文件已锁定，不启用教师评价按钮');
+    return;
+  }
   $('#teacher-comment-btn').prop('disabled', false);
   checkTeacherCommentButton();
 }
@@ -213,6 +219,11 @@ function enableAiScoreButton() {
   console.log('=== 启用AI评分按钮 ===');
   console.log('按钮元素:', $('#ai-score-btn').length);
   console.log('启用前状态:', $('#ai-score-btn').prop('disabled'));
+  // 检查文件是否被锁定
+  if (isFileLocked) {
+    console.log('文件已锁定，不启用AI评分按钮');
+    return;
+  }
   $('#ai-score-btn').prop('disabled', false);
   console.log('启用后状态:', $('#ai-score-btn').prop('disabled'));
   console.log('按钮文本:', $('#ai-score-btn').text());
@@ -291,16 +302,30 @@ window.handleGradeInfo = function(gradeInfo) {
     // 检查文件是否被锁定
     if (gradeInfo.locked) {
         console.log('文件已被锁定，禁用所有评分功能');
+        // 设置全局锁定状态
+        isFileLocked = true;
+        
         // 禁用所有评分按钮
         $('.grade-button').prop('disabled', true).addClass('disabled');
+        $('.grade-mode-btn').prop('disabled', true).addClass('disabled');
         $('#add-grade-to-file').prop('disabled', true);
         $('#cancel-grade').prop('disabled', true);
         $('#teacher-comment-btn').prop('disabled', true);
+        $('#ai-score-btn').prop('disabled', true);
         
-        // 显示锁定提示
-        const lockMessage = '<div class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> 此文件因格式错误已被锁定，不允许修改评分和评价</div>';
+        // 显示锁定提示（使用固定ID以便后续检查）
+        const lockMessage = '<div id="file-lock-warning" class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误已被锁定</strong><br>不允许修改评分和评价。如需解锁，请让学生重新提交正确格式的作业。</div>';
+        // 移除旧的锁定提示（如果存在）
+        $('#file-lock-warning').remove();
+        // 在文件内容前添加锁定提示
         $('#file-content').prepend(lockMessage);
         return;
+    } else {
+        // 如果文件未锁定，移除可能存在的锁定提示
+        isFileLocked = false;
+        $('#file-lock-warning').remove();
+        // 启用评分方式切换按钮
+        $('.grade-mode-btn').prop('disabled', false).removeClass('disabled');
     }
 
     if (gradeInfo.has_grade && gradeInfo.grade) {
@@ -459,6 +484,9 @@ window.loadFile = function(path) {
     console.log('Loading file:', path);
     showLoading();
     
+    // 重置锁定状态（将在handleGradeInfo中根据实际情况更新）
+    isFileLocked = false;
+    
     // 统一路径格式，使用正斜杠
     const normalizedPath = path.replace(/\\/g, '/');
     currentFilePath = normalizedPath;
@@ -589,8 +617,10 @@ window.loadFile = function(path) {
             // 启用AI评分按钮
             enableAiScoreButton();
 
-            // 启用确定按钮
-            $('#add-grade-to-file').prop('disabled', false);
+            // 启用确定按钮（如果文件未锁定）
+            if (!isFileLocked) {
+                $('#add-grade-to-file').prop('disabled', false);
+            }
         },
         error: function(xhr, status, error) {
             clearTimeout(timeout);
@@ -680,7 +710,17 @@ window.navigateToPrevFile = function() {
 
     if (currentIndex > 0) {
         const prevNode = fileNodes[currentIndex - 1];
+        console.log('导航到上一个文件:', prevNode.text);
+        // 保存当前评分方式状态
+        const savedGradeMode = gradeMode;
+        const savedSelectedGrade = selectedGrade;
+        console.log('保存的评分方式:', savedGradeMode, '评分:', savedSelectedGrade);
+        
+        // 选择节点会触发文件加载
         $('#directory-tree').jstree('select_node', prevNode.id);
+        
+        // 文件加载后，如果文件没有评分，恢复之前的评分方式
+        // 这会在 handleFileContent 中自动处理
     }
 }
 
@@ -691,30 +731,56 @@ window.navigateToNextFile = function() {
 
     if (currentIndex < fileNodes.length - 1) {
         const nextNode = fileNodes[currentIndex + 1];
+        console.log('导航到下一个文件:', nextNode.text);
+        // 保存当前评分方式状态
+        const savedGradeMode = gradeMode;
+        const savedSelectedGrade = selectedGrade;
+        console.log('保存的评分方式:', savedGradeMode, '评分:', savedSelectedGrade);
+        
+        // 选择节点会触发文件加载
         $('#directory-tree').jstree('select_node', nextNode.id);
+        
+        // 文件加载后，如果文件没有评分，恢复之前的评分方式
+        // 这会在 handleFileContent 中自动处理
     }
 }
 
-// 更新导航按钮状态
+// 更新导航按钮状态和文件位置显示
 window.updateNavigationButtons = function() {
     const fileNodes = getAllFileNodes();
     const currentIndex = getCurrentFileIndex();
+    const totalFiles = fileNodes.length;
 
+    // 更新按钮禁用状态
     $('#prev-file').prop('disabled', currentIndex <= 0);
-    $('#next-file').prop('disabled', currentIndex >= fileNodes.length - 1);
+    $('#next-file').prop('disabled', currentIndex >= totalFiles - 1);
+    
+    // 更新文件位置显示（如"3/10"）
+    if (currentIndex >= 0 && totalFiles > 0) {
+        $('#current-file-index').text(currentIndex + 1);  // 显示从1开始的索引
+        $('#total-files').text(totalFiles);
+    } else {
+        $('#current-file-index').text('0');
+        $('#total-files').text('0');
+    }
+    
+    console.log('导航状态已更新 - 当前文件:', currentIndex + 1, '/', totalFiles);
 }
 
-// 在文件选择时更新导航按钮状态
+// 在文件选择时更新导航按钮状态和文件位置显示
 $('#directory-tree').on('select_node.jstree', function(e, data) {
     if (data.node.type === 'file') {
+        console.log('文件节点被选中:', data.node.text);
         updateNavigationButtons();
     }
 });
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
 window.addGradeToFile = function(grade) {
-    console.log('Adding grade to file:', grade);
-    console.log('Current file path:', currentFilePath);
+    console.log('=== 添加评分到文件 ===');
+    console.log('评分:', grade);
+    console.log('评分方式:', gradeMode);
+    console.log('当前文件路径:', currentFilePath);
 
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
@@ -731,7 +797,8 @@ window.addGradeToFile = function(grade) {
     // 准备请求数据
     const requestData = {
         path: currentFilePath,
-        grade: grade
+        grade: grade,
+        grade_type: gradeMode  // 添加评分方式参数
     };
     
     // 如果有当前仓库ID和课程，添加到请求中
@@ -742,7 +809,7 @@ window.addGradeToFile = function(grade) {
         requestData.course = currentCourse;
     }
     
-    console.log('Adding grade with data:', requestData);
+    console.log('请求数据:', requestData);
     console.log('后端将自动判断作业类型');
     
     $.ajax({
@@ -1009,7 +1076,7 @@ window.initTree = function() {
 
             // 加载文件内容
             loadFile(data.node.id);
-            // 更新导航按钮状态
+            // 更新导航按钮状态和文件位置显示
             updateNavigationButtons();
         }
     });
@@ -1106,6 +1173,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 绑定评分按钮点击事件（使用事件委托，避免重复绑定）
     $(document).off('click', '.grade-button').on('click', '.grade-button', function() {
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
+        
         const grade = $(this).data('grade');
         console.log('评分按钮被点击:', grade);
         
@@ -1121,6 +1195,13 @@ document.addEventListener('DOMContentLoaded', function() {
     // 绑定确定按钮点击事件（使用事件委托，避免重复绑定）
     $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function() {
         console.log('确定按钮被点击，当前选中评分:', selectedGrade);
+        
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
         
         if (!currentFilePath) {
             showError('请先选择要评分的文件');
@@ -1138,6 +1219,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 绑定撤销按钮点击事件
     $(document).on('click', '#cancel-grade', function() {
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许撤销评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
         cancelGrade();
     });
 
@@ -1222,8 +1309,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 showError(errorMessage);
             },
             complete: function() {
-                // 恢复按钮状态
-                $('#ai-score-btn').prop('disabled', false).html('<i class="bi bi-robot"></i> AI评分');
+                // 恢复按钮状态（如果文件未锁定）
+                if (!isFileLocked) {
+                    $('#ai-score-btn').prop('disabled', false).html('<i class="bi bi-robot"></i> AI评分');
+                } else {
+                    $('#ai-score-btn').prop('disabled', true).html('<i class="bi bi-robot"></i> AI评分');
+                }
                 hideLoading();
             }
         });
