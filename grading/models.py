@@ -19,6 +19,7 @@ class Tenant(models.Model):
     name = models.CharField(max_length=100, unique=True, help_text="租户名称")
     description = models.TextField(blank=True, help_text="租户描述")
     is_active = models.BooleanField(default=True, help_text="是否激活")
+    tenant_repo_dir = models.CharField(max_length=255, default="", help_text="租户仓库目录（相对于全局基础目录）")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -55,8 +56,9 @@ class UserProfile(models.Model):
         """获取用户的基础仓库目录"""
         if self.repo_base_dir:
             return self.repo_base_dir
-        # 如果没有配置，使用租户的默认目录
-        return self.tenant.default_repo_dir if hasattr(self.tenant, "default_repo_dir") else None
+        # 如果没有配置，使用租户级目录（为空则返回None）
+        tenant_dir = getattr(self.tenant, "tenant_repo_dir", "")
+        return tenant_dir or None
 
 
 class GlobalConfig(models.Model):
