@@ -10,6 +10,7 @@ import traceback
 from collections import deque
 from pathlib import Path
 from queue import Queue
+from typing import List, Optional, Tuple
 
 import mammoth
 import pandas as pd
@@ -46,6 +47,7 @@ from .models import (
     Semester,
 )
 from .utils import FileHandler, GitHandler
+from grading.services.grade_registry_writer_service import GradeRegistryWriterService
 
 # Create your views here.
 
@@ -61,6 +63,9 @@ REQUEST_LOCK = threading.Lock()
 
 # 请求历史记录（用于限流）
 REQUEST_HISTORY = deque(maxlen=10)
+
+FALLBACK_HOMEWORK_SEARCH_MAX_DEPTH = 5
+FALLBACK_HOMEWORK_SEARCH_MAX_MATCHES = 3
 
 
 def get_base_directory(request=None):
@@ -183,6 +188,194 @@ def create_success_response(data=None, message="操作成功", response_format="
         if data:
             response_data.update(data)
         return JsonResponse(response_data)
+
+
+def _fallback_search_homework_folder(
+    repo_base_path: str,
+    folder_name: str,
+    preferred_root: Optional[str] = None,
+) -> List[str]:
+    """在仓库中回退搜索指定作业文件夹，限制深度和数量以避免性能问题。"""
+    matches: List[str] = []
+    clean_folder = (folder_name or "").strip().strip("/\\")
+    if not clean_folder:
+        return matches
+
+    if preferred_root and os.path.exists(preferred_root):
+        search_root = preferred_root
+    else:
+        search_root = repo_base_path
+
+    if not os.path.exists(search_root):
+        return matches
+
+    for current_root, dirs, _ in os.walk(search_root):
+        rel_depth = 0
+        if current_root != search_root:
+            rel_path = os.path.relpath(current_root, search_root)
+            if rel_path.startswith(".."):
+                continue
+            rel_depth = rel_path.count(os.sep)
+
+        if rel_depth >= FALLBACK_HOMEWORK_SEARCH_MAX_DEPTH:
+            dirs[:] = []
+            continue
+
+        if clean_folder in dirs:
+            matches.append(os.path.join(current_root, clean_folder))
+            if len(matches) >= FALLBACK_HOMEWORK_SEARCH_MAX_MATCHES:
+                break
+
+    return matches
+
+
+def _resolve_homework_directory(homework, repositories):
+    """
+    根据作业记录和用户仓库解析作业目录，必要时使用回退搜索。
+
+    Returns:
+        (result, meta)
+        result: dict 包含 homework_path/class_path/repository
+        meta:   附加信息，如尝试过的路径/回退原因
+    """
+    folder_name = (homework.folder_name or "").strip().strip("/\\")
+    course_name = (homework.course.name or "").strip()
+    class_name = (homework.course.class_name or "").strip()
+
+    attempted_paths: List[str] = []
+    multiple_matches: List[str] = []
+
+    if not folder_name:
+        return None, {"error": "missing_folder_name"}
+
+    for repository in repositories:
+        repo_base_path = repository.get_full_path()
+        candidate_paths: List[Tuple[str, str]] = []
+
+        if course_name and class_name:
+            candidate_paths.append(
+                (
+                    os.path.join(repo_base_path, course_name, class_name, folder_name),
+                    os.path.join(repo_base_path, course_name, class_name),
+                )
+            )
+
+        if course_name:
+            candidate_paths.append(
+                (
+                    os.path.join(repo_base_path, course_name, folder_name),
+                    os.path.join(repo_base_path, course_name),
+                )
+            )
+
+        candidate_paths.append((os.path.join(repo_base_path, folder_name), repo_base_path))
+
+        for homework_path, class_path in candidate_paths:
+            attempted_paths.append(homework_path)
+            if os.path.isdir(homework_path):
+                return (
+                    {
+                        "homework_path": homework_path,
+                        "class_path": class_path,
+                        "repository": repository,
+                        "found_via_fallback": False,
+                    },
+                    {},
+                )
+
+        search_base = os.path.join(repo_base_path, course_name) if course_name else repo_base_path
+        fallback_matches = _fallback_search_homework_folder(
+            repo_base_path, folder_name, preferred_root=search_base
+        )
+        if len(fallback_matches) == 1:
+            found_path = fallback_matches[0]
+            return (
+                {
+                    "homework_path": found_path,
+                    "class_path": os.path.dirname(found_path),
+                    "repository": repository,
+                    "found_via_fallback": True,
+                },
+                {},
+            )
+        elif len(fallback_matches) > 1:
+            multiple_matches.extend(fallback_matches)
+
+    return None, {"attempted_paths": attempted_paths, "multiple_matches": multiple_matches}
+
+
+def _clean_relative_homework_path(relative_path: str) -> Optional[str]:
+    """清理用户提供的相对路径，防止越权访问。"""
+    if not relative_path:
+        return None
+
+    cleaned = relative_path.replace("\\", "/").strip()
+    cleaned = cleaned.strip("/")
+    if not cleaned:
+        return None
+
+    normalized = os.path.normpath(cleaned)
+    if normalized in ("", "."):
+        return None
+    if os.path.isabs(normalized):
+        # 不允许绝对路径
+        return None
+
+    normalized = normalized.replace("\\", "/")
+    if normalized.startswith("..") or "/.." in normalized:
+        # 防止目录遍历
+        return None
+
+    return normalized.strip("/")
+
+
+def _resolve_homework_directory_by_relative_path(
+    relative_path: str, repositories
+) -> Tuple[Optional[dict], dict]:
+    """根据前端明确提供的相对路径解析作业目录。"""
+    meta = {"relative_path": relative_path}
+    cleaned_path = _clean_relative_homework_path(relative_path)
+    if not cleaned_path:
+        meta["error"] = "invalid_relative_path"
+        return None, meta
+
+    fs_relative_path = cleaned_path.replace("/", os.sep)
+
+    for repository in repositories:
+        repo_base_path = repository.get_full_path()
+        repo_abs_path = os.path.abspath(repo_base_path)
+        candidate_path = os.path.normpath(os.path.join(repo_base_path, fs_relative_path))
+        candidate_abs_path = os.path.abspath(candidate_path)
+
+        # 确保路径仍在仓库内
+        try:
+            common_prefix = os.path.commonpath([candidate_abs_path, repo_abs_path])
+        except ValueError:
+            # 在不同驱动器上，commonpath 会抛出异常
+            continue
+
+        if common_prefix != repo_abs_path:
+            continue
+
+        if os.path.isdir(candidate_abs_path):
+            logger.info(
+                "通过前端提供的相对路径解析作业目录 - 路径: %s (仓库: %s)",
+                candidate_abs_path,
+                repository.name,
+            )
+            meta["resolved_via"] = "manual_selection"
+            return (
+                {
+                    "homework_path": candidate_abs_path,
+                    "class_path": os.path.dirname(candidate_abs_path),
+                    "repository": repository,
+                    "found_via_manual_selection": True,
+                },
+                meta,
+            )
+
+    meta["error"] = "path_not_found_in_repositories"
+    return None, meta
 
 
 def read_file_content(full_path):
@@ -6300,8 +6493,6 @@ def grade_registry_writer_view(request):
             tenant = request.user.profile.tenant
         
         # 6. 调用服务层处理工具箱场景
-        from grading.services.grade_registry_writer_service import GradeRegistryWriterService
-        
         service = GradeRegistryWriterService(
             user=request.user,
             tenant=tenant,
@@ -6392,64 +6583,75 @@ def batch_grade_to_registry(request, homework_id):
         
         # 获取用户的活跃仓库
         user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
-        
+
         if not user_repositories.exists():
             logger.error("用户没有活跃的仓库 - 用户: %s", request.user.username)
             return create_error_response("未找到活跃的仓库", status_code=404, response_format="success")
-        
-        # 尝试在每个仓库中查找作业目录
-        homework_dir_full_path = None
-        class_dir_full_path = None
-        found_repository = None
-        
-        for repository in user_repositories:
-            repo_base_path = repository.get_full_path()
-            
-            # 构建可能的路径
-            # 路径1: <repo>/<course_name>/<class_name>/<homework_folder>
-            if homework.course.class_name:
-                potential_homework_path = os.path.join(
-                    repo_base_path,
-                    homework.course.name,
-                    homework.course.class_name,
-                    homework.folder_name
-                )
-                potential_class_path = os.path.join(
-                    repo_base_path,
-                    homework.course.name,
-                    homework.course.class_name
-                )
+
+        resolution = None
+        resolution_meta = {}
+
+        manual_relative_path = (request.POST.get("relative_path") or "").strip()
+        if manual_relative_path:
+            manual_resolution, manual_meta = _resolve_homework_directory_by_relative_path(
+                manual_relative_path, user_repositories
+            )
+            if manual_resolution:
+                resolution = manual_resolution
+                resolution_meta = manual_meta
             else:
-                # 路径2: <repo>/<course_name>/<homework_folder>
-                potential_homework_path = os.path.join(
-                    repo_base_path,
+                # 记录手动路径尝试的信息，方便排查
+                resolution_meta = manual_meta
+
+        if not resolution:
+            resolution, fallback_meta = _resolve_homework_directory(homework, user_repositories)
+            if fallback_meta:
+                # 如果之前已有元数据（例如手动路径失败），合并信息
+                if resolution_meta:
+                    resolution_meta.update(fallback_meta)
+                else:
+                    resolution_meta = fallback_meta
+
+        if not resolution:
+            attempted = resolution_meta.get("attempted_paths", [])
+            multiple_matches = resolution_meta.get("multiple_matches", [])
+
+            if multiple_matches:
+                logger.error(
+                    "检测到多个同名作业目录 - 课程: %s, 作业: %s, 路径: %s",
                     homework.course.name,
-                    homework.folder_name
+                    homework.folder_name,
+                    multiple_matches,
                 )
-                potential_class_path = os.path.join(
-                    repo_base_path,
-                    homework.course.name
+                return create_error_response(
+                    "检测到多个同名作业目录，请确认课程/班级配置或手动指定唯一目录",
+                    status_code=409,
+                    response_format="success",
                 )
-            
-            if os.path.exists(potential_homework_path) and os.path.isdir(potential_homework_path):
-                homework_dir_full_path = potential_homework_path
-                class_dir_full_path = potential_class_path
-                found_repository = repository
-                logger.info("找到作业目录 - 路径: %s", homework_dir_full_path)
-                break
-        
-        if not homework_dir_full_path:
+
             logger.error(
-                "未找到作业目录 - 课程: %s, 班级: %s, 作业: %s",
+                "未找到作业目录 - 课程: %s, 班级: %s, 作业: %s, 尝试路径: %s",
                 homework.course.name,
                 homework.course.class_name or "无",
                 homework.folder_name,
+                attempted,
             )
             return create_error_response(
                 f"未找到作业目录: {homework.folder_name}",
                 status_code=404,
                 response_format="success"
             )
+
+        homework_dir_full_path = resolution["homework_path"]
+        class_dir_full_path = resolution["class_path"]
+        found_repository = resolution["repository"]
+
+        if resolution.get("found_via_manual_selection"):
+            logger.info("通过用户选定的目录解析作业 - 路径: %s", homework_dir_full_path)
+        elif resolution.get("found_via_fallback"):
+            logger.info("通过回退搜索找到作业目录 - 路径: %s", homework_dir_full_path)
+        else:
+            logger.info("找到作业目录 - 路径: %s", homework_dir_full_path)
         
         if not class_dir_full_path or not os.path.exists(class_dir_full_path):
             logger.error("未找到班级目录 - 路径: %s", class_dir_full_path)
@@ -6465,6 +6667,13 @@ def batch_grade_to_registry(request, homework_id):
             logger.error("路径遍历攻击检测 - 班级路径: %s", class_dir_full_path)
             return create_error_response("无权访问该路径", status_code=403, response_format="success")
         
+        resolved_class_name = homework.course.class_name or ""
+        if not resolved_class_name:
+            class_basename = os.path.basename(os.path.normpath(class_dir_full_path))
+            if class_basename != homework.course.name:
+                resolved_class_name = class_basename
+        resolved_class_name = resolved_class_name or "无"
+
         # 5. 获取用户租户信息
         tenant = None
         if hasattr(request, "tenant"):
@@ -6473,8 +6682,6 @@ def batch_grade_to_registry(request, homework_id):
             tenant = request.user.profile.tenant
         
         # 6. 调用服务层处理作业评分系统场景
-        from grading.services.grade_registry_writer_service import GradeRegistryWriterService
-        
         service = GradeRegistryWriterService(
             user=request.user,
             tenant=tenant,
@@ -6500,7 +6707,7 @@ def batch_grade_to_registry(request, homework_id):
                     "homework_number": result["homework_number"],
                     "homework_name": homework.title,
                     "course_name": homework.course.name,
-                    "class_name": homework.course.class_name or "无",
+                    "class_name": resolved_class_name,
                     "summary": result["statistics"],
                     "details": {
                         "processed_files": result["processed_files"],

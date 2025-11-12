@@ -17,6 +17,7 @@ from grading.models import (
     Course,
     CourseSchedule,
     GradeTypeConfig,
+    Homework,
     Repository,
     Semester,
     Tenant,
@@ -485,3 +486,129 @@ class PermissionViewTest(BaseTestCase):
         # 租户管理员应该能访问管理功能
         response = self.client.get(reverse("grading:grade_type_management"))
         self.assertResponseOK(response)
+
+
+class BatchGradeToRegistryFallbackTest(BaseTestCase):
+    """批量登分目录解析回退逻辑测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.semester = Semester.objects.create(
+            name="2024年春季学期", start_date="2024-02-26", end_date="2024-06-30"
+        )
+        self.course = Course.objects.create(
+            semester=self.semester,
+            teacher=self.user,
+            name="Python程序设计",
+            course_type="theory",
+            description="",
+            location="A101",
+            class_name="计科1班",
+        )
+        self.homework = Homework.objects.create(
+            course=self.course, title="第一次作业", folder_name="第一次作业"
+        )
+        self.repository = Repository.objects.create(
+            owner=self.user, name="测试仓库", path="repo", is_active=True
+        )
+
+    @patch("grading.views.GradeRegistryWriterService")
+    def test_batch_grade_uses_fallback_directory(self, mock_service):
+        """当目录结构不匹配时，应该通过回退搜索找到作业目录"""
+        mock_instance = mock_service.return_value
+        mock_instance.process_grading_system_scenario.return_value = {
+            "success": True,
+            "homework_number": 1,
+            "statistics": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
+            "processed_files": [],
+            "failed_files": [],
+            "skipped_files": [],
+            "registry_path": "/tmp/registry.xlsx",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            class_dir = os.path.join(temp_dir, "任意目录")
+            homework_dir = os.path.join(class_dir, self.homework.folder_name)
+            os.makedirs(homework_dir)
+
+            self.login_user(self.user)
+            with patch.object(Repository, "get_full_path", return_value=temp_dir):
+                response = self.client.post(
+                    reverse("grading:batch_grade_to_registry", args=[self.homework.id])
+                )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+
+        mock_instance.process_grading_system_scenario.assert_called_once()
+        called_kwargs = mock_instance.process_grading_system_scenario.call_args.kwargs
+        self.assertEqual(called_kwargs["homework_dir"], homework_dir)
+        self.assertEqual(called_kwargs["class_dir"], class_dir)
+
+    @patch("grading.views.GradeRegistryWriterService")
+    def test_batch_grade_multiple_fallback_matches(self, mock_service):
+        """存在多个同名目录时应返回冲突错误"""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            class_a = os.path.join(temp_dir, "A班", self.homework.folder_name)
+            class_b = os.path.join(temp_dir, "B班", self.homework.folder_name)
+            os.makedirs(class_a)
+            os.makedirs(class_b)
+
+            self.login_user(self.user)
+            with patch.object(Repository, "get_full_path", return_value=temp_dir):
+                response = self.client.post(
+                    reverse("grading:batch_grade_to_registry", args=[self.homework.id])
+                )
+
+        self.assertEqual(response.status_code, 409)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertIn("多个同名作业目录", data["message"])
+        mock_service.return_value.process_grading_system_scenario.assert_not_called()
+
+    @patch("grading.views.GradeRegistryWriterService")
+    def test_batch_grade_manual_relative_path_resolves_conflict(self, mock_service):
+        """用户选择具体目录时，应优先使用该路径避免同名冲突"""
+        mock_instance = mock_service.return_value
+        mock_instance.process_grading_system_scenario.return_value = {
+            "success": True,
+            "homework_number": 1,
+            "statistics": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
+            "processed_files": [],
+            "failed_files": [],
+            "skipped_files": [],
+            "registry_path": "/tmp/registry.xlsx",
+        }
+
+        # 模拟课程未配置班级名称的场景
+        self.course.class_name = ""
+        self.course.save(update_fields=["class_name"])
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            course_root = os.path.join(temp_dir, self.course.name)
+            class_a_dir = os.path.join(course_root, "A班")
+            class_b_dir = os.path.join(course_root, "B班")
+            homework_dir_a = os.path.join(class_a_dir, self.homework.folder_name)
+            homework_dir_b = os.path.join(class_b_dir, self.homework.folder_name)
+            os.makedirs(homework_dir_a)
+            os.makedirs(homework_dir_b)
+
+            relative_path = f"{self.course.name}/A班/{self.homework.folder_name}"
+
+            self.login_user(self.user)
+            with patch.object(Repository, "get_full_path", return_value=temp_dir):
+                response = self.client.post(
+                    reverse("grading:batch_grade_to_registry", args=[self.homework.id]),
+                    {"relative_path": relative_path},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["class_name"], "A班")
+
+        mock_instance.process_grading_system_scenario.assert_called_once()
+        called_kwargs = mock_instance.process_grading_system_scenario.call_args.kwargs
+        self.assertEqual(called_kwargs["homework_dir"], homework_dir_a)
+        self.assertEqual(called_kwargs["class_dir"], class_a_dir)

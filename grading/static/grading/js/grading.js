@@ -767,13 +767,8 @@ window.updateNavigationButtons = function() {
     console.log('导航状态已更新 - 当前文件:', currentIndex + 1, '/', totalFiles);
 }
 
-// 在文件选择时更新导航按钮状态和文件位置显示
-$('#directory-tree').on('select_node.jstree', function(e, data) {
-    if (data.node.type === 'file') {
-        console.log('文件节点被选中:', data.node.text);
-        updateNavigationButtons();
-    }
-});
+// 注意：文件选择时的导航按钮更新已在 initTree() 函数中的 jstree 初始化时处理
+// 这里不需要重复绑定事件
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
 window.addGradeToFile = function(grade) {
@@ -1064,7 +1059,7 @@ window.initTree = function() {
                 }
             })
             .on('select_node.jstree', function(e, data) {
-        // 确保只处理文件节点
+        // 处理文件节点
         if (data.node.type === 'file') {
             // 取消其他节点的选中状态
             const selectedNodes = $('#directory-tree').jstree('get_selected');
@@ -1078,6 +1073,16 @@ window.initTree = function() {
             loadFile(data.node.id);
             // 更新导航按钮状态和文件位置显示
             updateNavigationButtons();
+            
+            // 禁用批量登分按钮（选中的是文件，不是文件夹）
+            $('#batch-grade-btn').prop('disabled', true)
+                .attr('title', '请先选择作业文件夹（非文件）')
+                .html('<i class="bi bi-tasks"></i> 批量登分');
+            currentHomeworkFolder = null;
+            currentHomeworkId = null;
+        } else if (data.node.type === 'folder') {
+            // 处理文件夹节点 - 更新批量登分按钮
+            updateBatchGradeButton(data.node.id, data.node.id);
         }
     });
     } catch (error) {
@@ -1103,6 +1108,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 确保AI评分按钮初始状态为禁用
     disableAiScoreButton();
+
+    // 初始化批量登分按钮为禁用状态
+    console.log('=== 初始化批量登分按钮 ===');
+    console.log('按钮元素数量:', $('#batch-grade-btn').length);
+    console.log('初始disabled状态:', $('#batch-grade-btn').prop('disabled'));
+    $('#batch-grade-btn').prop('disabled', true)
+        .attr('title', '请先选择作业文件夹（非文件）')
+        .html('<i class="bi bi-tasks"></i> 批量登分');
+    console.log('设置后disabled状态:', $('#batch-grade-btn').prop('disabled'));
+    console.log('按钮文本:', $('#batch-grade-btn').text());
 
     // 设置初始树数据
     if (window.initialTreeData) {
@@ -1755,3 +1770,165 @@ function updateHomeworkType(nodeId, folderName, homeworkType, modal) {
         }
     });
 }
+
+// ==================== 批量登分功能 ====================
+
+// 全局变量：当前选中的作业文件夹
+let currentHomeworkFolder = null;
+let currentHomeworkId = null;
+let currentHomeworkRelativePath = null;
+
+// 批量登分按钮点击事件
+$(document).on('click', '#batch-grade-btn', function() {
+    console.log('批量登分按钮被点击');
+    
+    if (!currentHomeworkFolder || !currentHomeworkId) {
+        alert('请先选择一个作业文件夹');
+        return;
+    }
+    
+    if (!currentCourse) {
+        alert('请先选择课程');
+        return;
+    }
+    
+    // 确认对话框
+    const confirmMsg = `确定要对作业"${currentHomeworkFolder}"进行批量登分吗？\n\n` +
+                      `系统将自动读取所有学生作业中的成绩，并写入到班级成绩登记表中。`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    // 显示加载状态
+    const $btn = $(this);
+    const originalText = $btn.html();
+    $btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 处理中...');
+    
+    // 调用批量登分API
+    $.ajax({
+        url: `/grading/homework/${currentHomeworkId}/batch-grade-to-registry/`,
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            relative_path: currentHomeworkRelativePath || ''
+        },
+        success: function(response) {
+            if (response.success) {
+                const summary = response.data.summary;
+                const details = response.data.details;
+                let message = `批量登分完成！\n\n`;
+                message += `作业：${response.data.homework_name}\n`;
+                message += `课程：${response.data.course_name}\n`;
+                message += `班级：${response.data.class_name}\n\n`;
+                message += `总文件数：${summary.total}\n`;
+                message += `成功：${summary.success}\n`;
+                message += `失败：${summary.failed}\n`;
+                message += `跳过：${summary.skipped}\n`;
+                
+                if (summary.failed > 0 && details.failed_files && details.failed_files.length > 0) {
+                    message += `\n失败的文件：\n`;
+                    details.failed_files.forEach(file => {
+                        message += `- ${file.student_name || file.file}: ${file.error}\n`;
+                    });
+                }
+                
+                alert(message);
+            } else {
+                alert('批量登分失败：' + (response.message || response.error || '未知错误'));
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('批量登分失败:', error);
+            let errorMsg = '批量登分失败';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMsg += '：' + xhr.responseJSON.message;
+            }
+            alert(errorMsg);
+        },
+        complete: function() {
+            // 恢复按钮状态
+            $btn.prop('disabled', false).html(originalText);
+        }
+    });
+});
+
+// 当选择作业文件夹时，更新批量登分按钮状态
+function updateBatchGradeButton(folderPath, folderId) {
+    console.log('=== 更新批量登分按钮状态 ===');
+    console.log('文件夹路径:', folderPath);
+    console.log('文件夹ID:', folderId);
+    console.log('当前课程:', currentCourse);
+    
+    if (!folderPath || !currentCourse) {
+        console.log('条件不满足，禁用按钮');
+        $('#batch-grade-btn').prop('disabled', true)
+            .attr('title', '请先选择作业文件夹（非文件）')
+            .html('<i class="bi bi-tasks"></i> 批量登分');
+        currentHomeworkFolder = null;
+        currentHomeworkId = null;
+        currentHomeworkRelativePath = null;
+        console.log('按钮已禁用，文本已重置');
+        return;
+    }
+    
+    // 从路径中提取作业文件夹名称
+    const pathParts = folderPath.split('/');
+    const folderName = pathParts[pathParts.length - 1];
+    
+    console.log('路径分割结果:', pathParts);
+    console.log('提取的文件夹名称:', folderName);
+    console.log('当前课程名称:', currentCourse);
+    
+    // 查询作业信息
+    $.ajax({
+        url: '/grading/api/homework-info/',
+        method: 'GET',
+        data: {
+            course_name: currentCourse,
+            homework_folder: folderName
+        },
+        success: function(response) {
+            if (response.success && response.homework) {
+                currentHomeworkFolder = folderName;
+                currentHomeworkId = response.homework.id;
+
+                let relativePath = folderPath;
+                if (currentCourse) {
+                    const coursePrefix = `${currentCourse}/`;
+                    if (!folderPath.startsWith(coursePrefix)) {
+                        relativePath = `${currentCourse}/${folderPath}`;
+                    }
+                }
+                currentHomeworkRelativePath = relativePath;
+
+                $('#batch-grade-btn').prop('disabled', false)
+                    .attr('title', `对作业"${folderName}"进行批量登分`)
+                    .html(`<i class="bi bi-tasks"></i> 批量登分 (${folderName})`);
+                console.log('作业信息已加载:', response.homework);
+            } else {
+                $('#batch-grade-btn').prop('disabled', true)
+                    .attr('title', '该文件夹不是有效的作业文件夹')
+                    .html('<i class="bi bi-tasks"></i> 批量登分');
+                currentHomeworkFolder = null;
+                currentHomeworkId = null;
+                currentHomeworkRelativePath = null;
+                console.log('未找到作业信息');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('查询作业信息失败:', error);
+            $('#batch-grade-btn').prop('disabled', true)
+                .attr('title', '查询作业信息失败')
+                .html('<i class="bi bi-tasks"></i> 批量登分');
+            currentHomeworkFolder = null;
+            currentHomeworkId = null;
+            currentHomeworkRelativePath = null;
+        }
+    });
+}
+
+// 注意：select_node.jstree 事件已在 initTree() 函数中的 jstree 初始化时绑定
+// 这里不需要重复绑定
