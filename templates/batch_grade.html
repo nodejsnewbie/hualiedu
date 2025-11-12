@@ -95,6 +95,9 @@
                         <button type="button" id="batch-grade-btn" class="btn btn-primary btn-lg" disabled>
                             <i class="fas fa-play"></i> 开始批量登分
                         </button>
+                        <button type="button" id="batch-grade-to-registry-btn" class="btn btn-success btn-lg ml-2" disabled>
+                            <i class="bi bi-file-earmark-spreadsheet"></i> 登分到成绩册
+                        </button>
                         <button type="button" id="refresh-btn" class="btn btn-secondary btn-lg ml-2">
                             <i class="fas fa-sync-alt"></i> 刷新仓库列表
                         </button>
@@ -193,6 +196,7 @@ $(document).ready(function() {
             $(this).addClass('selected');
             selectedRepository = $(this).data('repo');
             $('#batch-grade-btn').prop('disabled', false);
+            $('#batch-grade-to-registry-btn').prop('disabled', false);
         });
     }
 
@@ -246,11 +250,58 @@ $(document).ready(function() {
         `).show();
     }
 
+    // 执行登分到成绩册
+    function executeBatchGradeToRegistry() {
+        if (!selectedRepository) {
+            showError('请先选择要处理的仓库');
+            return;
+        }
+
+        $('#loading').show();
+        $('#result').hide();
+        $('#batch-grade-to-registry-btn').prop('disabled', true);
+
+        $.ajax({
+            url: '{% url "grading:batch_grade_to_registry" %}',
+            method: 'POST',
+            data: {
+                repository: selectedRepository,
+                csrfmiddlewaretoken: '{{ csrf_token }}'
+            },
+            success: function(response) {
+                $('#loading').hide();
+                if (response.success) {
+                    let resultHtml = `
+                        <div class="alert alert-success">
+                            <h5><i class="fas fa-check-circle"></i> 登分完成</h5>
+                            <p><strong>总文件数：</strong>${response.data.summary.total_files}</p>
+                            <p><strong>成功：</strong>${response.data.summary.success_count}</p>
+                            <p><strong>失败：</strong>${response.data.summary.failed_count}</p>
+                            <p><strong>跳过：</strong>${response.data.summary.skipped_count}</p>
+                        </div>
+                    `;
+                    $('#result').html(resultHtml).show();
+                } else {
+                    showError(response.error || '登分失败');
+                }
+            },
+            error: function(xhr, status, error) {
+                $('#loading').hide();
+                showError('执行登分失败: ' + error);
+            },
+            complete: function() {
+                $('#batch-grade-to-registry-btn').prop('disabled', false);
+            }
+        });
+    }
+
     // 绑定事件
     $('#batch-grade-btn').click(executeBatchGrade);
+    $('#batch-grade-to-registry-btn').click(executeBatchGradeToRegistry);
     $('#refresh-btn').click(function() {
         selectedRepository = null;
         $('#batch-grade-btn').prop('disabled', true);
+        $('#batch-grade-to-registry-btn').prop('disabled', true);
         loadRepositoryList();
     });
 

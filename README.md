@@ -7,17 +7,25 @@
 - Django 4.2.20
 
 ### 安装和运行
+
+**重要**: 所有命令必须在 conda py313 环境下执行
+
 ```bash
-# 1. 激活环境
+# 推荐: 使用 Makefile（最简单）
+make runserver          # 启动开发服务器
+make test              # 运行测试
+make migrate           # 数据库迁移
+
+# 或使用辅助脚本
+./scripts/runserver.sh  # 启动开发服务器
+./scripts/test.sh       # 运行测试
+
+# 或手动激活环境
 conda activate py313
-
-# 2. 安装依赖
-pip install -r requirements.txt
-pip install -r requirements-dev.txt  # 开发环境
-
-# 3. 运行项目
 python manage.py runserver
 ```
+
+📖 **完整开发指南**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
 
 ## 📚 项目结构
 
@@ -78,12 +86,12 @@ python manage.py test grading.tests.test_models
 - conda-project
 - VS Code 集成
 
-## 📖 详细文档
+## 📖 文档
 
-- [文档索引](docs/README.md) - 完整文档目录
-- [项目结构](docs/PROJECT_STRUCTURE.md) - 项目目录结构说明
-- [团队协作指南](docs/TEAM_COLLABORATION.md) - 开发规范和最佳实践
-- [测试指南](tests/README.md) - 测试规范和运行方法
+- **[开发指南](docs/DEVELOPMENT.md)** - 环境配置、开发流程、常用命令
+- **[项目结构](docs/PROJECT_STRUCTURE.md)** - 目录结构和代码组织
+- **[团队协作](docs/TEAM_COLLABORATION.md)** - 开发规范和最佳实践
+- **[功能文档](docs/README.md)** - 完整功能文档索引
 
 ## 🤝 贡献
 

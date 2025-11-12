@@ -46,13 +46,13 @@
             <div class="card h-100">
                 <div class="card-body">
                     <h5 class="card-title">
-                        <i class="fas fa-cog text-secondary"></i>
-                        更多工具
+                        <i class="fas fa-file-excel text-success"></i>
+                        作业成绩写入
                     </h5>
-                    <p class="card-text">更多实用工具正在开发中...</p>
-                    <button class="btn btn-secondary" disabled>
-                        敬请期待
-                    </button>
+                    <p class="card-text">将作业成绩表中的数据按姓名写入成绩登分册</p>
+                    <a href="{% url 'toolbox:assignment_grade_import' %}" class="btn btn-success">
+                        立即写入
+                    </a>
                 </div>
             </div>
         </div>

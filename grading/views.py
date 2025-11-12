@@ -6227,3 +6227,303 @@ def batch_ai_score_view(request):
         logger.error(f"批量AI评分视图异常: {str(e)}")
         logger.error(traceback.format_exc())
         return create_error_response(f"服务器内部错误: {str(e)}")
+
+
+# ==================== 成绩登分册写入功能 ====================
+
+@login_required
+@require_http_methods(["POST"])
+def grade_registry_writer_view(request):
+    """
+    工具箱模块场景：成绩登分册写入视图
+    
+    从班级目录的Excel成绩文件批量写入成绩到登分册
+    
+    POST参数:
+        - class_directory: 班级目录路径（相对路径）
+        - repository_id: 仓库ID
+    
+    Returns:
+        JSON响应包含处理结果
+    """
+    try:
+        # 1. 获取请求参数
+        class_directory = request.POST.get("class_directory", "").strip()
+        repo_id = request.POST.get("repository_id")
+        
+        if not class_directory:
+            return create_error_response("未提供班级目录路径", response_format="success")
+        
+        if not repo_id:
+            return create_error_response("未提供仓库ID", response_format="success")
+        
+        logger.info(
+            "工具箱模块场景 - 用户: %s, 仓库ID: %s, 班级目录: %s",
+            request.user.username,
+            repo_id,
+            class_directory,
+        )
+        
+        # 2. 验证用户对仓库的访问权限
+        try:
+            repository = Repository.objects.get(
+                id=repo_id,
+                owner=request.user,
+                is_active=True
+            )
+        except Repository.DoesNotExist:
+            logger.error("仓库不存在或无权限访问 - 仓库ID: %s, 用户: %s", repo_id, request.user.username)
+            return create_error_response("仓库不存在或无权限访问", status_code=403, response_format="success")
+        
+        # 3. 构建完整的班级目录路径
+        repo_base_path = repository.get_full_path()
+        class_dir_full_path = os.path.join(repo_base_path, class_directory)
+        
+        # 4. 路径安全检查
+        if not os.path.abspath(class_dir_full_path).startswith(os.path.abspath(repo_base_path)):
+            logger.error("路径遍历攻击检测 - 路径: %s", class_dir_full_path)
+            return create_error_response("无权访问该路径", status_code=403, response_format="success")
+        
+        if not os.path.exists(class_dir_full_path):
+            logger.error("班级目录不存在 - 路径: %s", class_dir_full_path)
+            return create_error_response("班级目录不存在", status_code=404, response_format="success")
+        
+        if not os.path.isdir(class_dir_full_path):
+            logger.error("路径不是目录 - 路径: %s", class_dir_full_path)
+            return create_error_response("路径不是目录", status_code=400, response_format="success")
+        
+        # 5. 获取用户租户信息
+        tenant = None
+        if hasattr(request, "tenant"):
+            tenant = request.tenant
+        elif hasattr(request.user, "profile"):
+            tenant = request.user.profile.tenant
+        
+        # 6. 调用服务层处理工具箱场景
+        from grading.services.grade_registry_writer_service import GradeRegistryWriterService
+        
+        service = GradeRegistryWriterService(
+            user=request.user,
+            tenant=tenant,
+            scenario=GradeRegistryWriterService.SCENARIO_TOOLBOX
+        )
+        
+        result = service.process_toolbox_scenario(class_dir=class_dir_full_path)
+        
+        # 7. 返回处理结果
+        if result["success"]:
+            logger.info(
+                "工具箱模块场景处理成功 - 文件: %d, 学生成绩: 成功 %d, 失败 %d",
+                result["statistics"]["total_files"],
+                result["statistics"]["success"],
+                result["statistics"]["failed"],
+            )
+            return create_success_response(
+                data={
+                    "summary": result["statistics"],
+                    "details": {
+                        "processed_files": result["processed_files"],
+                        "failed_files": result["failed_files"],
+                    },
+                    "registry_path": result["registry_path"],
+                },
+                message="成绩写入完成",
+                response_format="success"
+            )
+        else:
+            logger.error("工具箱模块场景处理失败 - 错误: %s", result.get("error_message"))
+            return create_error_response(
+                result.get("error_message", "成绩写入失败"),
+                status_code=500,
+                response_format="success"
+            )
+    
+    except Exception as e:
+        logger.error("工具箱模块场景处理异常: %s", str(e), exc_info=True)
+        return create_error_response(
+            f"处理请求时出错: {str(e)}",
+            status_code=500,
+            response_format="success"
+        )
+
+
+
+@login_required
+@require_http_methods(["POST"])
+def batch_grade_to_registry(request, homework_id):
+    """
+    作业评分系统场景：批量登分到成绩册
+    
+    从作业目录的Word文档批量写入成绩到班级登分册
+    
+    URL参数:
+        - homework_id: 作业ID
+    
+    Returns:
+        JSON响应包含处理结果
+    """
+    try:
+        logger.info(
+            "作业评分系统场景 - 用户: %s, 作业ID: %s",
+            request.user.username,
+            homework_id,
+        )
+        
+        # 1. 获取作业对象
+        try:
+            homework = Homework.objects.get(id=homework_id)
+        except Homework.DoesNotExist:
+            logger.error("作业不存在 - 作业ID: %s", homework_id)
+            return create_error_response("作业不存在", status_code=404, response_format="success")
+        
+        # 2. 验证用户权限（检查是否是课程教师）
+        if homework.course.teacher != request.user and not request.user.is_superuser:
+            logger.error(
+                "无权限访问作业 - 作业ID: %s, 用户: %s, 课程教师: %s",
+                homework_id,
+                request.user.username,
+                homework.course.teacher.username,
+            )
+            return create_error_response("无权限访问该作业", status_code=403, response_format="success")
+        
+        # 3. 获取作业目录路径
+        # 假设作业目录结构：<repo_base>/<course_name>/<class_name>/<homework_folder_name>
+        # 需要从用户的仓库中查找对应的课程目录
+        
+        # 获取用户的活跃仓库
+        user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
+        
+        if not user_repositories.exists():
+            logger.error("用户没有活跃的仓库 - 用户: %s", request.user.username)
+            return create_error_response("未找到活跃的仓库", status_code=404, response_format="success")
+        
+        # 尝试在每个仓库中查找作业目录
+        homework_dir_full_path = None
+        class_dir_full_path = None
+        found_repository = None
+        
+        for repository in user_repositories:
+            repo_base_path = repository.get_full_path()
+            
+            # 构建可能的路径
+            # 路径1: <repo>/<course_name>/<class_name>/<homework_folder>
+            if homework.course.class_name:
+                potential_homework_path = os.path.join(
+                    repo_base_path,
+                    homework.course.name,
+                    homework.course.class_name,
+                    homework.folder_name
+                )
+                potential_class_path = os.path.join(
+                    repo_base_path,
+                    homework.course.name,
+                    homework.course.class_name
+                )
+            else:
+                # 路径2: <repo>/<course_name>/<homework_folder>
+                potential_homework_path = os.path.join(
+                    repo_base_path,
+                    homework.course.name,
+                    homework.folder_name
+                )
+                potential_class_path = os.path.join(
+                    repo_base_path,
+                    homework.course.name
+                )
+            
+            if os.path.exists(potential_homework_path) and os.path.isdir(potential_homework_path):
+                homework_dir_full_path = potential_homework_path
+                class_dir_full_path = potential_class_path
+                found_repository = repository
+                logger.info("找到作业目录 - 路径: %s", homework_dir_full_path)
+                break
+        
+        if not homework_dir_full_path:
+            logger.error(
+                "未找到作业目录 - 课程: %s, 班级: %s, 作业: %s",
+                homework.course.name,
+                homework.course.class_name or "无",
+                homework.folder_name,
+            )
+            return create_error_response(
+                f"未找到作业目录: {homework.folder_name}",
+                status_code=404,
+                response_format="success"
+            )
+        
+        if not class_dir_full_path or not os.path.exists(class_dir_full_path):
+            logger.error("未找到班级目录 - 路径: %s", class_dir_full_path)
+            return create_error_response("未找到班级目录", status_code=404, response_format="success")
+        
+        # 4. 路径安全检查
+        repo_base_path = found_repository.get_full_path()
+        if not os.path.abspath(homework_dir_full_path).startswith(os.path.abspath(repo_base_path)):
+            logger.error("路径遍历攻击检测 - 作业路径: %s", homework_dir_full_path)
+            return create_error_response("无权访问该路径", status_code=403, response_format="success")
+        
+        if not os.path.abspath(class_dir_full_path).startswith(os.path.abspath(repo_base_path)):
+            logger.error("路径遍历攻击检测 - 班级路径: %s", class_dir_full_path)
+            return create_error_response("无权访问该路径", status_code=403, response_format="success")
+        
+        # 5. 获取用户租户信息
+        tenant = None
+        if hasattr(request, "tenant"):
+            tenant = request.tenant
+        elif hasattr(request.user, "profile"):
+            tenant = request.user.profile.tenant
+        
+        # 6. 调用服务层处理作业评分系统场景
+        from grading.services.grade_registry_writer_service import GradeRegistryWriterService
+        
+        service = GradeRegistryWriterService(
+            user=request.user,
+            tenant=tenant,
+            scenario=GradeRegistryWriterService.SCENARIO_GRADING_SYSTEM
+        )
+        
+        result = service.process_grading_system_scenario(
+            homework_dir=homework_dir_full_path,
+            class_dir=class_dir_full_path
+        )
+        
+        # 7. 返回处理结果
+        if result["success"]:
+            logger.info(
+                "作业评分系统场景处理成功 - 作业批次: %d, 成功: %d, 失败: %d, 跳过: %d",
+                result["homework_number"],
+                result["statistics"]["success"],
+                result["statistics"]["failed"],
+                result["statistics"]["skipped"],
+            )
+            return create_success_response(
+                data={
+                    "homework_number": result["homework_number"],
+                    "homework_name": homework.title,
+                    "course_name": homework.course.name,
+                    "class_name": homework.course.class_name or "无",
+                    "summary": result["statistics"],
+                    "details": {
+                        "processed_files": result["processed_files"],
+                        "failed_files": result["failed_files"],
+                        "skipped_files": result["skipped_files"],
+                    },
+                    "registry_path": result["registry_path"],
+                },
+                message="批量登分完成",
+                response_format="success"
+            )
+        else:
+            logger.error("作业评分系统场景处理失败 - 错误: %s", result.get("error_message"))
+            return create_error_response(
+                result.get("error_message", "批量登分失败"),
+                status_code=500,
+                response_format="success"
+            )
+    
+    except Exception as e:
+        logger.error("作业评分系统场景处理异常: %s", str(e), exc_info=True)
+        return create_error_response(
+            f"处理请求时出错: {str(e)}",
+            status_code=500,
+            response_format="success"
+        )

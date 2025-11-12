@@ -4,6 +4,7 @@ import os
 import subprocess
 import threading
 
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import JsonResponse
@@ -11,6 +12,7 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
 from .models import ConversionLog, FileConversionTask
+from .utils import AssignmentImportError, import_assignment_scores_to_gradebook
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +20,69 @@ logger = logging.getLogger(__name__)
 @login_required
 def toolbox_index(request):
     """工具箱首页"""
-    return render(request, "toolbox/index.html")
+    tasks = FileConversionTask.objects.filter(user=request.user).order_by("-created_at")[:10]
+    return render(request, "toolbox/index.html", {"tasks": tasks})
+
+
+@login_required
+def assignment_grade_import_view(request):
+    """作业成绩写入成绩登分册"""
+    default_assignment_file = os.path.join(settings.BASE_DIR, "docs", "第五次作业.xlsx")
+    default_gradebook_file = os.path.join(settings.BASE_DIR, "docs", "成绩登分册.xlsx")
+
+    form_data = {
+        "assignment_file": default_assignment_file,
+        "gradebook_file": default_gradebook_file,
+        "assignment_number": 5,
+    }
+    result = None
+
+    if request.method == "POST":
+        assignment_input = request.POST.get("assignment_file", "").strip()
+        gradebook_input = request.POST.get("gradebook_file", "").strip()
+        assignment_number_input = request.POST.get("assignment_number", "").strip()
+
+        if assignment_input:
+            form_data["assignment_file"] = assignment_input
+        if gradebook_input:
+            form_data["gradebook_file"] = gradebook_input
+
+        if assignment_number_input:
+            try:
+                assignment_number = int(assignment_number_input)
+                if assignment_number < 1:
+                    raise ValueError
+                form_data["assignment_number"] = assignment_number
+            except (TypeError, ValueError):
+                messages.error(request, "作业次数必须为正整数")
+                assignment_number = None
+            else:
+                assignment_number = form_data["assignment_number"]
+        else:
+            assignment_number = form_data["assignment_number"]
+
+        if assignment_number:
+            try:
+                result = import_assignment_scores_to_gradebook(
+                    form_data["assignment_file"],
+                    form_data["gradebook_file"],
+                    assignment_number,
+                )
+                messages.success(
+                    request,
+                    f"写入完成：更新 {result['updated_students']} 位学生，目标列 {result['assignment_column_letter']}",
+                )
+            except AssignmentImportError as exc:
+                messages.error(request, f"写入失败：{exc}")
+            except Exception as exc:  # pragma: no cover - 防御性捕获
+                logger.exception("导入作业成绩失败", exc_info=exc)
+                messages.error(request, "写入失败，请查看日志。")
+
+    return render(
+        request,
+        "toolbox/assignment_grade_import.html",
+        {"form_data": form_data, "result": result},
+    )
 
 
 @login_required

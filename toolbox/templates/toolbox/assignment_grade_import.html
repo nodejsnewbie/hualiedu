@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block title %}作业成绩写入{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-3">📥 作业成绩写入</h1>
+            <p class="text-muted">
+                将 <code>docs/第五次作业.xlsx</code> 中的成绩按姓名写入 <code>docs/成绩登分册.xlsx</code>，同一学生名将匹配同一行。
+                第一次作业写入第 1 列（紧随“姓名”列），第五次作业写入第 5 列，以此类推。
+            </p>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">配置参数</h5>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                <div class="form-group mb-3">
+                    <label for="assignment_file" class="form-label">作业成绩文件路径</label>
+                    <input type="text" class="form-control" id="assignment_file" name="assignment_file"
+                           value="{{ form_data.assignment_file }}">
+                    <small class="form-text text-muted">默认：docs/第五次作业.xlsx</small>
+                </div>
+
+                <div class="form-group mb-3">
+                    <label for="gradebook_file" class="form-label">成绩登分册文件路径</label>
+                    <input type="text" class="form-control" id="gradebook_file" name="gradebook_file"
+                           value="{{ form_data.gradebook_file }}">
+                    <small class="form-text text-muted">默认：docs/成绩登分册.xlsx</small>
+                </div>
+
+                <div class="form-group mb-3">
+                    <label for="assignment_number" class="form-label">作业次数（第几次作业）</label>
+                    <input type="number" min="1" class="form-control" id="assignment_number" name="assignment_number"
+                           value="{{ form_data.assignment_number }}">
+                    <small class="form-text text-muted">例如：5 表示写入第 5 列。</small>
+                </div>
+
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-upload me-2"></i> 开始写入
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% if result %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">执行结果</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-4">
+                    <p class="mb-1 text-muted">目标列</p>
+                    <p class="h5">{{ result.assignment_column_letter }} 列</p>
+                </div>
+                <div class="col-md-4">
+                    <p class="mb-1 text-muted">已更新学生</p>
+                    <p class="h5">{{ result.updated_students }} 人</p>
+                </div>
+                <div class="col-md-4">
+                    <p class="mb-1 text-muted">缺失匹配</p>
+                    <p class="h5">
+                        作业缺少 {{ result.missing_in_gradebook|length }} 人，
+                        登分册缺少 {{ result.missing_in_assignment|length }} 人
+                    </p>
+                </div>
+            </div>
+
+            {% if result.updates %}
+            <div class="table-responsive mt-4">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>姓名</th>
+                            <th>分数</th>
+                            <th>所在行</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in result.updates %}
+                        <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{{ item.score }}</td>
+                            <td>#{{ item.row }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% if result.missing_in_gradebook %}
+            <div class="mt-4">
+                <h6>成绩登分册中不存在的学生（{{ result.missing_in_gradebook|length }}）</h6>
+                <p class="text-muted mb-1">这些姓名在成绩登分册中找不到，请确认名单是否完整：</p>
+                <div>
+                    {% for name in result.missing_in_gradebook %}
+                        <span class="badge bg-secondary me-2 mb-2">{{ name }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if result.missing_in_assignment %}
+            <div class="mt-4">
+                <h6>作业成绩中缺失的学生（{{ result.missing_in_assignment|length }}）</h6>
+                <p class="text-muted mb-1">这些姓名在作业文件中未找到，成绩保持为空：</p>
+                <div>
+                    {% for name in result.missing_in_assignment %}
+                        <span class="badge bg-warning text-dark me-2 mb-2">{{ name }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

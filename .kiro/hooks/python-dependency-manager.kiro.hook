@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "name": "Python Dependency Manager",
+  "description": "Monitors requirements.txt and pyproject.toml for changes, checks virtual environment activation, installs/updates dependencies automatically, reports conflicts, and updates requirements-dev.txt if needed",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "requirements.txt",
+      "pyproject.toml"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The Python dependency files (requirements.txt or pyproject.toml) have been modified. Please:\n\n1. Check if a virtual environment is currently activated by examining environment variables and Python paths\n2. If no virtual environment is active, warn the user and provide instructions to activate one\n3. If a virtual environment is active, automatically install or update the dependencies using the appropriate command (pip install -r requirements.txt or pip install -e .)\n4. After installation, check for any dependency conflicts by running pip check and report any issues found\n5. If requirements-dev.txt exists and needs updating based on the changes, update it accordingly\n6. Provide a summary of:\n   - Virtual environment status\n   - Dependencies installed/updated\n   - Any conflicts or warnings detected\n   - Whether requirements-dev.txt was updated\n   - Recommendations for next steps if any issues were found"
+  }
+}
