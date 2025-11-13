@@ -33,8 +33,12 @@
 | 如何判断作业类型？ | [设计文档](../.kiro/specs/homework-grading-system/design.md) - 作业类型判断 |
 | 格式错误如何处理？ | [设计文档](../.kiro/specs/homework-grading-system/design.md) - 错误处理 |
 | 有哪些统一函数？ | [设计文档](../.kiro/specs/homework-grading-system/design.md) - 组件和接口 |
+| 批量登分如何工作？ | [设计文档](../.kiro/specs/grade-registry-writer/design.md) |
 | 系统有哪些功能？ | [需求文档](../.kiro/specs/homework-grading-system/requirements.md) |
+| 已知问题和修复 | [已知问题](./KNOWN_ISSUES.md) |
 | 核心概念速查 | [快速参考](./SUMMARY.md) |
+| 开发环境配置 | [开发指南](./DEVELOPMENT.md) |
+| 团队协作规范 | [协作指南](./TEAM_COLLABORATION.md) |
 
 ## 🎯 推荐阅读顺序
 

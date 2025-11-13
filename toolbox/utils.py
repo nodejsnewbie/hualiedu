@@ -109,6 +109,8 @@ def _get_gradebook_sheet(workbook, sheet_name: str) -> Worksheet:
     try:
         return workbook[sheet_name]
     except KeyError as exc:
+        if workbook.sheetnames:
+            return workbook[workbook.sheetnames[0]]
         raise AssignmentImportError(f"成绩登分册中找不到工作表：{sheet_name}") from exc
 
 

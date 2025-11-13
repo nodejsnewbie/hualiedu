@@ -94,20 +94,26 @@ class GitHandler:
             return os.path.basename(path)
 
     @staticmethod
-    def clone_repo_remote(repo_name, target_path):
+    def clone_repo_remote(repo_name, target_path, branch=None):
         """克隆远程仓库"""
         try:
-            result = subprocess.run(
-                ["git", "clone", repo_name, target_path], capture_output=True, text=True
-            )
+            clone_cmd = ["git", "clone"]
+            if branch:
+                clone_cmd.extend(["-b", branch])
+            clone_cmd.extend([repo_name, target_path])
+            result = subprocess.run(clone_cmd, capture_output=True, text=True)
             return result.returncode == 0
         except Exception:
             return False
 
     @staticmethod
-    def pull_repo(repo_path):
+    def pull_repo(repo_path, branch=None):
         """拉取仓库更新，自动处理未提交的更改"""
         try:
+            if branch and not GitHandler.ensure_branch(repo_path, branch):
+                logger.error(f"切换到分支 {branch} 失败: {repo_path}")
+                return False
+
             # 检查是否有未提交的更改
             status_result = subprocess.run(
                 ["git", "status", "--porcelain"],
@@ -149,12 +155,10 @@ class GitHandler:
                 logger.info("本地更改已自动提交")
                 
                 # 推送到远程仓库
-                push_result = subprocess.run(
-                    ["git", "push"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True
-                )
+                push_cmd = ["git", "push"]
+                if branch:
+                    push_cmd.extend(["origin", branch])
+                push_result = subprocess.run(push_cmd, cwd=repo_path, capture_output=True, text=True)
                 
                 if push_result.returncode != 0:
                     logger.error(f"git push 失败: {push_result.stderr}")
@@ -163,12 +167,10 @@ class GitHandler:
                 logger.info("本地更改已推送到远程仓库")
             
             # 拉取更新
-            result = subprocess.run(
-                ["git", "pull"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True
-            )
+            pull_cmd = ["git", "pull"]
+            if branch:
+                pull_cmd.extend(["origin", branch])
+            result = subprocess.run(pull_cmd, cwd=repo_path, capture_output=True, text=True)
             
             if result.returncode != 0:
                 logger.error(f"git pull 失败: {result.stderr}")
@@ -190,6 +192,50 @@ class GitHandler:
             )
             return result.returncode == 0
         except Exception:
+            return False
+
+    @staticmethod
+    def ensure_branch(repo_path, branch):
+        """确保仓库切换到指定分支"""
+        if not branch:
+            return True
+        try:
+            # 获取当前分支
+            current_branch = GitHandler.get_current_branch(repo_path)
+            if current_branch == branch:
+                return True
+
+            # 确保远程分支最新
+            subprocess.run(
+                ["git", "fetch", "origin", branch],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+
+            checkout_result = subprocess.run(
+                ["git", "checkout", branch],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if checkout_result.returncode == 0:
+                return True
+
+            # 如果本地没有该分支，尝试从远程创建
+            create_result = subprocess.run(
+                ["git", "checkout", "-B", branch, f"origin/{branch}"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if create_result.returncode == 0:
+                return True
+
+            logger.error(f"切换分支失败: {create_result.stderr or checkout_result.stderr}")
+            return False
+        except Exception as e:
+            logger.error(f"切换分支 {branch} 失败: {str(e)}")
             return False
 
     @staticmethod

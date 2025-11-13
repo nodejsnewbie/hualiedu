@@ -1,5 +1,91 @@
 # 已知问题
 
+## 批量登分按钮无响应问题（已修复 - 2025-11-13）
+
+### 问题描述
+在作业评分系统中，点击"批量登分"按钮没有反应，而且该功能没有体现出应该针对某一次作业的设计理念。
+
+### 根本原因
+1. **ID不匹配**：HTML模板中按钮ID是 `batch-grade-btn`（带连字符），但JavaScript代码中使用的是 `batchGradeBtn`（驼峰命名），导致事件绑定失败
+2. 原有设计没有明确批量登分应该针对特定作业文件夹
+3. 没有跟踪当前选中的作业文件夹信息
+
+### 解决方案
+1. **修复ID不匹配问题**：将JavaScript代码中所有 `batchGradeBtn` 统一改为 `batch-grade-btn`
+2. **实现作业关联功能**：
+   - 添加 `currentHomeworkFolder` 和 `currentHomeworkId` 全局变量跟踪当前作业
+   - 实现 `updateBatchGradeButton()` 函数，根据选中的文件夹自动查询作业信息并更新按钮状态
+   - 按钮文本动态显示当前选中的作业名称，如"批量登分 (作业1)"
+   - 只有选中作业文件夹时按钮才启用，选中文件时自动禁用
+3. **改进用户体验**：
+   - 在HTML模板中添加提示信息："选择作业文件夹后可批量操作"
+   - 按钮tooltip动态更新，显示当前操作的作业名称
+   - 点击按钮前显示确认对话框，明确告知用户将要操作的作业
+
+### 修改的文件
+- `grading/static/grading/js/grading.js`：
+  - 修复ID不匹配（统一使用 `batch-grade-btn`）
+  - 实现作业关联逻辑
+  - 整合重复的事件绑定，确保按钮状态正确更新
+  - 选中文件时重置按钮文本和tooltip
+  - 添加详细的调试日志
+- `templates/grading_simple.html`：
+  - 修复按钮ID（从 `batchGradeBtn` 改为 `batch-grade-btn`）
+  - 添加初始禁用状态和提示信息
+  - 添加图标和说明文字
+- `grading/templates/grading.html`：改进按钮提示信息（备用模板）
+
+### 重要说明
+实际使用的模板是 `templates/grading_simple.html`，而不是 `grading/templates/grading.html`。
+`grading_page` 视图返回的是 `grading_simple.html` 模板。
+
+## 批量登分失败 - 未找到作业目录
+
+### 问题描述
+点击批量登分按钮后，提示"批量登分失败：未找到作业目录: xxx"
+
+### 原因
+批量登分功能需要数据库中有对应的 Homework（作业）记录。如果：
+1. 数据库中没有对应的作业记录
+2. 作业的 `folder_name` 与实际文件夹名称不匹配
+3. 文件夹路径结构不符合预期
+
+就会出现此错误。
+
+### 解决方案
+
+> 2025-11 更新：系统会在每个激活仓库中有限深度地回退搜索同名作业文件夹。如果找到唯一匹配，会自动使用该目录继续登分；如果找到多个同名目录，则会提示冲突并要求手动修正。因此仍需保持课程名称、班级名称及 `folder_name` 与文件系统一致，并避免在同一仓库里出现多个同名作业目录。
+
+#### 方法1：使用管理命令自动导入作业（推荐）
+```bash
+# 预览将要导入的作业
+conda run -n py313 python manage.py import_homeworks <仓库路径> <课程名称> --dry-run
+
+# 实际导入作业
+conda run -n py313 python manage.py import_homeworks <仓库路径> <课程名称>
+```
+
+#### 方法2：使用诊断脚本排查问题
+```bash
+conda run -n py313 python scripts/diagnose_batch_grade.py <课程名称> <作业文件夹名称>
+```
+
+#### 方法3：在Django Admin中手动创建作业
+1. 访问 http://127.0.0.1:8000/admin/grading/homework/
+2. 点击"添加作业"
+3. 填写信息，确保 `folder_name` 与实际文件夹名称完全一致
+
+### 详细文档
+参考 `docs/BATCH_GRADE_SETUP.md` 获取完整的设置指南。
+
+### 技术细节
+- 移除了重复的 `select_node.jstree` 事件绑定
+- 在 jstree 初始化时统一处理文件和文件夹的选择事件
+- 确保选中文件时按钮被禁用并重置显示文本
+
+### 相关文档
+详细的批量登分功能设计请参考：`.kiro/specs/grade-registry-writer/design.md`
+
 ## Homework模型未导入问题（已修复）
 
 ### 问题描述

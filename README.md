@@ -88,10 +88,15 @@ python manage.py test grading.tests.test_models
 
 ## 📖 文档
 
+### 开发文档
 - **[开发指南](docs/DEVELOPMENT.md)** - 环境配置、开发流程、常用命令
 - **[项目结构](docs/PROJECT_STRUCTURE.md)** - 目录结构和代码组织
-- **[团队协作](docs/TEAM_COLLABORATION.md)** - 开发规范和最佳实践
-- **[功能文档](docs/README.md)** - 完整功能文档索引
+- **[团队协作](docs/TEAM_COLLABORATION.md)** - Git工作流、代码审查、协作规范
+
+### 功能文档
+- **[功能文档索引](docs/README.md)** - 完整功能文档和设计文档
+- **[快速参考](docs/SUMMARY.md)** - 核心概念速查
+- **[已知问题](docs/KNOWN_ISSUES.md)** - 问题追踪和修复记录
 
 ## 🤝 贡献
 

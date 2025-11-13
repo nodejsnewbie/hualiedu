@@ -37,8 +37,9 @@ class GitHandlerTestCase(TestCase):
         result = GitHandler.is_git_repo(self.test_repo_path)
         self.assertFalse(result)
 
+    @patch('grading.utils.GitHandler.ensure_branch', return_value=True)
     @patch('subprocess.run')
-    def test_pull_repo_with_changes(self, mock_run):
+    def test_pull_repo_with_changes(self, mock_run, mock_ensure):
         """测试拉取仓库时有本地更改"""
         # 模拟git status返回有更改
         mock_status = MagicMock(returncode=0, stdout=" M file.txt\n")
@@ -53,12 +54,14 @@ class GitHandlerTestCase(TestCase):
         
         mock_run.side_effect = [mock_status, mock_add, mock_commit, mock_push, mock_pull]
         
-        result = GitHandler.pull_repo(self.test_repo_path)
+        result = GitHandler.pull_repo(self.test_repo_path, branch="main")
         self.assertTrue(result)
+        mock_ensure.assert_called_once_with(self.test_repo_path, "main")
         self.assertEqual(mock_run.call_count, 5)
 
+    @patch('grading.utils.GitHandler.ensure_branch', return_value=True)
     @patch('subprocess.run')
-    def test_pull_repo_without_changes(self, mock_run):
+    def test_pull_repo_without_changes(self, mock_run, mock_ensure):
         """测试拉取仓库时没有本地更改"""
         # 模拟git status返回无更改
         mock_status = MagicMock(returncode=0, stdout="")
@@ -67,12 +70,14 @@ class GitHandlerTestCase(TestCase):
         
         mock_run.side_effect = [mock_status, mock_pull]
         
-        result = GitHandler.pull_repo(self.test_repo_path)
+        result = GitHandler.pull_repo(self.test_repo_path, branch="develop")
         self.assertTrue(result)
+        mock_ensure.assert_called_once_with(self.test_repo_path, "develop")
         self.assertEqual(mock_run.call_count, 2)
 
+    @patch('grading.utils.GitHandler.ensure_branch', return_value=True)
     @patch('subprocess.run')
-    def test_pull_repo_commit_failed(self, mock_run):
+    def test_pull_repo_commit_failed(self, mock_run, mock_ensure):
         """测试提交失败的情况"""
         mock_status = MagicMock(returncode=0, stdout=" M file.txt\n")
         mock_add = MagicMock(returncode=0)
@@ -80,8 +85,15 @@ class GitHandlerTestCase(TestCase):
         
         mock_run.side_effect = [mock_status, mock_add, mock_commit]
         
-        result = GitHandler.pull_repo(self.test_repo_path)
+        result = GitHandler.pull_repo(self.test_repo_path, branch="feature")
         self.assertFalse(result)
+        mock_ensure.assert_called_once_with(self.test_repo_path, "feature")
+
+    @patch('grading.utils.GitHandler.ensure_branch', return_value=False)
+    def test_pull_repo_branch_switch_failed(self, mock_ensure):
+        result = GitHandler.pull_repo(self.test_repo_path, branch="dev")
+        self.assertFalse(result)
+        mock_ensure.assert_called_once_with(self.test_repo_path, "dev")
 
     @patch('subprocess.run')
     def test_clone_repo_remote_success(self, mock_run):
@@ -122,3 +134,13 @@ class GitHandlerTestCase(TestCase):
         shutil.rmtree(git_dir)
         result = GitHandler.is_git_repository(self.test_repo_path)
         self.assertFalse(result)
+    @patch('subprocess.run')
+    def test_clone_repo_remote_with_branch(self, mock_run):
+        mock_run.return_value = MagicMock(returncode=0)
+        result = GitHandler.clone_repo_remote("git@example.com:repo.git", self.test_repo_path, branch="dev")
+        self.assertTrue(result)
+        mock_run.assert_called_once_with(
+            ["git", "clone", "-b", "dev", "git@example.com:repo.git", self.test_repo_path],
+            capture_output=True,
+            text=True,
+        )

@@ -19,7 +19,7 @@ from grading.services.grade_registry_writer_service import (
     GradeRegistryWriterService,
     AuditLogger,
 )
-from grading.grade_registry_writer import RegistryManager
+from grading.grade_registry_writer import RegistryManager, NameMatcher as CoreNameMatcher
 
 from .base import BaseTestCase
 
@@ -416,21 +416,20 @@ class GradeRegistryWriterServiceFindRegistryTest(BaseTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result, registry_file)
 
-    def test_find_grade_registry_with_different_names(self):
-        """测试查找不同名称的登分册文件"""
-        test_names = ["登分册.xlsx", "grade_registry.xlsx", "grades.xlsx"]
-        
-        for name in test_names:
+    def test_find_grade_registry_requires_specific_filename(self):
+        """只接受文件名为“成绩登分册.xlsx”"""
+        other_names = ["登分册.xlsx", "grade_registry.xlsx", "grades.xlsx"]
+
+        for name in other_names:
             with self.subTest(name=name):
                 temp_dir = tempfile.mkdtemp()
                 registry_file = os.path.join(temp_dir, name)
                 open(registry_file, 'w').close()
-                
+
                 result = self.service.find_grade_registry(temp_dir)
-                
-                self.assertIsNotNone(result)
-                self.assertEqual(result, registry_file)
-                
+
+                self.assertIsNone(result)
+
                 shutil.rmtree(temp_dir)
 
     def test_find_grade_registry_not_found(self):
@@ -476,6 +475,14 @@ class GradeRegistryWriterServiceProcessSingleWordFileTest(BaseTestCase):
         self.mock_registry = Mock(spec=RegistryManager)
         self.mock_registry.student_names = {"张三": 2, "李四": 3}
 
+        size_patcher = patch.object(
+            GradeRegistryWriterService,
+            "_validate_file_size",
+            return_value=(True, None),
+        )
+        self.addCleanup(size_patcher.stop)
+        self.mock_validate_size = size_patcher.start()
+
     @patch('grading.services.grade_registry_writer_service.GradeFileProcessor')
     @patch('grading.services.grade_registry_writer_service.NameMatcher')
     def test_process_single_word_file_success(self, mock_name_matcher, mock_processor):
@@ -484,6 +491,7 @@ class GradeRegistryWriterServiceProcessSingleWordFileTest(BaseTestCase):
         mock_processor.extract_student_name.return_value = "张三"
         mock_processor.extract_grade_from_word.return_value = "A"
         mock_name_matcher.match.return_value = ("张三", "exact")
+        mock_name_matcher.normalize_name.side_effect = CoreNameMatcher.normalize_name
         self.mock_registry.find_student_row.return_value = 2
         self.mock_registry.write_grade.return_value = (True, None)
         
@@ -534,6 +542,7 @@ class GradeRegistryWriterServiceProcessSingleWordFileTest(BaseTestCase):
         mock_processor.extract_student_name.return_value = "王五"
         mock_processor.extract_grade_from_word.return_value = "A"
         mock_name_matcher.match.return_value = (None, "none")
+        mock_name_matcher.normalize_name.side_effect = CoreNameMatcher.normalize_name
         
         result = self.service._process_single_word_file(
             "/path/to/王五_作业1.docx",
@@ -546,11 +555,31 @@ class GradeRegistryWriterServiceProcessSingleWordFileTest(BaseTestCase):
 
     @patch('grading.services.grade_registry_writer_service.GradeFileProcessor')
     @patch('grading.services.grade_registry_writer_service.NameMatcher')
+    def test_process_single_word_file_filename_contains_student(self, mock_name_matcher, mock_processor):
+        """当文件名包含学生姓名时也应匹配成功"""
+        mock_processor.extract_student_name.return_value = "第二次作业"
+        mock_processor.extract_grade_from_word.return_value = "A"
+        mock_name_matcher.match.return_value = (None, "none")
+        mock_name_matcher.normalize_name.side_effect = CoreNameMatcher.normalize_name
+        self.mock_registry.find_student_row.return_value = 2
+        self.mock_registry.write_grade.return_value = (True, None)
+
+        result = self.service._process_single_word_file(
+            "/path/to/张三.docx",
+            self.mock_registry,
+            5
+        )
+
+        self.assertTrue(result["success"])
+
+    @patch('grading.services.grade_registry_writer_service.GradeFileProcessor')
+    @patch('grading.services.grade_registry_writer_service.NameMatcher')
     def test_process_single_word_file_multiple_matches(self, mock_name_matcher, mock_processor):
         """测试学生姓名匹配到多个"""
         mock_processor.extract_student_name.return_value = "张三"
         mock_processor.extract_grade_from_word.return_value = "A"
         mock_name_matcher.match.return_value = (None, "multiple")
+        mock_name_matcher.normalize_name.side_effect = CoreNameMatcher.normalize_name
         
         result = self.service._process_single_word_file(
             "/path/to/张三_作业1.docx",
@@ -568,6 +597,7 @@ class GradeRegistryWriterServiceProcessSingleWordFileTest(BaseTestCase):
         mock_processor.extract_student_name.return_value = "张三"
         mock_processor.extract_grade_from_word.return_value = "A"
         mock_name_matcher.match.return_value = ("张三", "exact")
+        mock_name_matcher.normalize_name.side_effect = CoreNameMatcher.normalize_name
         self.mock_registry.find_student_row.return_value = 2
         self.mock_registry.write_grade.return_value = (False, "A")
         
@@ -1660,6 +1690,16 @@ class SecurityValidationTest(BaseTestCase):
         is_valid, error_msg = self.service._validate_excel_integrity(txt_file)
         self.assertFalse(is_valid)
         self.assertIn("文件格式错误", error_msg)
+    
+    def test_validate_excel_integrity_rejects_xls(self):
+        """测试不再接受.xls格式"""
+        xls_file = os.path.join(self.temp_dir, "test.xls")
+        with open(xls_file, 'w') as f:
+            f.write("dummy")
+
+        is_valid, error_msg = self.service._validate_excel_integrity(xls_file)
+        self.assertFalse(is_valid)
+        self.assertIn(".xlsx", error_msg)
 
     def test_validate_excel_integrity_corrupted_file(self):
         """测试损坏的Excel文件"""
@@ -2155,13 +2195,13 @@ class FindGradeRegistryTest(BaseTestCase):
         self.assertEqual(result, registry_file)
 
     def test_find_registry_xls_format(self):
-        """测试查找.xls格式的登分册"""
+        """不再支持.xls格式的登分册"""
         registry_file = os.path.join(self.temp_dir, "成绩登分册.xls")
         open(registry_file, 'w').close()
 
         result = self.service.find_grade_registry(self.temp_dir)
         
-        self.assertEqual(result, registry_file)
+        self.assertIsNone(result)
 
     def test_find_registry_directory_not_exists(self):
         """测试目录不存在"""

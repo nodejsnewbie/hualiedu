@@ -24,6 +24,79 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 logger = logging.getLogger(__name__)
 
+CHINESE_NUMERAL_CHARS = "零〇一二两三四五六七八九十百千"
+CHINESE_NUMERAL_DIGIT_MAP = {
+    "零": 0,
+    "〇": 0,
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+CHINESE_NUMERAL_UNIT_MAP = {
+    "十": 10,
+    "百": 100,
+    "千": 1000,
+}
+CHINESE_NUMERAL_ALLOWED_SET = set(CHINESE_NUMERAL_CHARS)
+
+
+def _convert_chinese_numeral_to_int(token: str) -> Optional[int]:
+    """将中文数字（十以内/十几/几十/百以内）转换为整数。"""
+    if not token:
+        return None
+
+    token = token.strip()
+    if not token:
+        return None
+
+    total = 0
+    current = 0
+    has_value = False
+
+    for ch in token:
+        if ch in CHINESE_NUMERAL_DIGIT_MAP:
+            current = CHINESE_NUMERAL_DIGIT_MAP[ch]
+            has_value = True
+        elif ch in CHINESE_NUMERAL_UNIT_MAP:
+            multiplier = CHINESE_NUMERAL_UNIT_MAP[ch]
+            if current == 0:
+                # 处理“十、百、千”这种前面省略“1”的情况
+                current = 1
+            total += current * multiplier
+            current = 0
+            has_value = True
+        else:
+            # 出现无法识别的字符，放弃解析
+            return None
+
+    value = total + current
+    if has_value and value > 0:
+        return value
+    return None
+
+
+def _parse_homework_number_token(token: str) -> Optional[int]:
+    """解析捕获到的数字（阿拉伯数字或中文数字）"""
+    if not token:
+        return None
+
+    digit_match = re.search(r"\d+", token)
+    if digit_match:
+        return int(digit_match.group(0))
+
+    chinese_part = "".join(ch for ch in token if ch in CHINESE_NUMERAL_ALLOWED_SET)
+    if chinese_part:
+        return _convert_chinese_numeral_to_int(chinese_part)
+
+    return None
+
 
 class GradeFileProcessor:
     """作业成绩文件处理器"""
@@ -76,10 +149,15 @@ class GradeFileProcessor:
                                 logger.debug("提取到学生姓名: %s (从文件名)", student_name)
                                 return student_name
             
+            # 如果文件名本身不包含“作业”“homework”等关键字，直接使用文件名
+            if not re.search(r"(作业|homework|hw)\s*\d+", filename, re.IGNORECASE) and "作业" not in filename:
+                logger.debug("提取到学生姓名: %s (从文件名整体)", filename.strip())
+                return filename.strip()
+
             # 如果没有分隔符，尝试从路径中提取
             # 例如：/path/to/张三/作业1.docx
             parent_dir = os.path.basename(os.path.dirname(file_path))
-            if parent_dir and not re.search(r"作业\d+|homework\d+", parent_dir, re.IGNORECASE):
+            if parent_dir and "作业" not in parent_dir and not re.search(r"(homework|hw)\s*\d+", parent_dir, re.IGNORECASE):
                 logger.debug("提取到学生姓名: %s (从目录名)", parent_dir.strip())
                 return parent_dir.strip()
             
@@ -112,19 +190,21 @@ class GradeFileProcessor:
 
             # 从完整路径中查找作业次数
             # 匹配模式：第X次作业、作业X、homework_X、hw_X
+            chinese_digits = CHINESE_NUMERAL_CHARS
             patterns = [
-                r"第(\d+)次作业",
-                r"作业(\d+)",
-                r"homework[_\s]?(\d+)",
-                r"hw[_\s]?(\d+)",
+                rf"第([\d{chinese_digits}]+)次作业",
+                rf"作业([\d{chinese_digits}]+)",
+                rf"homework[_\s]?([\d{chinese_digits}]+)",
+                rf"hw[_\s]?([\d{chinese_digits}]+)",
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, file_path, re.IGNORECASE)
                 if match:
-                    homework_number = int(match.group(1))
-                    logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
-                    return homework_number
+                    homework_number = _parse_homework_number_token(match.group(1))
+                    if homework_number is not None:
+                        logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
+                        return homework_number
             
             logger.warning("无法从路径提取作业次数: %s", file_path)
             return None
@@ -157,19 +237,21 @@ class GradeFileProcessor:
             filename = os.path.splitext(os.path.basename(file_path))[0]
             
             # 匹配模式：第X次作业、作业X、homework_X、hw_X
+            chinese_digits = CHINESE_NUMERAL_CHARS
             patterns = [
-                r"第(\d+)次作业",
-                r"作业(\d+)",
-                r"homework[_\s]?(\d+)",
-                r"hw[_\s]?(\d+)",
+                rf"第([\d{chinese_digits}]+)次作业",
+                rf"作业([\d{chinese_digits}]+)",
+                rf"homework[_\s]?([\d{chinese_digits}]+)",
+                rf"hw[_\s]?([\d{chinese_digits}]+)",
             ]
             
             for pattern in patterns:
                 match = re.search(pattern, filename, re.IGNORECASE)
                 if match:
-                    homework_number = int(match.group(1))
-                    logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
-                    return homework_number
+                    homework_number = _parse_homework_number_token(match.group(1))
+                    if homework_number is not None:
+                        logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
+                        return homework_number
             
             logger.warning("无法从文件名提取作业次数: %s", file_path)
             return None
@@ -273,27 +355,42 @@ class GradeFileProcessor:
             workbook = load_workbook(file_path, read_only=True, data_only=True)
             worksheet = workbook.active
 
-            # 查找"姓名"和"成绩"列
+            # 查找"姓名"和"成绩"列（支持表头出现在前几行）
             name_col_idx = None
             grade_col_idx = None
+            header_row = None
+            max_scan_rows = min(worksheet.max_row, 20)
 
-            # 假设第一行是表头
-            header_row = 1
+            for row_idx in range(1, max_scan_rows + 1):
+                header_cells = list(
+                    worksheet.iter_rows(min_row=row_idx, max_row=row_idx, values_only=True)
+                )
+                if not header_cells:
+                    continue
 
-            # 性能优化：批量读取表头行，避免多次访问单元格
-            header_cells = list(worksheet.iter_rows(min_row=header_row, max_row=header_row, values_only=True))[0]
+                header_values = header_cells[0]
+                local_name_idx = None
+                local_grade_idx = None
 
-            for col_idx, cell_value in enumerate(header_cells, start=1):
-                if cell_value:
+                for col_idx, cell_value in enumerate(header_values, start=1):
+                    if not cell_value:
+                        continue
                     cell_text = str(cell_value).strip()
-                    if "姓名" in cell_text:
-                        name_col_idx = col_idx
-                        logger.debug("找到姓名列: 列%d", col_idx)
-                    elif "成绩" in cell_text or "分数" in cell_text or "等级" in cell_text:
-                        grade_col_idx = col_idx
-                        logger.debug("找到成绩列: 列%d", col_idx)
+                    if local_name_idx is None and "姓名" in cell_text:
+                        local_name_idx = col_idx
+                    if local_grade_idx is None and (
+                        "成绩" in cell_text or "分数" in cell_text or "等级" in cell_text
+                    ):
+                        local_grade_idx = col_idx
 
-            if name_col_idx is None:
+                if local_name_idx is not None:
+                    name_col_idx = local_name_idx
+                    grade_col_idx = local_grade_idx
+                    header_row = row_idx
+                    logger.debug("检测到表头行: %d (姓名列: %d, 成绩列: %s)", header_row, name_col_idx, grade_col_idx)
+                    break
+
+            if name_col_idx is None or header_row is None:
                 logger.error("Excel文件缺少姓名列: %s", file_path)
                 workbook.close()
                 return []
@@ -397,6 +494,7 @@ class RegistryManager:
         self.student_names: Dict[str, int] = {}  # 姓名 -> 行号映射
         self.lock_file_handle = None  # 文件锁句柄
         self.lock_file_path = None  # 锁文件路径
+        self.header_row_index: int = 1
 
     def _acquire_file_lock(self) -> bool:
         """
@@ -540,18 +638,23 @@ class RegistryManager:
             if not self.worksheet:
                 return False, "工作表未加载"
             
-            # 查找"姓名"列
-            header_row = 1
+            # 查找"姓名"列（允许表头位于前几行）
             self.name_column_index = None
-            
-            for col_idx in range(1, self.worksheet.max_column + 1):
-                cell_value = self.worksheet.cell(header_row, col_idx).value
-                if cell_value and "姓名" in str(cell_value):
-                    self.name_column_index = col_idx
-                    logger.debug("找到姓名列: 列%d", col_idx)
+            self.header_row_index = None
+            max_scan_rows = min(self.worksheet.max_row, 20)
+
+            for row_idx in range(1, max_scan_rows + 1):
+                for col_idx in range(1, self.worksheet.max_column + 1):
+                    cell_value = self.worksheet.cell(row_idx, col_idx).value
+                    if cell_value and "姓名" in str(cell_value):
+                        self.name_column_index = col_idx
+                        self.header_row_index = row_idx
+                        logger.debug("找到姓名列: 行%d 列%d", row_idx, col_idx)
+                        break
+                if self.name_column_index is not None:
                     break
-            
-            if self.name_column_index is None:
+
+            if self.name_column_index is None or self.header_row_index is None:
                 logger.error("成绩登分册格式错误：缺少姓名列")
                 return False, "成绩登分册格式错误：缺少姓名列"
             
@@ -574,15 +677,15 @@ class RegistryManager:
 
         # 性能优化：批量读取所有学生姓名，避免重复查询
         # 使用iter_rows批量读取，比逐个访问单元格快得多
-        # 从第2行开始（第1行是表头）
+        header_row = self.header_row_index or 1
         for row_idx, row in enumerate(
             self.worksheet.iter_rows(
-                min_row=2,
+                min_row=header_row + 1,
                 min_col=self.name_column_index,
                 max_col=self.name_column_index,
                 values_only=True
             ),
-            start=2
+            start=header_row + 1
         ):
             name = row[0]
             if name:
@@ -618,30 +721,13 @@ class RegistryManager:
         try:
             logger.debug("查找或创建作业列: 第%d次作业", homework_number)
 
-            # 查找现有的作业列
-            header_row = 1
-            homework_patterns = [
-                f"第{homework_number}次作业",
-                f"作业{homework_number}",
-                f"作业 {homework_number}",
-            ]
-            
-            for col_idx in range(1, self.worksheet.max_column + 1):
-                cell_value = self.worksheet.cell(header_row, col_idx).value
-                if cell_value:
-                    cell_text = str(cell_value).strip()
-                    for pattern in homework_patterns:
-                        if pattern in cell_text:
-                            logger.info("找到现有作业列: %s (列%d)", cell_text, col_idx)
-                            return col_idx
-            
-            # 未找到，创建新列
-            new_col_idx = self.worksheet.max_column + 1
-            column_name = f"第{homework_number}次作业"
-            self.worksheet.cell(header_row, new_col_idx).value = column_name
-            
-            logger.info("创建新作业列: %s (列%d)", column_name, new_col_idx)
-            return new_col_idx
+            header_row = self.header_row_index or 1
+            if not hasattr(self, "name_column_index") or not self.name_column_index:
+                raise ValueError("姓名列未初始化，无法定位作业列")
+
+            target_col = self.name_column_index + homework_number
+            self.worksheet.cell(header_row, target_col)  # 确保单元格存在，但不写入标题
+            return target_col
             
         except (ValueError, AttributeError) as e:
             logger.error("查找或创建作业列时出错: %s", str(e), exc_info=True)

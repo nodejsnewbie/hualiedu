@@ -158,25 +158,48 @@ class GitHandlerTest(BaseTestCase):
         self.assertFalse(result)
 
     @patch("subprocess.run")
-    def test_pull_repo_success(self, mock_run):
-        """测试成功拉取仓库更新"""
+    def test_clone_repo_remote_with_branch(self, mock_run):
         mock_run.return_value = MagicMock(returncode=0)
 
-        result = GitHandler.pull_repo(self.git_repo_path)
+        result = GitHandler.clone_repo_remote(
+            "https://github.com/user/repo.git", self.target_path, branch="feature"
+        )
 
         self.assertTrue(result)
         mock_run.assert_called_once_with(
-            ["git", "pull"], cwd=self.git_repo_path, capture_output=True, text=True
+            ["git", "clone", "-b", "feature", "https://github.com/user/repo.git", self.target_path],
+            capture_output=True,
+            text=True,
         )
 
+    @patch("grading.utils.GitHandler.ensure_branch", return_value=True)
     @patch("subprocess.run")
-    def test_pull_repo_failure(self, mock_run):
-        """测试拉取仓库更新失败"""
-        mock_run.return_value = MagicMock(returncode=1)
+    def test_pull_repo_success(self, mock_run, mock_ensure):
+        """测试成功拉取仓库更新"""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=0),
+        ]
 
-        result = GitHandler.pull_repo(self.git_repo_path)
+        result = GitHandler.pull_repo(self.git_repo_path, branch="main")
+
+        self.assertTrue(result)
+        mock_ensure.assert_called_once_with(self.git_repo_path, "main")
+        self.assertEqual(mock_run.call_count, 2)
+
+    @patch("grading.utils.GitHandler.ensure_branch", return_value=True)
+    @patch("subprocess.run")
+    def test_pull_repo_failure(self, mock_run, mock_ensure):
+        """测试拉取仓库更新失败"""
+        mock_run.side_effect = [
+            MagicMock(returncode=0, stdout=""),
+            MagicMock(returncode=1, stderr="error"),
+        ]
+
+        result = GitHandler.pull_repo(self.git_repo_path, branch="main")
 
         self.assertFalse(result)
+        mock_ensure.assert_called_once_with(self.git_repo_path, "main")
 
     @patch("subprocess.run")
     def test_checkout_branch_success(self, mock_run):

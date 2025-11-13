@@ -8,6 +8,7 @@
 
 import os
 import logging
+import math
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -349,9 +350,9 @@ class GradeRegistryWriterService:
         """
         try:
             # 1. 检查文件扩展名
-            if not file_path.lower().endswith(('.xlsx', '.xls')):
+            if not file_path.lower().endswith(".xlsx"):
                 self.logger.error("非Excel文件格式: %s", file_path)
-                return False, "文件格式错误：必须是Excel文件(.xlsx或.xls)"
+                return False, "文件格式错误：必须是Excel文件(.xlsx)"
 
             # 2. 尝试打开Excel文件验证完整性
             from openpyxl import load_workbook
@@ -744,8 +745,11 @@ class GradeRegistryWriterService:
         Returns:
             处理结果字典
         """
+        file_basename = os.path.basename(word_file)
+
         file_result = {
             "file_path": word_file,
+            "file_name": file_basename,
             "student_name": None,
             "grade": None,
             "success": False,
@@ -758,7 +762,7 @@ class GradeRegistryWriterService:
             is_valid, error_msg = self._validate_file_size(word_file)
             if not is_valid:
                 file_result["error_message"] = error_msg
-                self.logger.warning("文件大小验证失败: %s - %s", word_file, error_msg)
+                self.logger.warning("文件大小验证失败: %s - %s", file_basename, error_msg)
                 self.audit_logger.log_file_processing(word_file, "failed", error_msg)
                 return file_result
             
@@ -766,16 +770,17 @@ class GradeRegistryWriterService:
             student_name = GradeFileProcessor.extract_student_name(word_file)
             if not student_name:
                 file_result["error_message"] = "无法提取学生姓名"
-                self.logger.warning("无法提取学生姓名: %s", word_file)
+                self.logger.warning("无法提取学生姓名: %s", file_basename)
                 return file_result
 
             file_result["student_name"] = student_name
 
             # 2. 提取成绩
             grade = GradeFileProcessor.extract_grade_from_word(word_file)
+            grade = self._sanitize_grade_value(grade)
             if not grade:
                 file_result["error_message"] = "无法提取成绩"
-                self.logger.warning("无法提取成绩: %s", word_file)
+                self.logger.warning("无法提取成绩: %s", file_basename)
                 return file_result
 
             file_result["grade"] = grade
@@ -785,21 +790,33 @@ class GradeRegistryWriterService:
             matched_name, match_type = NameMatcher.match(student_name, student_names)
 
             if not matched_name:
-                if match_type == "multiple":
-                    file_result["error_message"] = f"姓名匹配到多个学生: {student_name}"
+                filename_match = None
+                if match_type != "multiple":
+                    filename_match = self._match_student_by_filename(word_file, student_names)
+                if filename_match:
+                    matched_name = filename_match
+                    match_type = "filename"
+                    self.logger.info(
+                        "通过文件名匹配学生成功: %s -> %s",
+                        os.path.basename(word_file),
+                        matched_name,
+                    )
                 else:
-                    file_result["error_message"] = f"未找到匹配的学生: {student_name}"
-                self.logger.warning(
-                    "%s - 文件: %s", file_result["error_message"], word_file
-                )
-                return file_result
+                    if match_type == "multiple":
+                        file_result["error_message"] = f"姓名匹配到多个学生: {student_name}"
+                    else:
+                        file_result["error_message"] = f"未找到匹配的学生: {student_name}"
+                    self.logger.warning(
+                        "%s - 文件: %s", file_result["error_message"], file_basename
+                    )
+                    return file_result
 
             # 4. 查找学生行
             student_row = registry_manager.find_student_row(matched_name)
             if not student_row:
                 file_result["error_message"] = f"未找到学生行: {matched_name}"
                 self.logger.warning(
-                    "未找到学生行: %s - 文件: %s", matched_name, word_file
+                    "未找到学生行: %s - 文件: %s", matched_name, file_basename
                 )
                 return file_result
 
@@ -935,7 +952,7 @@ class GradeRegistryWriterService:
 
             # 性能优化：批量读取文件列表
             for file in os.listdir(class_dir):
-                if file.endswith((".xlsx", ".xls")) and not file.startswith("~$"):
+                if file.lower().endswith(".xlsx") and not file.startswith("~$"):
                     # 排除登分册文件本身
                     file_path = os.path.join(class_dir, file)
                     if file_path != registry_path:
@@ -1064,6 +1081,41 @@ class GradeRegistryWriterService:
             )
 
         return result
+
+    def _match_student_by_filename(self, word_file: str, student_names: List[str]) -> Optional[str]:
+        """如果文件名包含学生姓名，则视为匹配。"""
+        filename = os.path.splitext(os.path.basename(word_file))[0]
+        normalized_filename = NameMatcher.normalize_name(filename)
+        if not normalized_filename:
+            return None
+
+        matches = []
+        for candidate in student_names:
+            normalized_candidate = NameMatcher.normalize_name(candidate)
+            if normalized_candidate and normalized_candidate in normalized_filename:
+                matches.append(candidate)
+
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            self.logger.warning(
+                "文件名包含多个学生姓名: %s -> %s", filename, matches
+            )
+        return None
+
+    @staticmethod
+    def _sanitize_grade_value(value) -> Optional[str]:
+        """将成绩值转换为非空字符串，过滤 NaN/None。"""
+        if value is None:
+            return None
+        if isinstance(value, float) and math.isnan(value):
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.lower() in {"nan", "none", "null"}:
+            return None
+        return text
 
     def _process_single_excel_file(
         self, excel_file: str, registry_manager: RegistryManager
@@ -1224,7 +1276,11 @@ class GradeRegistryWriterService:
 
         try:
             student_name = grade_data["name"]
-            grade = grade_data["grade"]
+            grade = self._sanitize_grade_value(grade_data["grade"])
+            if not grade:
+                student_detail["error_message"] = "无法提取成绩"
+                self.logger.warning("Excel成绩无效: %s", grade_data["name"])
+                return student_detail
 
             # 1. 匹配学生姓名
             matched_name, match_type = NameMatcher.match(student_name, student_names)
@@ -1299,17 +1355,15 @@ class GradeRegistryWriterService:
                 self.logger.error("路径不是目录: %s", class_dir)
                 return None
 
-            # 查找登分册文件
-            registry_patterns = ["成绩登分册", "登分册", "grade_registry", "grades"]
-
+            # 查找登分册文件（要求文件名为“成绩登分册.xlsx”）
+            target_name = "成绩登分册.xlsx"
             for file in os.listdir(class_dir):
-                if file.endswith((".xlsx", ".xls")) and not file.startswith("~$"):
-                    file_lower = file.lower()
-                    for pattern in registry_patterns:
-                        if pattern in file or pattern in file_lower:
-                            registry_path = os.path.join(class_dir, file)
-                            self.logger.info("找到登分册文件: %s", registry_path)
-                            return registry_path
+                if file.startswith("~$"):
+                    continue
+                if file == target_name:
+                    registry_path = os.path.join(class_dir, file)
+                    self.logger.info("找到登分册文件: %s", registry_path)
+                    return registry_path
 
             self.logger.warning("未找到登分册文件: %s", class_dir)
             return None

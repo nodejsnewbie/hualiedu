@@ -12,28 +12,17 @@
 
 ## 🛠️ 环境配置
 
-### Python 环境
+**详细的环境配置指南请参考**: [开发指南](./DEVELOPMENT.md)
+
+快速开始：
 ```bash
-# 1. 使用指定的 Python 版本
-conda activate py313  # 或使用项目指定的环境
+# 1. 激活 Python 环境
+conda activate py313
 
-# 2. 安装依赖
-pip install -r requirements.txt          # 生产依赖
-pip install -r requirements-dev.txt      # 开发依赖
-
-# 3. 设置 pre-commit 钩子
+# 2. 安装依赖和配置
+pip install -r requirements.txt
 pre-commit install
-```
-
-### 环境变量
-```bash
-# 复制环境变量模板
 cp .env.example .env
-
-# 配置必要的环境变量
-# - 数据库连接
-# - API 密钥
-# - 调试模式等
 ```
 
 ## 📝 代码规范

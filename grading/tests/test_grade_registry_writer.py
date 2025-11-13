@@ -45,6 +45,30 @@ class GradeFileProcessorExtractStudentNameTest(BaseTestCase):
         """测试使用长破折号分隔"""
         result = GradeFileProcessor.extract_student_name("张三—作业1.docx")
         self.assertEqual(result, "张三")
+    
+    def test_extract_name_no_separator(self):
+        """文件名无分隔符时应直接返回文件名"""
+        result = GradeFileProcessor.extract_student_name("李四.docx")
+        self.assertEqual(result, "李四")
+
+
+class GradeFileProcessorExtractHomeworkNumberTest(BaseTestCase):
+    """测试作业批次提取支持中文数字"""
+
+    def test_extract_from_path_with_chinese_characters(self):
+        """目录名包含中文数字时也能识别批次"""
+        path = "/tmp/Web前端开发/23计算机5班/第一次作业"
+        self.assertEqual(GradeFileProcessor.extract_homework_number_from_path(path), 1)
+
+    def test_extract_from_path_with_double_digit_chinese(self):
+        """支持两位中文数字（第十二次）"""
+        path = "/tmp/Web前端开发/23计算机5班/第十二次作业"
+        self.assertEqual(GradeFileProcessor.extract_homework_number_from_path(path), 12)
+
+    def test_extract_from_filename_with_chinese_characters(self):
+        """Excel 文件名中的中文数字可识别"""
+        filename = "/tmp/成绩/第十次作业成绩.xlsx"
+        self.assertEqual(GradeFileProcessor.extract_homework_number_from_filename(filename), 10)
 
 
 class RegistryManagerConcurrencyTest(BaseTestCase):
@@ -231,3 +255,35 @@ class RegistryManagerConcurrencyTest(BaseTestCase):
         lock_file_path = f"{invalid_path}.lock"
         self.assertFalse(os.path.exists(lock_file_path))
         self.assertIsNone(manager.lock_file_handle)
+
+
+class RegistryManagerHeaderDetectionTest(BaseTestCase):
+    """测试登分册表头自动检测"""
+
+    def setUp(self):
+        super().setUp()
+        self.test_dir = tempfile.mkdtemp()
+        self.registry_path = os.path.join(self.test_dir, "registry.xlsx")
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.append(["学校成绩表"])
+        worksheet.append(["", "", ""])
+        worksheet.append(["序号", "学号", "姓名", "第1次作业"])
+        worksheet.append([1, "1001", "张三", "A"])
+        workbook.save(self.registry_path)
+        workbook.close()
+
+    def tearDown(self):
+        if os.path.exists(self.test_dir):
+            shutil.rmtree(self.test_dir)
+        super().tearDown()
+
+    def test_validate_format_detects_header_not_in_first_row(self):
+        manager = RegistryManager(self.registry_path)
+        self.assertTrue(manager.load())
+        is_valid, error = manager.validate_format()
+        self.assertTrue(is_valid, msg=error)
+        self.assertEqual(manager.header_row_index, 3)
+        self.assertEqual(manager.name_column_index, 3)
+        self.assertEqual(manager.find_student_row("张三"), 4)
+        manager._release_file_lock()

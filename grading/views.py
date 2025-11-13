@@ -5895,7 +5895,8 @@ def sync_repository_view(request):
         # 检查本地是否已存在
         if os.path.exists(full_path):
             # 拉取更新
-            success = GitHandler.pull_repo(full_path)
+            target_branch = repository.branch or None
+            success = GitHandler.pull_repo(full_path, target_branch)
             if success:
                 repository.last_sync = timezone.now()
                 repository.save()
@@ -5904,7 +5905,8 @@ def sync_repository_view(request):
                 message = f"仓库 '{repository.name}' 同步失败"
         else:
             # 克隆仓库
-            success = GitHandler.clone_repo_remote(repository.url, full_path)
+            target_branch = repository.branch or None
+            success = GitHandler.clone_repo_remote(repository.url, full_path, target_branch)
             if success:
                 repository.last_sync = timezone.now()
                 repository.save()

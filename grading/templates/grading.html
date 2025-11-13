@@ -27,12 +27,17 @@
                 <div class="card-header">
                     <h5 class="card-title mb-0">文件目录</h5>
                     <div class="mt-2">
-                        <a href="{% url 'grading:batch_grade_page' %}" class="btn btn-success btn-sm me-2">
+                        <button type="button" class="btn btn-success btn-sm me-2" id="batch-grade-btn" disabled title="请先选择作业文件夹（非文件）">
                             <i class="bi bi-tasks"></i> 批量登分
-                        </a>
-                        <a href="{% url 'grading:batch_ai_score_page' %}" class="btn btn-warning btn-sm">
+                        </button>
+                        <button type="button" class="btn btn-warning btn-sm" id="batch-ai-score-btn" disabled title="请先选择作业文件夹（非文件）">
                             <i class="bi bi-robot"></i> 批量AI评分
-                        </a>
+                        </button>
+                    </div>
+                    <div class="mt-2">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle"></i> 选择作业文件夹后可批量操作
+                        </small>
                     </div>
                 </div>
                 <div class="card-body">
@@ -186,7 +191,7 @@
 </script>
 
 <!-- 自定义脚本 - 在jstree之前加载，确保评分功能优先 -->
-<script src="{% static 'grading/js/grading.js' %}"></script>
+<script src="{% static 'grading/js/grading.js' %}?v=20251113-2"></script>
 
 <!-- 作业类型标签管理 -->
 <script src="{% static 'grading/js/homework-type-labels.js' %}"></script>

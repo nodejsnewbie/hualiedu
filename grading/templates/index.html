@@ -108,9 +108,6 @@
                     📅 校历管理
                 </a>
                 {% if user.is_staff %}
-                <a href="{% url 'grading:batch_grade_page' %}" class="menu-item">
-                    📊 批量登分
-                </a>
                 <a href="{% url 'grading:batch_ai_score_page' %}" class="menu-item">
                     🤖 批量AI评分
                 </a>

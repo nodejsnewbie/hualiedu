@@ -29,13 +29,7 @@ urlpatterns = [
     path("get_file_grade_info/", views.get_file_grade_info_api, name="get_file_grade_info"),
     path("ai_score/", views.ai_score_view, name="ai_score"),
     path("batch_ai_score/", views.batch_ai_score_view, name="batch_ai_score"),
-    # 批量登分相关路由
-    path("batch-grade/", views.batch_grade_page, name="batch_grade_page"),
-    path(
-        "batch-grade/api/",
-        views.batch_grade_registration,
-        name="batch_grade_registration",
-    ),
+
     # 成绩登分册写入功能路由
     path("grade-registry-writer/", views.grade_registry_writer_view, name="grade_registry_writer"),
     path(
