@@ -37,6 +37,11 @@ urlpatterns = [
         views.batch_grade_to_registry,
         name="batch_grade_to_registry",
     ),
+    path(
+        "batch-grade/progress/<str:tracking_id>/",
+        views.batch_grade_progress,
+        name="batch_grade_progress",
+    ),
     # 高级批量AI评分相关路由
     path("batch-ai-score/", views.batch_ai_score_advanced_view, name="batch_ai_score_advanced"),
     path("batch-ai-score/get-classes/", views._get_class_list, name="get_class_list"),

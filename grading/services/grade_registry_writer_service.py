@@ -12,14 +12,131 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+from django.core.cache import cache
+from django.utils import timezone
 from grading.grade_registry_writer import (
     GradeFileProcessor,
     RegistryManager,
     NameMatcher,
 )
 
-
 logger = logging.getLogger(__name__)
+
+
+class BatchGradeProgressTracker:
+    """批量登分进度跟踪器"""
+
+    CACHE_KEY_PREFIX = "batch_grade_progress"
+    CACHE_TIMEOUT_SECONDS = 60 * 30
+
+    def __init__(self, tracking_id: str, user_id: Optional[int] = None):
+        self.tracking_id = tracking_id
+        self.user_id = user_id
+        self.state: Dict[str, any] = {
+            "tracking_id": tracking_id,
+            "user_id": user_id,
+            "status": "pending",
+            "total": 0,
+            "processed": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "current_file": None,
+            "message": "等待开始",
+            "started_at": timezone.now().isoformat(),
+            "updated_at": timezone.now().isoformat(),
+        }
+
+    @classmethod
+    def cache_key(cls, tracking_id: str) -> str:
+        return f"{cls.CACHE_KEY_PREFIX}:{tracking_id}"
+
+    def _save(self):
+        self.state["updated_at"] = timezone.now().isoformat()
+        cache.set(
+            self.cache_key(self.tracking_id),
+            self.state,
+            self.CACHE_TIMEOUT_SECONDS,
+        )
+
+    def start(self, total_files: int = 0, message: str = "准备中..."):
+        self.state.update(
+            {
+                "status": "preparing",
+                "total": max(total_files, 0),
+                "processed": 0,
+                "success": 0,
+                "failed": 0,
+                "skipped": 0,
+                "current_file": None,
+                "message": message,
+            }
+        )
+        self._save()
+
+    def update_total(self, total_files: int):
+        self.state["total"] = max(total_files, 0)
+        self._save()
+
+    def update_progress(
+        self,
+        *,
+        processed: int,
+        success: int,
+        failed: int,
+        skipped: int,
+        current_file: Optional[str] = None,
+        message: Optional[str] = None,
+    ):
+        self.state.update(
+            {
+                "status": "running",
+                "processed": max(processed, 0),
+                "success": max(success, 0),
+                "failed": max(failed, 0),
+                "skipped": max(skipped, 0),
+                "current_file": current_file,
+            }
+        )
+        if message:
+            self.state["message"] = message
+        elif current_file:
+            self.state["message"] = f"正在处理 {current_file}"
+        else:
+            self.state["message"] = "正在批量登分..."
+        self._save()
+
+    def complete(self, summary: Optional[Dict[str, int]] = None, message: str = "批量登分完成"):
+        self.state.update(
+            {
+                "status": "success",
+                "message": message,
+                "completed_at": timezone.now().isoformat(),
+            }
+        )
+        if summary:
+            self.state["final_summary"] = summary
+            self.state["processed"] = summary.get("total", self.state["processed"])
+            self.state["success"] = summary.get("success", self.state["success"])
+            self.state["failed"] = summary.get("failed", self.state["failed"])
+            self.state["skipped"] = summary.get("skipped", self.state["skipped"])
+        self._save()
+
+    def fail(self, message: str):
+        self.state.update(
+            {
+                "status": "error",
+                "message": message,
+                "completed_at": timezone.now().isoformat(),
+            }
+        )
+        self._save()
+
+    @classmethod
+    def get_progress(cls, tracking_id: str) -> Optional[Dict[str, any]]:
+        if not tracking_id:
+            return None
+        return cache.get(cls.cache_key(tracking_id))
 
 
 class AuditLogger:
@@ -500,7 +617,10 @@ class GradeRegistryWriterService:
 
 
     def process_grading_system_scenario(
-        self, homework_dir: str, class_dir: str
+        self,
+        homework_dir: str,
+        class_dir: str,
+        progress_tracker: Optional[BatchGradeProgressTracker] = None,
     ) -> Dict[str, any]:
         """
         处理作业评分系统场景
@@ -543,12 +663,17 @@ class GradeRegistryWriterService:
             "error_message": None,
         }
 
+        if progress_tracker:
+            progress_tracker.start(message="正在准备批量登分...")
+
         try:
             # 安全加固：验证作业目录路径
             is_valid, error_msg = self._validate_path_security(homework_dir, homework_dir)
             if not is_valid:
                 result["error_message"] = f"作业目录路径验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
             
             # 安全加固：验证班级目录路径
@@ -556,6 +681,8 @@ class GradeRegistryWriterService:
             if not is_valid:
                 result["error_message"] = f"班级目录路径验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
             
             # 安全加固：验证租户隔离
@@ -563,6 +690,8 @@ class GradeRegistryWriterService:
             if not is_valid:
                 result["error_message"] = error_msg
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
             
             # 1. 从作业目录名提取作业批次
@@ -572,6 +701,8 @@ class GradeRegistryWriterService:
             if homework_number is None:
                 result["error_message"] = f"无法从目录名提取作业批次: {homework_dir}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             result["homework_number"] = homework_number
@@ -582,6 +713,8 @@ class GradeRegistryWriterService:
             if not registry_path:
                 result["error_message"] = f"未找到成绩登分册文件: {class_dir}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             result["registry_path"] = registry_path
@@ -592,6 +725,8 @@ class GradeRegistryWriterService:
             if not is_valid:
                 result["error_message"] = f"登分册文件验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
             
             # 安全加固：验证登分册文件完整性
@@ -599,6 +734,8 @@ class GradeRegistryWriterService:
             if not is_valid:
                 result["error_message"] = f"登分册文件完整性验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             # 3. 扫描作业目录下的Word文档（性能优化：批量读取文件列表）
@@ -606,6 +743,8 @@ class GradeRegistryWriterService:
             if not os.path.exists(homework_dir):
                 result["error_message"] = f"作业目录不存在: {homework_dir}"
                 self.logger.error(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             # 性能优化：批量读取文件列表
@@ -617,9 +756,13 @@ class GradeRegistryWriterService:
             if not word_files:
                 result["error_message"] = f"作业目录中没有找到Word文档: {homework_dir}"
                 self.logger.warning(result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             result["statistics"]["total"] = len(word_files)
+            if progress_tracker:
+                progress_tracker.update_total(len(word_files))
             self.logger.info("找到 %d 个Word文档", len(word_files))
             
             # 性能优化：文件数量警告
@@ -637,17 +780,25 @@ class GradeRegistryWriterService:
             registry_manager = RegistryManager(registry_path)
 
             if not registry_manager.load():
-                result["error_message"] = "加载登分册失败"
+                error_message = getattr(registry_manager, "last_error_message", None)
+                result["error_message"] = error_message or "加载登分册失败"
+                self.logger.error("登分册加载失败: %s", result["error_message"])
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             is_valid, error_msg = registry_manager.validate_format()
             if not is_valid:
                 result["error_message"] = error_msg
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             # 5. 创建备份
             if not registry_manager.create_backup():
                 result["error_message"] = "创建登分册备份失败"
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
                 return result
 
             # 6. 处理每个Word文档
@@ -657,7 +808,7 @@ class GradeRegistryWriterService:
                     homework_number
                 )
 
-                for word_file in word_files:
+                for index, word_file in enumerate(word_files, start=1):
                     file_result = self._process_single_word_file(
                         word_file, registry_manager, homework_col
                     )
@@ -671,6 +822,16 @@ class GradeRegistryWriterService:
                     else:
                         result["failed_files"].append(file_result)
                         result["statistics"]["failed"] += 1
+
+                    if progress_tracker:
+                        progress_tracker.update_progress(
+                            processed=index,
+                            success=result["statistics"]["success"],
+                            failed=result["statistics"]["failed"],
+                            skipped=result["statistics"]["skipped"],
+                            current_file=os.path.basename(word_file),
+                            message=f"正在处理第 {index}/{len(word_files)} 个文件",
+                        )
 
                 # 7. 保存登分册
                 if registry_manager.save():
@@ -693,10 +854,17 @@ class GradeRegistryWriterService:
                         skipped_count=result["statistics"]["skipped"],
                         registry_path=registry_path,
                     )
+                    if progress_tracker:
+                        progress_tracker.complete(
+                            summary=result["statistics"],
+                            message="批量登分完成",
+                        )
                 else:
                     result["error_message"] = "保存登分册失败"
                     registry_manager.restore_from_backup()
                     self.logger.error("保存登分册失败，已从备份恢复")
+                    if progress_tracker:
+                        progress_tracker.fail(result["error_message"])
 
                     # 记录审计日志
                     self.audit_logger.end_operation(
@@ -708,6 +876,8 @@ class GradeRegistryWriterService:
                 result["error_message"] = f"处理文件时出错: {str(e)}"
                 self.logger.error("处理文件时出错: %s", str(e), exc_info=True)
                 registry_manager.restore_from_backup()
+                if progress_tracker:
+                    progress_tracker.fail(result["error_message"])
 
                 # 记录审计日志
                 self.audit_logger.end_operation(
@@ -721,6 +891,8 @@ class GradeRegistryWriterService:
             self.logger.error(
                 "处理作业评分系统场景时出错: %s", str(e), exc_info=True
             )
+            if progress_tracker and result["error_message"]:
+                progress_tracker.fail(result["error_message"])
 
             # 记录审计日志
             self.audit_logger.end_operation(
@@ -728,6 +900,9 @@ class GradeRegistryWriterService:
                 error_message=result["error_message"],
                 exception_type=type(e).__name__,
             )
+
+        if not result["success"] and progress_tracker and result["error_message"]:
+            progress_tracker.fail(result["error_message"])
 
         return result
 
@@ -985,7 +1160,9 @@ class GradeRegistryWriterService:
             registry_manager = RegistryManager(registry_path)
 
             if not registry_manager.load():
-                result["error_message"] = "加载登分册失败"
+                error_message = getattr(registry_manager, "last_error_message", None)
+                result["error_message"] = error_message or "加载登分册失败"
+                self.logger.error("登分册加载失败: %s", result["error_message"])
                 return result
 
             is_valid, error_msg = registry_manager.validate_format()

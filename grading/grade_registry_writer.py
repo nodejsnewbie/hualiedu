@@ -479,6 +479,8 @@ class GradeFileProcessor:
 class RegistryManager:
     """成绩登分册管理器"""
 
+    last_error_message: Optional[str] = None
+
     def __init__(self, registry_path: str):
         """
         初始化登分册管理器
@@ -495,6 +497,7 @@ class RegistryManager:
         self.lock_file_handle = None  # 文件锁句柄
         self.lock_file_path = None  # 锁文件路径
         self.header_row_index: int = 1
+        self.last_error_message: Optional[str] = None
 
     def _acquire_file_lock(self) -> bool:
         """
@@ -520,12 +523,14 @@ class RegistryManager:
                     logger.error("文件被其他进程占用: %s", self.registry_path)
                     self.lock_file_handle.close()
                     self.lock_file_handle = None
+                    self.last_error_message = "成绩登分册文件被占用，请关闭后重试"
                     return False
                 else:
                     raise
                     
         except Exception as e:
             logger.error("获取文件锁失败: %s", str(e), exc_info=True)
+            self.last_error_message = f"获取文件锁失败: {str(e)}"
             if self.lock_file_handle:
                 self.lock_file_handle.close()
                 self.lock_file_handle = None
@@ -587,20 +592,26 @@ class RegistryManager:
         """
         try:
             logger.debug("开始加载登分册: %s", self.registry_path)
+            self.last_error_message = None
 
             if not os.path.exists(self.registry_path):
                 logger.error("登分册文件不存在: %s", self.registry_path)
+                self.last_error_message = f"登分册文件不存在: {self.registry_path}"
                 return False
 
             # 并发控制：检测文件是否被占用
             is_in_use, error_msg = self._check_file_in_use()
             if is_in_use:
                 logger.error("文件被占用: %s - %s", self.registry_path, error_msg)
+                self.last_error_message = error_msg or "成绩登分册文件被占用，请关闭后重试"
                 return False
 
             # 并发控制：获取文件锁
             if not self._acquire_file_lock():
                 logger.error("无法获取文件锁: %s", self.registry_path)
+                # _acquire_file_lock 会尽可能设置 last_error_message
+                if not self.last_error_message:
+                    self.last_error_message = "无法获取文件锁，文件可能被占用"
                 return False
 
             # 性能优化：不使用read_only模式（因为需要写入），但使用data_only=False保留公式
@@ -621,6 +632,7 @@ class RegistryManager:
 
         except (OSError, ValueError) as e:
             logger.error("加载登分册失败: %s, 错误: %s", self.registry_path, str(e), exc_info=True)
+            self.last_error_message = f"加载登分册失败: {str(e)}"
             # 加载失败时释放锁
             self._release_file_lock()
             return False

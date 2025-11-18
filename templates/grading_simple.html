@@ -68,6 +68,16 @@
                             <i class="bi bi-info-circle"></i> 选择作业文件夹后可批量操作
                         </small>
                     </div>
+                    <div id="batch-grade-progress-wrapper" class="mt-2" style="display: none;">
+                        <div class="progress" role="progressbar" aria-label="批量登分进度" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                            <div id="batch-grade-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" style="width: 0%;">
+                                准备开始...
+                            </div>
+                        </div>
+                        <div id="batch-grade-progress-text" class="text-muted small mt-1">
+                            <i class="bi bi-hourglass-split"></i> 批量登分准备就绪
+                        </div>
+                    </div>
                     <!-- 文件目录树容器 -->
                     <div id="directory-tree" class="overflow-auto" style="max-height: 600px;">
                         <p class="text-muted">请先选择仓库和课程</p>
@@ -533,7 +543,7 @@
 <!-- JSTree JS -->
 <script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
 <!-- 自定义脚本 -->
-<script src="{% static 'grading/js/grading.js' %}"></script>
+<script src="{% static 'grading/js/grading.js' %}?v=20251113-final6"></script>
 <!-- 作业类型标签管理 -->
 <script src="{% static 'grading/js/homework-type-labels.js' %}"></script>
 {% endblock %}

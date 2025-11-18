@@ -1777,6 +1777,290 @@ function updateHomeworkType(nodeId, folderName, homeworkType, modal) {
 let currentHomeworkFolder = null;
 let currentHomeworkId = null;
 let currentHomeworkRelativePath = null;
+let batchGradeProgressPollInterval = null;
+let batchGradeButtonResetTimeout = null;
+let batchGradeTrackingId = null;
+
+function ensureBatchGradeButtonDefaults() {
+    const $btn = $('#batch-grade-btn');
+    if ($btn.length && !$btn.data('base-class')) {
+        $btn.data('base-class', $btn.attr('class'));
+    }
+    return $btn;
+}
+
+function resetBatchGradeButtonAppearance() {
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn.length) {
+        return $btn;
+    }
+    const baseClass = $btn.data('base-class');
+    if (baseClass) {
+        $btn.attr('class', baseClass);
+    }
+    return $btn;
+}
+
+function getBatchGradeButtonLabel(folderNameOverride) {
+    const folderName = typeof folderNameOverride === 'string' ? folderNameOverride : currentHomeworkFolder;
+    if (folderName) {
+        return `<i class="bi bi-tasks"></i> 批量登分 (${folderName})`;
+    }
+    return '<i class="bi bi-tasks"></i> 批量登分';
+}
+
+function renderBatchGradeButtonLabel(folderNameOverride) {
+    const $btn = resetBatchGradeButtonAppearance();
+    if (!$btn || !$btn.length) {
+        return;
+    }
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    $btn.html(getBatchGradeButtonLabel(folderNameOverride));
+}
+
+function showBatchGradeProcessingState() {
+    console.log('=== showBatchGradeProcessingState 被调用 ===');
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        console.error('按钮元素不存在');
+        return;
+    }
+    console.log('按钮当前状态 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+    
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    $btn.prop('disabled', true)
+        .html('<i class="bi bi-hourglass-split"></i> 正在批量登分...');
+    
+    console.log('按钮已设置为处理中 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+}
+
+function showBatchGradeResultState(isSuccess, customText, autoRestore) {
+    console.log('=== showBatchGradeResultState 被调用 ===');
+    console.log('isSuccess:', isSuccess);
+    console.log('customText:', customText);
+    console.log('autoRestore:', autoRestore);
+    
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        console.error('按钮元素不存在');
+        return;
+    }
+    
+    console.log('按钮当前状态 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+    
+    const icon = isSuccess ? 'bi-check-circle' : 'bi-info-circle';
+    const text = customText || (isSuccess ? '批量登分成功' : '查看提示');
+    
+    console.log('准备设置按钮 - icon:', icon, 'text:', text);
+    
+    resetBatchGradeButtonAppearance();
+    const statusClass = isSuccess ? 'btn-success' : 'btn-warning';
+    $btn.addClass(statusClass)
+        .prop('disabled', false)  // 允许用户继续操作
+        .html(`<i class="bi ${icon}"></i> ${text}`);
+    
+    console.log('按钮已更新 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+
+    // 清除之前的定时器
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    
+    // 如果设置了自动恢复，则在指定时间后恢复按钮状态
+    if (autoRestore !== false) {
+        batchGradeButtonResetTimeout = setTimeout(() => {
+            resetBatchGradeButtonAppearance();
+            renderBatchGradeButtonLabel();
+            // 根据是否有选中的作业来决定按钮状态
+            const shouldEnable = currentHomeworkId && currentCourse;
+            $btn.prop('disabled', !shouldEnable);
+            if (shouldEnable) {
+                $btn.attr('title', `对作业"${currentHomeworkFolder}"进行批量登分`);
+            } else {
+                $btn.attr('title', '请先选择作业文件夹（非文件）');
+            }
+        }, 10000);  // 10秒后恢复，给用户足够时间查看结果
+    }
+}
+
+// 手动恢复按钮状态（当用户关闭模态框时调用）
+function restoreBatchGradeButtonState() {
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        return;
+    }
+    
+    resetBatchGradeButtonAppearance();
+    renderBatchGradeButtonLabel();
+    
+    const shouldEnable = currentHomeworkId && currentCourse;
+    $btn.prop('disabled', !shouldEnable);
+    if (shouldEnable) {
+        $btn.attr('title', `对作业"${currentHomeworkFolder}"进行批量登分`);
+    } else {
+        $btn.attr('title', '请先选择作业文件夹（非文件）');
+    }
+}
+
+function startBatchGradeProgress(trackingId) {
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    const $bar = $('#batch-grade-progress-bar');
+    const $text = $('#batch-grade-progress-text');
+    batchGradeTrackingId = trackingId;
+    $wrapper.stop(true, true).fadeIn(150);
+    $bar.removeClass('bg-success bg-danger')
+        .addClass('bg-info progress-bar-striped progress-bar-animated')
+        .css('width', '0%')
+        .attr('aria-valuenow', 0)
+        .text('准备中...');
+    $text.removeClass('text-success text-danger')
+        .addClass('text-muted')
+        .html('<i class="bi bi-hourglass-split"></i> 正在准备批量登分...');
+    // 暂时禁用进度轮询（后端未实现）
+    // startBatchGradeProgressPolling(trackingId);
+}
+
+function completeBatchGradeProgress(isSuccess, message) {
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    stopBatchGradeProgressPolling();
+    // 使用传入的message，如果没有则使用默认值
+    const finalMessage = message || (isSuccess ? '批量登分完成' : '批量登分失败');
+    const $text = $('#batch-grade-progress-text');
+    const $bar = $('#batch-grade-progress-bar');
+    const statusClass = isSuccess ? 'text-success' : 'text-warning';
+    const barClass = isSuccess ? 'bg-success' : 'bg-warning';
+    const icon = isSuccess ? 'bi-check-circle' : 'bi-info-circle';
+    
+    console.log('completeBatchGradeProgress - isSuccess:', isSuccess, 'message:', finalMessage);
+
+    $bar.removeClass('bg-info progress-bar-animated progress-bar-striped bg-success bg-danger')
+        .addClass(barClass)
+        .css('width', '100%')
+        .attr('aria-valuenow', 100)
+        .text(finalMessage);
+    $text.removeClass('text-muted text-success text-danger')
+        .addClass(statusClass)
+        .html(`<i class="bi ${icon}"></i> ${finalMessage}`);
+
+    setTimeout(() => {
+        $wrapper.fadeOut(200);
+    }, 2000);
+}
+
+function startBatchGradeProgressPolling(trackingId) {
+    if (!trackingId) {
+        return;
+    }
+    stopBatchGradeProgressPolling();
+    fetchBatchGradeProgress(trackingId);
+    batchGradeProgressPollInterval = setInterval(() => {
+        fetchBatchGradeProgress(trackingId);
+    }, 1500);
+}
+
+function stopBatchGradeProgressPolling() {
+    if (batchGradeProgressPollInterval) {
+        clearInterval(batchGradeProgressPollInterval);
+        batchGradeProgressPollInterval = null;
+    }
+}
+
+function fetchBatchGradeProgress(trackingId) {
+    if (!trackingId) {
+        return;
+    }
+    $.ajax({
+        url: `/grading/batch-grade/progress/${trackingId}/`,
+        method: 'GET',
+        success: function(response) {
+            if (response.success && response.data) {
+                renderBatchGradeProgressState(response.data);
+            }
+        },
+        error: function(xhr) {
+            if (xhr.status === 403) {
+                stopBatchGradeProgressPolling();
+            }
+        }
+    });
+}
+
+function renderBatchGradeProgressState(progress) {
+    if (!progress || progress.tracking_id !== batchGradeTrackingId) {
+        return;
+    }
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    const $bar = $('#batch-grade-progress-bar');
+    const $text = $('#batch-grade-progress-text');
+    const total = progress.total || 0;
+    const processed = progress.processed || 0;
+    const success = progress.success || 0;
+    const failed = progress.failed || 0;
+    const skipped = progress.skipped || 0;
+    const percent = total > 0 ? Math.round((processed / total) * 100) : (progress.status === 'success' ? 100 : 5);
+    const summaryText = total
+        ? `已处理 ${processed}/${total} · 成功 ${success} · 失败 ${failed} · 跳过 ${skipped}`
+        : (progress.message || '正在批量登分...');
+
+    $wrapper.show();
+    $bar.attr('aria-valuenow', percent).css('width', `${percent}%`).text(summaryText);
+
+    let statusClass = 'text-muted';
+    let barStateClass = 'bg-info';
+    let icon = 'bi-hourglass-split';
+    let isFinal = false;
+
+    if (progress.status === 'success') {
+        statusClass = 'text-success';
+        barStateClass = 'bg-success';
+        icon = 'bi-check-circle';
+        isFinal = true;
+    } else if (progress.status === 'error') {
+        statusClass = 'text-danger';
+        barStateClass = 'bg-danger';
+        icon = 'bi-exclamation-triangle';
+        isFinal = true;
+    }
+
+    $bar.removeClass('bg-info bg-success bg-danger');
+    if (isFinal) {
+        $bar.removeClass('progress-bar-animated progress-bar-striped').addClass(barStateClass);
+    } else {
+        $bar.addClass('progress-bar-animated progress-bar-striped').addClass(barStateClass);
+    }
+
+    $text.removeClass('text-muted text-success text-danger')
+        .addClass(statusClass)
+        .html(`<i class="bi ${icon}"></i> ${progress.message || '正在批量登分...'}`);
+
+    if (isFinal) {
+        stopBatchGradeProgressPolling();
+        setTimeout(() => {
+            $wrapper.fadeOut(250);
+        }, 2000);
+    }
+}
 
 // 批量登分按钮点击事件
 $(document).on('click', '#batch-grade-btn', function() {
@@ -1792,18 +2076,13 @@ $(document).on('click', '#batch-grade-btn', function() {
         return;
     }
     
-    // 确认对话框
-    const confirmMsg = `确定要对作业"${currentHomeworkFolder}"进行批量登分吗？\n\n` +
-                      `系统将自动读取所有学生作业中的成绩，并写入到班级成绩登记表中。`;
-    
-    if (!confirm(confirmMsg)) {
-        return;
-    }
+    // 直接执行，不显示确认对话框
+    console.log('开始批量登分，作业:', currentHomeworkFolder);
     
     // 显示加载状态
-    const $btn = $(this);
-    const originalText = $btn.html();
-    $btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 处理中...');
+    const trackingId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `batch-${Date.now()}`;
+    showBatchGradeProcessingState();
+    startBatchGradeProgress(trackingId);
     
     // 调用批量登分API
     $.ajax({
@@ -1813,44 +2092,138 @@ $(document).on('click', '#batch-grade-btn', function() {
             'X-CSRFToken': getCSRFToken()
         },
         data: {
-            relative_path: currentHomeworkRelativePath || ''
+            relative_path: currentHomeworkRelativePath || '',
+            tracking_id: trackingId
         },
         success: function(response) {
-            if (response.success) {
-                const summary = response.data.summary;
-                const details = response.data.details;
-                let message = `批量登分完成！\n\n`;
-                message += `作业：${response.data.homework_name}\n`;
-                message += `课程：${response.data.course_name}\n`;
-                message += `班级：${response.data.class_name}\n\n`;
-                message += `总文件数：${summary.total}\n`;
-                message += `成功：${summary.success}\n`;
-                message += `失败：${summary.failed}\n`;
-                message += `跳过：${summary.skipped}\n`;
+            console.log('=== 批量登分响应 ===');
+            console.log('完整响应:', response);
+            console.log('response.success:', response.success);
+            console.log('response.data:', response.data);
+            
+            // 更智能的判断：如果有data字段，就认为是成功的（即使success=false）
+            if (response.data || response.success) {
+                // 兼容不同的数据结构
+                const data = response.data || response;
+                const summary = data.summary || data.statistics || {};
                 
-                if (summary.failed > 0 && details.failed_files && details.failed_files.length > 0) {
-                    message += `\n失败的文件：\n`;
-                    details.failed_files.forEach(file => {
-                        message += `- ${file.student_name || file.file}: ${file.error}\n`;
-                    });
+                // 如果summary为空，尝试从其他字段获取
+                if (!summary.total && response.data.statistics) {
+                    summary.total = response.data.statistics.total || 0;
+                    summary.success = response.data.statistics.success || 0;
+                    summary.failed = response.data.statistics.failed || 0;
+                    summary.skipped = response.data.statistics.skipped || 0;
                 }
                 
-                alert(message);
+                console.log('统计数据:', summary);
+                renderBatchGradeProgressState({
+                    tracking_id: trackingId,
+                    status: 'success',
+                    total: summary.total,
+                    processed: summary.total,
+                    success: summary.success,
+                    failed: summary.failed,
+                    skipped: summary.skipped,
+                    message: '批量登分完成'
+                });
+                completeBatchGradeProgress(true, '批量登分完成');
+                showBatchGradeResultState(true, '批量登分成功', false);  // 不自动恢复，等用户关闭模态框
+                
+                const details = data.details || {};
+                console.log('详细信息:', details);
+                
+                // 使用模态框显示结果
+                showBatchGradeResultModal(data);
             } else {
-                alert('批量登分失败：' + (response.message || response.error || '未知错误'));
+                // 提取详细的错误信息
+                let errorMessage = response.message || response.error || '未知错误';
+                
+                // 如果有更详细的错误信息，使用它
+                if (response.data && response.data.error_message) {
+                    errorMessage = response.data.error_message;
+                }
+                
+                console.log('批量登分失败 - 错误信息:', errorMessage);
+                console.log('完整错误数据:', response);
+                
+                renderBatchGradeProgressState({
+                    tracking_id: trackingId,
+                    status: 'error',
+                    total: 0,
+                    processed: 0,
+                    success: 0,
+                    failed: 0,
+                    skipped: 0,
+                    message: errorMessage
+                });
+                completeBatchGradeProgress(false, errorMessage);
+                showBatchGradeResultState(false, '查看提示', false);  // 改为"查看提示"，更友好
+                
+                // 使用错误模态框显示详细错误信息
+                showBatchGradeErrorModal({
+                    title: '批量登分失败',
+                    message: errorMessage,
+                    details: response.data || response,
+                    homework_name: currentHomeworkFolder,
+                    course_name: currentCourse
+                });
             }
         },
         error: function(xhr, status, error) {
             console.error('批量登分失败:', error);
-            let errorMsg = '批量登分失败';
-            if (xhr.responseJSON && xhr.responseJSON.message) {
-                errorMsg += '：' + xhr.responseJSON.message;
+            console.error('XHR状态:', xhr.status);
+            console.error('XHR响应:', xhr.responseText);
+            
+            let errorMsg = '批量登分请求失败';
+            let errorDetails = {};
+            
+            if (xhr.responseJSON) {
+                errorMsg = xhr.responseJSON.message || xhr.responseJSON.error || errorMsg;
+                errorDetails = xhr.responseJSON;
+            } else if (xhr.responseText) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMsg = response.message || response.error || errorMsg;
+                    errorDetails = response;
+                } catch (e) {
+                    errorMsg += '：' + xhr.responseText.substring(0, 200);
+                }
             }
-            alert(errorMsg);
-        },
-        complete: function() {
-            // 恢复按钮状态
-            $btn.prop('disabled', false).html(originalText);
+            
+            // 根据HTTP状态码提供更具体的错误信息
+            if (xhr.status === 404) {
+                errorMsg = '未找到批量登分接口或作业不存在';
+            } else if (xhr.status === 403) {
+                errorMsg = '没有权限执行批量登分操作';
+            } else if (xhr.status === 500) {
+                errorMsg = '服务器内部错误：' + errorMsg;
+            } else if (xhr.status === 0) {
+                errorMsg = '网络连接失败，请检查网络连接';
+            }
+            
+            renderBatchGradeProgressState({
+                tracking_id: trackingId,
+                status: 'error',
+                total: 0,
+                processed: 0,
+                success: 0,
+                failed: 0,
+                skipped: 0,
+                message: errorMsg
+            });
+            completeBatchGradeProgress(false, errorMsg);
+            showBatchGradeResultState(false, '查看提示', false);
+            
+            // 使用错误模态框显示详细错误信息
+            showBatchGradeErrorModal({
+                title: '批量登分失败',
+                message: errorMsg,
+                details: errorDetails,
+                homework_name: currentHomeworkFolder,
+                course_name: currentCourse,
+                http_status: xhr.status,
+                http_status_text: xhr.statusText
+            });
         }
     });
 });
@@ -1864,12 +2237,12 @@ function updateBatchGradeButton(folderPath, folderId) {
     
     if (!folderPath || !currentCourse) {
         console.log('条件不满足，禁用按钮');
-        $('#batch-grade-btn').prop('disabled', true)
-            .attr('title', '请先选择作业文件夹（非文件）')
-            .html('<i class="bi bi-tasks"></i> 批量登分');
         currentHomeworkFolder = null;
         currentHomeworkId = null;
         currentHomeworkRelativePath = null;
+        $('#batch-grade-btn').prop('disabled', true)
+            .attr('title', '请先选择作业文件夹（非文件）');
+        renderBatchGradeButtonLabel();
         console.log('按钮已禁用，文本已重置');
         return;
     }
@@ -1905,30 +2278,267 @@ function updateBatchGradeButton(folderPath, folderId) {
                 currentHomeworkRelativePath = relativePath;
 
                 $('#batch-grade-btn').prop('disabled', false)
-                    .attr('title', `对作业"${folderName}"进行批量登分`)
-                    .html(`<i class="bi bi-tasks"></i> 批量登分 (${folderName})`);
+                    .attr('title', `对作业"${folderName}"进行批量登分`);
+                console.log('准备调用 renderBatchGradeButtonLabel');
+                renderBatchGradeButtonLabel(folderName);
                 console.log('作业信息已加载:', response.homework);
+                console.log('按钮最终状态:', $('#batch-grade-btn').html());
             } else {
-                $('#batch-grade-btn').prop('disabled', true)
-                    .attr('title', '该文件夹不是有效的作业文件夹')
-                    .html('<i class="bi bi-tasks"></i> 批量登分');
                 currentHomeworkFolder = null;
                 currentHomeworkId = null;
                 currentHomeworkRelativePath = null;
+                $('#batch-grade-btn').prop('disabled', true)
+                    .attr('title', '该文件夹不是有效的作业文件夹');
+                renderBatchGradeButtonLabel();
                 console.log('未找到作业信息');
             }
         },
         error: function(xhr, status, error) {
             console.error('查询作业信息失败:', error);
-            $('#batch-grade-btn').prop('disabled', true)
-                .attr('title', '查询作业信息失败')
-                .html('<i class="bi bi-tasks"></i> 批量登分');
             currentHomeworkFolder = null;
             currentHomeworkId = null;
             currentHomeworkRelativePath = null;
+            $('#batch-grade-btn').prop('disabled', true)
+                .attr('title', '查询作业信息失败');
+            renderBatchGradeButtonLabel();
         }
     });
 }
 
 // 注意：select_node.jstree 事件已在 initTree() 函数中的 jstree 初始化时绑定
 // 这里不需要重复绑定
+
+// 显示批量登分错误模态框
+function showBatchGradeErrorModal(errorData) {
+    const modalHtml = `
+        <div class="modal fade" id="batchGradeErrorModal" tabindex="-1" aria-labelledby="batchGradeErrorModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-light">
+                        <h5 class="modal-title" id="batchGradeErrorModalLabel">
+                            <i class="bi bi-info-circle text-primary"></i>
+                            批量登分提示
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        ${errorData.homework_name ? `
+                        <div class="mb-3">
+                            <h6>作业信息</h6>
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <td class="text-muted" style="width: 80px;">作业：</td>
+                                    <td><strong>${errorData.homework_name}</strong></td>
+                                </tr>
+                                ${errorData.course_name ? `
+                                <tr>
+                                    <td class="text-muted">课程：</td>
+                                    <td>${errorData.course_name}</td>
+                                </tr>
+                                ` : ''}
+                            </table>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="alert alert-warning bg-light border-warning">
+                            <h6 class="alert-heading mb-2">
+                                <i class="bi bi-info-circle"></i> 提示信息
+                            </h6>
+                            <p class="mb-0">${errorData.message}</p>
+                        </div>
+                        
+                        ${errorData.http_status ? `
+                        <div class="mb-0">
+                            <small class="text-muted">
+                                错误代码: ${errorData.http_status}
+                            </small>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="card border-primary" style="display: none;">
+                            <div class="card-body">
+                                <h6 class="card-title text-primary">
+                                    <i class="bi bi-lightbulb"></i> 解决方法（已隐藏）
+                                </h6>
+                                <ul class="mb-0">
+                                    ${errorData.message.includes('未找到作业目录') ? `
+                                        <li>检查数据库中是否有对应的作业记录</li>
+                                        <li>使用命令导入作业：<code>conda run -n py313 python manage.py import_homeworks &lt;仓库路径&gt; &lt;课程名称&gt;</code></li>
+                                        <li>或在Django Admin中手动创建作业</li>
+                                    ` : errorData.message.includes('未找到活跃的仓库') ? `
+                                        <li>在Django Admin中创建并激活仓库</li>
+                                        <li>检查仓库的 is_active 字段是否为 True</li>
+                                    ` : errorData.message.includes('未找到班级目录') ? `
+                                        <li>检查文件夹结构是否正确</li>
+                                        <li>确保班级目录存在</li>
+                                    ` : errorData.message.includes('没有权限') || errorData.http_status === 403 ? `
+                                        <li>确认您是该课程的教师</li>
+                                        <li>检查用户权限设置</li>
+                                    ` : errorData.http_status === 404 ? `
+                                        <li>检查作业ID是否正确</li>
+                                        <li>确认作业记录存在于数据库中</li>
+                                    ` : errorData.http_status === 500 ? `
+                                        <li>查看服务器日志获取详细错误信息</li>
+                                        <li>检查 logs/app.log 文件</li>
+                                        <li>联系系统管理员</li>
+                                    ` : errorData.http_status === 0 ? `
+                                        <li>检查网络连接</li>
+                                        <li>确认服务器正在运行</li>
+                                        <li>检查防火墙设置</li>
+                                    ` : `
+                                        <li>查看浏览器控制台获取详细错误信息</li>
+                                        <li>查看服务器日志：logs/app.log</li>
+                                        <li>使用诊断脚本：<code>conda run -n py313 python scripts/diagnose_batch_grade.py &lt;课程名称&gt; &lt;作业文件夹名称&gt;</code></li>
+                                        <li>参考文档：docs/BATCH_GRADE_SETUP.md</li>
+                                    `}
+                                </ul>
+                            </div>
+                        </div>
+                        
+                        ${errorData.details && Object.keys(errorData.details).length > 0 ? `
+                        <div class="mt-3">
+                            <details>
+                                <summary class="text-muted" style="cursor: pointer;">
+                                    <i class="bi bi-code-square"></i> 查看详细错误信息（技术人员）
+                                </summary>
+                                <pre class="mt-2 p-2 bg-light border rounded" style="font-size: 0.85em; max-height: 300px; overflow-y: auto;">${JSON.stringify(errorData.details, null, 2)}</pre>
+                            </details>
+                        </div>
+                        ` : ''}
+                    </div>
+                    <div class="modal-footer">
+                        <small class="text-muted me-auto">
+                            <i class="bi bi-question-circle"></i> 如需帮助，请查看文档或联系管理员
+                        </small>
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                            <i class="bi bi-check-lg"></i> 知道了
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#batchGradeErrorModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('batchGradeErrorModal'));
+    modal.show();
+    
+    // 模态框关闭后移除并恢复按钮状态
+    $('#batchGradeErrorModal').on('hidden.bs.modal', function() {
+        $(this).remove();
+        // 恢复按钮状态
+        restoreBatchGradeButtonState();
+    });
+}
+
+// 显示批量登分结果模态框
+function showBatchGradeResultModal(data) {
+    console.log('=== showBatchGradeResultModal 被调用 ===');
+    console.log('数据:', data);
+    
+    // 数据验证和默认值
+    const summary = data.summary || data.statistics || {
+        total: 0,
+        success: 0,
+        failed: 0,
+        skipped: 0
+    };
+    const details = data.details || {
+        processed_files: [],
+        failed_files: [],
+        skipped_files: []
+    };
+    
+    console.log('处理后的summary:', summary);
+    console.log('处理后的details:', details);
+    
+    // 判断是否有真正的错误（失败），跳过不算错误
+    const hasErrors = summary.failed > 0;
+    
+    console.log('=== 模态框显示逻辑 ===');
+    console.log('failed:', summary.failed);
+    console.log('hasErrors:', hasErrors);
+    console.log('将显示:', hasErrors ? '错误列表' : '成功信息');
+    
+    // 创建模态框HTML
+    const modalHtml = `
+        <div class="modal fade" id="batchGradeResultModal" tabindex="-1" aria-labelledby="batchGradeResultModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header ${hasErrors ? 'bg-warning' : 'bg-success'} text-white">
+                        <h5 class="modal-title" id="batchGradeResultModalLabel">
+                            <i class="bi ${hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle'}"></i>
+                            ${hasErrors ? '批量登分完成（有错误）' : '批量登分完成'}
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        ${!hasErrors ? `
+                        <!-- 完全成功时：只显示成功信息 -->
+                        <div class="text-center py-4">
+                            <div class="mb-4">
+                                <i class="bi bi-check-circle-fill text-success" style="font-size: 4rem;"></i>
+                            </div>
+                            <h4 class="mb-3">批量登分成功</h4>
+                            <p class="text-muted">
+                                已成功处理 <strong class="text-success">${summary.success}</strong> 个文件
+                                ${summary.skipped > 0 ? `，跳过 ${summary.skipped} 个` : ''}
+                            </p>
+                        </div>
+                        ` : `
+                        <!-- 有错误时：只显示错误列表 -->
+                        <div class="alert alert-danger">
+                            <h6 class="mb-3">
+                                <i class="bi bi-x-circle"></i> 以下文件处理失败
+                            </h6>
+                            <ul class="mb-0">
+                                ${details.failed_files.map(file => {
+                                    const fileName = file.student_name || file.file_name || file.file || '未知文件';
+                                    const errorMsg = file.error_message || file.error || file.message || '未知错误';
+                                    return `
+                                    <li class="mb-2">
+                                        <strong>${fileName}</strong><br>
+                                        <small class="text-muted">${errorMsg}</small>
+                                    </li>
+                                    `;
+                                }).join('')}
+                            </ul>
+                        </div>
+                        <p class="text-muted small mb-0">
+                            成功处理 ${summary.success} 个文件，失败 ${summary.failed} 个
+                        </p>
+                        `}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                            <i class="bi bi-check-lg"></i> 确定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#batchGradeResultModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('batchGradeResultModal'));
+    modal.show();
+    
+    // 模态框关闭后移除并恢复按钮状态
+    $('#batchGradeResultModal').on('hidden.bs.modal', function() {
+        $(this).remove();
+        // 恢复按钮状态
+        restoreBatchGradeButtonState();
+    });
+}

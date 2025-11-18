@@ -4,9 +4,11 @@ import json
 import logging
 import mimetypes
 import os
+import re
 import threading
 import time
 import traceback
+import uuid
 from collections import deque
 from pathlib import Path
 from queue import Queue
@@ -47,7 +49,10 @@ from .models import (
     Semester,
 )
 from .utils import FileHandler, GitHandler
-from grading.services.grade_registry_writer_service import GradeRegistryWriterService
+from grading.services.grade_registry_writer_service import (
+    GradeRegistryWriterService,
+    BatchGradeProgressTracker,
+)
 
 # Create your views here.
 
@@ -148,7 +153,7 @@ def validate_user_permissions(request):
     return True, None
 
 
-def create_error_response(message, status_code=400, response_format="status"):
+def create_error_response(message, status_code=400, response_format="status", extra=None):
     """
     创建统一的错误响应
 
@@ -156,14 +161,21 @@ def create_error_response(message, status_code=400, response_format="status"):
         message: 错误消息
         status_code: HTTP状态码
         response_format: 响应格式 ("status" 或 "success")
+        extra: 附加的响应数据
 
     Returns:
         JsonResponse: 格式化的错误响应
     """
     if response_format == "status":
-        return JsonResponse({"status": "error", "message": message}, status=status_code)
+        payload = {"status": "error", "message": message}
+        if extra:
+            payload.update(extra)
+        return JsonResponse(payload, status=status_code)
     else:
-        return JsonResponse({"success": False, "message": message}, status=status_code)
+        payload = {"success": False, "message": message}
+        if extra:
+            payload.update(extra)
+        return JsonResponse(payload, status=status_code)
 
 
 def create_success_response(data=None, message="操作成功", response_format="status"):
@@ -6561,13 +6573,32 @@ def batch_grade_to_registry(request, homework_id):
             request.user.username,
             homework_id,
         )
+
+        tracking_id = (request.POST.get("tracking_id") or "").strip()
+        tracking_id = re.sub(r"[^a-zA-Z0-9_-]", "", tracking_id)
+        tracking_id = tracking_id[:64] if tracking_id else uuid.uuid4().hex
+        progress_tracker = BatchGradeProgressTracker(
+            tracking_id=tracking_id,
+            user_id=request.user.id,
+        )
+        progress_tracker.start(message="正在准备批量登分...")
+
+        def error_response(message, status_code=400):
+            if progress_tracker:
+                progress_tracker.fail(message)
+            return create_error_response(
+                message,
+                status_code=status_code,
+                response_format="success",
+                extra={"tracking_id": tracking_id},
+            )
         
         # 1. 获取作业对象
         try:
             homework = Homework.objects.get(id=homework_id)
         except Homework.DoesNotExist:
             logger.error("作业不存在 - 作业ID: %s", homework_id)
-            return create_error_response("作业不存在", status_code=404, response_format="success")
+            return error_response("作业不存在", status_code=404)
         
         # 2. 验证用户权限（检查是否是课程教师）
         if homework.course.teacher != request.user and not request.user.is_superuser:
@@ -6577,7 +6608,7 @@ def batch_grade_to_registry(request, homework_id):
                 request.user.username,
                 homework.course.teacher.username,
             )
-            return create_error_response("无权限访问该作业", status_code=403, response_format="success")
+            return error_response("无权限访问该作业", status_code=403)
         
         # 3. 获取作业目录路径
         # 假设作业目录结构：<repo_base>/<course_name>/<class_name>/<homework_folder_name>
@@ -6588,7 +6619,7 @@ def batch_grade_to_registry(request, homework_id):
 
         if not user_repositories.exists():
             logger.error("用户没有活跃的仓库 - 用户: %s", request.user.username)
-            return create_error_response("未找到活跃的仓库", status_code=404, response_format="success")
+            return error_response("未找到活跃的仓库", status_code=404)
 
         resolution = None
         resolution_meta = {}
@@ -6625,10 +6656,9 @@ def batch_grade_to_registry(request, homework_id):
                     homework.folder_name,
                     multiple_matches,
                 )
-                return create_error_response(
+                return error_response(
                     "检测到多个同名作业目录，请确认课程/班级配置或手动指定唯一目录",
                     status_code=409,
-                    response_format="success",
                 )
 
             logger.error(
@@ -6638,10 +6668,9 @@ def batch_grade_to_registry(request, homework_id):
                 homework.folder_name,
                 attempted,
             )
-            return create_error_response(
+            return error_response(
                 f"未找到作业目录: {homework.folder_name}",
                 status_code=404,
-                response_format="success"
             )
 
         homework_dir_full_path = resolution["homework_path"]
@@ -6657,17 +6686,17 @@ def batch_grade_to_registry(request, homework_id):
         
         if not class_dir_full_path or not os.path.exists(class_dir_full_path):
             logger.error("未找到班级目录 - 路径: %s", class_dir_full_path)
-            return create_error_response("未找到班级目录", status_code=404, response_format="success")
+            return error_response("未找到班级目录", status_code=404)
         
         # 4. 路径安全检查
         repo_base_path = found_repository.get_full_path()
         if not os.path.abspath(homework_dir_full_path).startswith(os.path.abspath(repo_base_path)):
             logger.error("路径遍历攻击检测 - 作业路径: %s", homework_dir_full_path)
-            return create_error_response("无权访问该路径", status_code=403, response_format="success")
+            return error_response("无权访问该路径", status_code=403)
         
         if not os.path.abspath(class_dir_full_path).startswith(os.path.abspath(repo_base_path)):
             logger.error("路径遍历攻击检测 - 班级路径: %s", class_dir_full_path)
-            return create_error_response("无权访问该路径", status_code=403, response_format="success")
+            return error_response("无权访问该路径", status_code=403)
         
         resolved_class_name = homework.course.class_name or ""
         if not resolved_class_name:
@@ -6692,7 +6721,8 @@ def batch_grade_to_registry(request, homework_id):
         
         result = service.process_grading_system_scenario(
             homework_dir=homework_dir_full_path,
-            class_dir=class_dir_full_path
+            class_dir=class_dir_full_path,
+            progress_tracker=progress_tracker,
         )
         
         # 7. 返回处理结果
@@ -6717,22 +6747,41 @@ def batch_grade_to_registry(request, homework_id):
                         "skipped_files": result["skipped_files"],
                     },
                     "registry_path": result["registry_path"],
+                    "tracking_id": tracking_id,
                 },
                 message="批量登分完成",
                 response_format="success"
             )
         else:
             logger.error("作业评分系统场景处理失败 - 错误: %s", result.get("error_message"))
-            return create_error_response(
+            return error_response(
                 result.get("error_message", "批量登分失败"),
                 status_code=500,
-                response_format="success"
             )
     
     except Exception as e:
         logger.error("作业评分系统场景处理异常: %s", str(e), exc_info=True)
-        return create_error_response(
+        return error_response(
             f"处理请求时出错: {str(e)}",
             status_code=500,
-            response_format="success"
         )
+
+
+@login_required
+def batch_grade_progress(request, tracking_id: str):
+    """
+    查询批量登分进度
+    """
+    progress = BatchGradeProgressTracker.get_progress(tracking_id)
+    if not progress:
+        return JsonResponse({"success": False, "message": "未找到进度"}, status=404)
+
+    # 仅允许查看自己的进度（超级管理员除外）
+    if (
+        progress.get("user_id")
+        and progress.get("user_id") != request.user.id
+        and not request.user.is_superuser
+    ):
+        return JsonResponse({"success": False, "message": "无权限查看该进度"}, status=403)
+
+    return JsonResponse({"success": True, "data": progress})
