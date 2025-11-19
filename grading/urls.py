@@ -107,6 +107,9 @@ urlpatterns = [
     path("api/homework-info/", views.get_homework_info_api, name="get_homework_info_api"),
     path("api/homework-type/", views.get_homework_type_api, name="get_homework_type_api"),
     path("api/update-homework-type/", views.update_homework_type_api, name="update_homework_type_api"),
+    # 缓存管理API
+    path("api/cache/stats/", views.cache_stats_api, name="cache_stats_api"),
+    path("api/cache/clear/", views.clear_cache_api, name="clear_cache_api"),
     # 测试页面
     path("jquery-test/", views.jquery_test, name="jquery_test"),
     path("test-clean/", views.test_clean, name="test_clean"),

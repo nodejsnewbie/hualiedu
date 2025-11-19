@@ -17,6 +17,15 @@ huali-edu/
 │   ├── management/            # Django管理命令
 │   ├── migrations/            # 数据库迁移
 │   ├── services/              # 业务逻辑服务
+│   │   ├── grade_registry_writer_service.py  # 批量登分服务
+│   │   ├── semester_manager.py               # 学期管理主服务
+│   │   ├── semester_auto_creator.py          # 学期自动创建
+│   │   ├── semester_detector.py              # 当前学期检测
+│   │   ├── semester_config.py                # 学期配置管理
+│   │   ├── semester_naming.py                # 学期命名规则
+│   │   ├── semester_status.py                # 学期状态管理
+│   │   ├── semester_status_display.py        # 学期状态显示
+│   │   └── semester_time.py                  # 学期时间计算
 │   ├── static/                # 静态文件
 │   ├── templates/             # 模板文件
 │   ├── templatetags/          # 模板标签
@@ -109,7 +118,21 @@ huali-edu/
 - 生产环境收集到 `staticfiles/`
 - 应用特定的静态文件放在应用的 `static/` 目录
 
-### 7. 模板文件
+### 7. 服务层组织
+**批量登分服务**:
+- `grade_registry_writer_service.py` - 成绩批量写入服务，支持作业评分和工具箱两种场景
+
+**学期管理服务**:
+- `semester_manager.py` - 学期管理主服务，协调其他学期相关服务
+- `semester_auto_creator.py` - 根据模板自动创建学期
+- `semester_detector.py` - 检测当前学期
+- `semester_config.py` - 学期配置管理
+- `semester_naming.py` - 学期命名规则
+- `semester_status.py` - 学期状态管理
+- `semester_status_display.py` - 学期状态显示格式化
+- `semester_time.py` - 学期时间计算工具
+
+### 8. 模板文件
 - 全局模板放在 `templates/`
 - 应用特定模板放在应用的 `templates/` 目录
 - 不要保留调试或测试模板

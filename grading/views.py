@@ -56,8 +56,8 @@ from grading.services.grade_registry_writer_service import (
 
 # Create your views here.
 
-# 在文件开头添加缓存字典
-directory_file_count_cache = {}
+# 导入缓存管理器
+from .cache_manager import get_cache_manager
 
 # 全局请求队列和限流配置
 API_REQUEST_QUEUE = Queue()
@@ -785,15 +785,30 @@ def validate_file_operation(file_path_param="file_path", require_write=True):
     return decorator
 
 
-def get_directory_file_count_cached(dir_path, base_dir=None):
-    """获取目录文件数量（带缓存）"""
-    if dir_path in directory_file_count_cache:
-        return directory_file_count_cache[dir_path]
+def get_directory_file_count_cached(dir_path, base_dir=None, request=None):
+    """
+    获取目录文件数量（带缓存）
+    
+    Args:
+        dir_path: 目录路径
+        base_dir: 基础目录
+        request: Django请求对象（用于获取用户和租户信息）
+    
+    Returns:
+        文件数量
+    """
+    # 获取缓存管理器
+    cache_manager = get_cache_manager(request)
+    
+    # 尝试从缓存获取
+    cached_count = cache_manager.get_file_count(dir_path)
+    if cached_count is not None:
+        return cached_count
 
     try:
         # 获取基础目录
         if base_dir is None:
-            base_dir = get_base_directory()
+            base_dir = get_base_directory(request)
         if base_dir is None:
             return 0
 
@@ -820,7 +835,15 @@ def get_directory_file_count_cached(dir_path, base_dir=None):
                 file_count += 1
 
         # 缓存结果
-        directory_file_count_cache[dir_path] = file_count
+        cache_manager.set_file_count(dir_path, file_count)
+        
+        # 检查文件数量阈值
+        threshold_check = cache_manager.check_file_count_threshold(file_count)
+        if threshold_check["warning"]:
+            logger.warning(
+                f"目录文件数量警告: {dir_path} - {threshold_check['message']}"
+            )
+        
         return file_count
 
     except Exception as e:
@@ -828,9 +851,16 @@ def get_directory_file_count_cached(dir_path, base_dir=None):
         return 0
 
 
-def clear_directory_file_count_cache():
-    """清除目录文件数量缓存"""
-    directory_file_count_cache.clear()
+def clear_directory_file_count_cache(request=None):
+    """
+    清除目录文件数量缓存
+    
+    Args:
+        request: Django请求对象
+    """
+    cache_manager = get_cache_manager(request)
+    cache_manager.clear_file_count()
+    logger.info("已清除目录文件数量缓存")
 
 
 def index(request):
@@ -969,7 +999,7 @@ def get_dir_file_count(request):
         base_dir = get_base_directory(request)
         
         # 使用缓存获取文件数量
-        file_count = get_directory_file_count_cached(dir_path, base_dir=base_dir)
+        file_count = get_directory_file_count_cached(dir_path, base_dir=base_dir, request=request)
 
         # 直接返回文件数量字符串
         return HttpResponse(str(file_count))
@@ -1377,7 +1407,7 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
                         node["state"]["disabled"] = True
 
                     # 统计并缓存目录文件数量
-                    file_count = get_directory_file_count_cached(relative_path, base_dir=base_dir)
+                    file_count = get_directory_file_count_cached(relative_path, base_dir=base_dir, request=request)
                     node["data"] = {"file_count": file_count}
                     
                     # 如果提供了课程名称，检查是否是作业文件夹（第二层）
@@ -6785,3 +6815,116 @@ def batch_grade_progress(request, tracking_id: str):
         return JsonResponse({"success": False, "message": "无权限查看该进度"}, status=403)
 
     return JsonResponse({"success": True, "data": progress})
+
+
+# ==================== 缓存管理API ====================
+
+@login_required
+@require_http_methods(["GET"])
+def cache_stats_api(request):
+    """
+    获取缓存统计信息API
+    
+    仅管理员可访问
+    """
+    # 权限检查
+    if not request.user.is_staff:
+        return JsonResponse(
+            {"success": False, "message": "需要管理员权限"},
+            status=403
+        )
+    
+    try:
+        cache_manager = get_cache_manager(request)
+        stats = cache_manager.get_cache_stats()
+        
+        return JsonResponse({
+            "success": True,
+            "data": stats
+        })
+    except Exception as e:
+        logger.error(f"获取缓存统计失败: {str(e)}", exc_info=True)
+        return JsonResponse(
+            {"success": False, "message": f"获取缓存统计失败: {str(e)}"},
+            status=500
+        )
+
+
+@login_required
+@require_http_methods(["POST"])
+def clear_cache_api(request):
+    """
+    清除缓存API
+    
+    仅管理员可访问
+    
+    参数:
+        - type: 缓存类型 (all/file_count/dir_tree/file_content/file_metadata)
+        - scope: 清除范围 (all/user/tenant)
+    """
+    # 权限检查
+    if not request.user.is_staff:
+        return JsonResponse(
+            {"success": False, "message": "需要管理员权限"},
+            status=403
+        )
+    
+    try:
+        cache_type = request.POST.get("type", "all")
+        scope = request.POST.get("scope", "user")
+        
+        cache_manager = get_cache_manager(request)
+        
+        # 根据范围清除缓存
+        if scope == "all":
+            # 清除所有缓存（仅超级管理员）
+            if not request.user.is_superuser:
+                return JsonResponse(
+                    {"success": False, "message": "需要超级管理员权限"},
+                    status=403
+                )
+            cache_manager.clear_all()
+            message = "已清除所有缓存"
+        elif scope == "tenant":
+            # 清除租户缓存
+            cache_manager.clear_tenant_cache()
+            message = f"已清除租户缓存"
+        else:
+            # 清除用户缓存或指定类型缓存
+            if cache_type == "all":
+                cache_manager.clear_user_cache()
+                message = "已清除用户所有缓存"
+            elif cache_type == "file_count":
+                cache_manager.clear_file_count()
+                message = "已清除文件数量缓存"
+            elif cache_type == "dir_tree":
+                cache_manager.clear_dir_tree()
+                message = "已清除目录树缓存"
+            elif cache_type == "file_content":
+                cache_manager.clear_file_content()
+                message = "已清除文件内容缓存"
+            elif cache_type == "file_metadata":
+                cache_manager.clear_file_metadata()
+                message = "已清除文件元数据缓存"
+            else:
+                return JsonResponse(
+                    {"success": False, "message": f"无效的缓存类型: {cache_type}"},
+                    status=400
+                )
+        
+        logger.info(
+            f"缓存清除成功 - 用户: {request.user.username}, "
+            f"类型: {cache_type}, 范围: {scope}"
+        )
+        
+        return JsonResponse({
+            "success": True,
+            "message": message
+        })
+        
+    except Exception as e:
+        logger.error(f"清除缓存失败: {str(e)}", exc_info=True)
+        return JsonResponse(
+            {"success": False, "message": f"清除缓存失败: {str(e)}"},
+            status=500
+        )
