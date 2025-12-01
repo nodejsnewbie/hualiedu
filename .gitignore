@@ -8,33 +8,39 @@ __pycache__/
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
+*.sqlite3
+*.sqlite3-*
 
-# Static files
-/static/
+# Static files (collected by collectstatic)
 /staticfiles/
 
-# Media files
+# Media files (user uploads)
 /media/
 
 # Environment variables
 .env
 .env.local
 .env.production
+.envrc
 
-# Virtual environments (if using virtualenv instead of conda)
+# Virtual environments
 .venv/
 venv/
 env/
+
+# Note: .python-version and uv.lock should be committed for reproducibility
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
 Thumbs.db
+*.DS_Store
 
 # Coverage reports
 htmlcov/
@@ -44,12 +50,13 @@ htmlcov/
 # Testing
 .pytest_cache/
 .tox/
+.hypothesis/
 
 # Temporary files
-*_backup
-*_old
-*_temp
-*_tmp
+*_backup*
+*_old*
+*_temp*
+*_tmp*
 *.backup
 *.bak
 *.tmp
@@ -61,3 +68,45 @@ templates/*_test.html
 templates/*_debug.html
 templates/*_temp.html
 templates/*_old.html
+
+# Logs directory
+logs/*.log
+
+# SSH keys and sensitive files
+media/ssh_keys/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_ecdsa*
+
+# Database backups
+*.sql
+*.dump
+db.sqlite3.backup*
+
+# Python cache
+*.pyc
+*.pyo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Test data directories
+testteacher*/
+*_仓库/
+test_repo*/
