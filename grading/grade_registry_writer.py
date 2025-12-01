@@ -11,10 +11,21 @@ import os
 import re
 import logging
 import shutil
-import fcntl
 import errno
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict
+
+# fcntl is Unix-only, use msvcrt on Windows
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    HAS_FCNTL = False
+    try:
+        import msvcrt
+        HAS_MSVCRT = True
+    except ImportError:
+        HAS_MSVCRT = False
 
 from docx import Document
 from openpyxl import load_workbook
@@ -640,6 +651,11 @@ class RegistryManager:
         Returns:
             True表示成功获取锁，False表示文件被占用
         """
+        # If no locking mechanism is available, skip locking
+        if not HAS_FCNTL and not HAS_MSVCRT:
+            logger.warning("File locking not available on this platform")
+            return True
+            
         try:
             # 创建锁文件路径
             self.lock_file_path = f"{self.registry_path}.lock"
@@ -649,11 +665,20 @@ class RegistryManager:
             
             # 尝试获取独占锁（非阻塞）
             try:
-                fcntl.flock(self.lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if HAS_FCNTL:
+                    fcntl.flock(self.lock_file_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                elif HAS_MSVCRT:
+                    msvcrt.locking(self.lock_file_handle.fileno(), msvcrt.LK_NBLCK, 1)
                 logger.info("成功获取文件锁: %s", self.lock_file_path)
                 return True
-            except IOError as e:
-                if e.errno in (errno.EACCES, errno.EAGAIN):
+            except (IOError, OSError) as e:
+                if HAS_FCNTL and e.errno in (errno.EACCES, errno.EAGAIN):
+                    logger.error("文件被其他进程占用: %s", self.registry_path)
+                    self.lock_file_handle.close()
+                    self.lock_file_handle = None
+                    self.last_error_message = "成绩登分册文件被占用，请关闭后重试"
+                    return False
+                elif HAS_MSVCRT and e.errno == errno.EACCES:
                     logger.error("文件被其他进程占用: %s", self.registry_path)
                     self.lock_file_handle.close()
                     self.lock_file_handle = None
@@ -675,7 +700,10 @@ class RegistryManager:
         try:
             if self.lock_file_handle:
                 # 释放锁
-                fcntl.flock(self.lock_file_handle.fileno(), fcntl.LOCK_UN)
+                if HAS_FCNTL:
+                    fcntl.flock(self.lock_file_handle.fileno(), fcntl.LOCK_UN)
+                elif HAS_MSVCRT:
+                    msvcrt.locking(self.lock_file_handle.fileno(), msvcrt.LK_UNLCK, 1)
                 self.lock_file_handle.close()
                 self.lock_file_handle = None
                 
@@ -694,17 +722,26 @@ class RegistryManager:
         Returns:
             (是否被占用, 错误消息)
         """
+        # If no locking mechanism is available, skip check
+        if not HAS_FCNTL and not HAS_MSVCRT:
+            return False, None
+            
         try:
             # 方法1：尝试以独占模式打开文件
             try:
                 with open(self.registry_path, 'r+b') as f:
                     # 尝试获取文件锁
                     try:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        if HAS_FCNTL:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        elif HAS_MSVCRT:
+                            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                         return False, None
-                    except IOError as e:
-                        if e.errno in (errno.EACCES, errno.EAGAIN):
+                    except (IOError, OSError) as e:
+                        if (HAS_FCNTL and e.errno in (errno.EACCES, errno.EAGAIN)) or \
+                           (HAS_MSVCRT and e.errno == errno.EACCES):
                             logger.error("文件被占用: %s", self.registry_path)
                             return True, "成绩登分册文件被占用，请关闭后重试"
                         else:

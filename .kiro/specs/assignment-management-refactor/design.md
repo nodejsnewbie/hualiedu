@@ -4,6 +4,8 @@
 
 本设计文档描述作业管理系统重构的技术方案。核心目标是将面向技术人员的"仓库管理"转变为面向教师的"作业管理"，同时实现远程 Git 仓库直接访问架构，消除本地同步需求。
 
+**系统定位**: 作业评分系统本质上是一个统一的客户端，它同时支持 Git 仓库和文件系统两种存储方式，为教师提供统一的界面来批量处理和评分学生作业，而无需关心底层的存储技术细节。
+
 ### 设计原则
 
 1. **用户友好性**: 隐藏技术细节，使用教育领域术语
@@ -11,6 +13,30 @@
 3. **统一接口**: Git 和文件系统使用统一的抽象层
 4. **性能优化**: 内存缓存机制，支持并发访问
 5. **安全性**: 凭据加密存储，路径验证
+
+### 关键设计决策
+
+1. **远程优先架构**: 选择直接访问远程 Git 仓库而非本地克隆，理由是：
+   - 消除本地存储空间占用
+   - 避免同步延迟和冲突
+   - 简化教师操作流程
+   - 降低系统维护复杂度
+
+2. **存储抽象层**: 使用适配器模式统一 Git 和文件系统访问，理由是：
+   - 为未来扩展其他存储方式（如云存储）提供灵活性
+   - 简化业务逻辑层代码
+   - 便于单元测试和模拟
+
+3. **内存缓存策略**: 使用 Django 缓存框架而非文件系统缓存，理由是：
+   - 提高远程访问性能
+   - 支持多进程共享缓存
+   - 自动过期管理
+   - 减少磁盘 I/O
+
+4. **术语重构**: 将"仓库"改为"作业配置"，理由是：
+   - 更符合教育场景的语言习惯
+   - 降低教师用户的学习成本
+   - 隐藏技术实现细节
 
 ## Architecture
 
@@ -234,7 +260,287 @@ class FileSystemStorageAdapter(StorageAdapter):
         return True
 ```
 
-### 5. AssignmentManagementService
+### 5. StudentSubmissionService
+
+```python
+class StudentSubmissionService:
+    """学生作业提交服务"""
+    
+    def get_student_courses(self, student: User) -> List[Course]:
+        """获取学生所在班级的课程列表
+        
+        Args:
+            student: 学生用户
+            
+        Returns:
+            课程列表
+        """
+        # 学生课程列表隔离（Requirement 9.1）
+        student_classes = student.profile.classes.all()
+        return Course.objects.filter(
+            class_obj__in=student_classes,
+            tenant=student.profile.tenant
+        ).distinct()
+    
+    def list_assignment_directories(
+        self,
+        assignment: Assignment,
+        student: User
+    ) -> Dict:
+        """列出作业次数目录
+        
+        Args:
+            assignment: 作业配置
+            student: 学生用户
+            
+        Returns:
+            包含目录列表和学生提交状态的字典
+        """
+        adapter = self._get_storage_adapter(assignment)
+        
+        try:
+            # 获取作业目录列表
+            entries = adapter.list_directory("")
+            
+            # 检查学生在每个目录中的提交状态
+            directories = []
+            for entry in entries:
+                if entry["type"] == "dir":
+                    has_submission = self._check_student_submission(
+                        adapter, entry["name"], student
+                    )
+                    directories.append({
+                        "name": entry["name"],
+                        "has_submission": has_submission,
+                        "submission_file": self._get_student_file(
+                            adapter, entry["name"], student
+                        ) if has_submission else None
+                    })
+            
+            return {
+                "success": True,
+                "directories": directories
+            }
+        except Exception as e:
+            logger.error(f"列出作业目录失败: {e}")
+            return {
+                "success": False,
+                "error": "无法获取作业列表，请稍后重试"
+            }
+    
+    def create_assignment_directory(
+        self,
+        assignment: Assignment,
+        student: User
+    ) -> Dict:
+        """创建新的作业次数目录
+        
+        根据现有目录自动生成下一个作业次数名称。
+        
+        Args:
+            assignment: 作业配置
+            student: 学生用户
+            
+        Returns:
+            包含新目录名称的字典
+        """
+        adapter = self._get_storage_adapter(assignment)
+        
+        try:
+            # 获取现有作业次数
+            entries = adapter.list_directory("")
+            existing_numbers = self._extract_assignment_numbers(entries)
+            
+            # 生成新的作业次数名称（Requirement 9.3, 9.4）
+            new_dir_name = PathValidator.generate_assignment_number_name(
+                existing_numbers
+            )
+            
+            # 创建目录（Requirement 4.4, 9.8）
+            adapter.create_directory(new_dir_name)
+            
+            return {
+                "success": True,
+                "directory_name": new_dir_name
+            }
+        except Exception as e:
+            logger.error(f"创建作业目录失败: {e}")
+            return {
+                "success": False,
+                "error": "无法创建作业目录，请稍后重试"
+            }
+    
+    def submit_assignment_file(
+        self,
+        assignment: Assignment,
+        student: User,
+        directory_name: str,
+        file: UploadedFile
+    ) -> Dict:
+        """提交作业文件
+        
+        Args:
+            assignment: 作业配置
+            student: 学生用户
+            directory_name: 作业次数目录名
+            file: 上传的文件
+            
+        Returns:
+            提交结果字典
+        """
+        # 验证文件格式（Requirement 9.6）
+        if not self._validate_file_format(file.name):
+            return {
+                "success": False,
+                "error": "不支持的文件格式，请上传 docx、pdf、zip、txt、jpg 或 png 文件"
+            }
+        
+        # 验证文件大小
+        if not self._validate_file_size(file.size):
+            return {
+                "success": False,
+                "error": "文件大小超过限制（最大 10MB）"
+            }
+        
+        # 处理文件名（Requirement 4.3, 9.5）
+        processed_filename = self._process_filename(file.name, student)
+        
+        # 构建文件路径（Requirement 4.2）
+        file_path = f"{directory_name}/{processed_filename}"
+        
+        adapter = self._get_storage_adapter(assignment)
+        
+        try:
+            # 写入文件（Requirement 9.7 - 覆盖旧文件）
+            adapter.write_file(file_path, file.read())
+            
+            return {
+                "success": True,
+                "filename": processed_filename,
+                "message": "作业提交成功"
+            }
+        except Exception as e:
+            logger.error(f"提交作业失败: {e}")
+            return {
+                "success": False,
+                "error": "文件上传失败，请稍后重试"
+            }
+    
+    def _validate_file_format(self, filename: str) -> bool:
+        """验证文件格式"""
+        allowed_extensions = {'.docx', '.pdf', '.zip', '.txt', '.jpg', '.png'}
+        ext = os.path.splitext(filename)[1].lower()
+        return ext in allowed_extensions
+    
+    def _validate_file_size(self, size: int) -> bool:
+        """验证文件大小"""
+        max_size = 10 * 1024 * 1024  # 10MB
+        return size <= max_size
+    
+    def _process_filename(self, filename: str, student: User) -> str:
+        """处理文件名，确保包含学生姓名
+        
+        如果文件名不包含学生姓名，自动添加前缀。
+        """
+        student_name = student.profile.name or student.username
+        
+        # 检查文件名是否已包含学生姓名（Requirement 4.8, 11）
+        if student_name not in filename:
+            # 添加学生姓名前缀（Requirement 9.5）
+            name, ext = os.path.splitext(filename)
+            filename = f"{student_name}-{name}{ext}"
+        
+        return filename
+    
+    def _check_student_submission(
+        self,
+        adapter: StorageAdapter,
+        directory: str,
+        student: User
+    ) -> bool:
+        """检查学生在指定目录中是否有提交"""
+        student_name = student.profile.name or student.username
+        
+        try:
+            entries = adapter.list_directory(directory)
+            return any(student_name in entry["name"] for entry in entries)
+        except:
+            return False
+    
+    def _get_student_file(
+        self,
+        adapter: StorageAdapter,
+        directory: str,
+        student: User
+    ) -> str:
+        """获取学生在指定目录中的文件名"""
+        student_name = student.profile.name or student.username
+        
+        try:
+            entries = adapter.list_directory(directory)
+            for entry in entries:
+                if student_name in entry["name"]:
+                    return entry["name"]
+        except:
+            pass
+        
+        return None
+    
+    def _extract_assignment_numbers(self, entries: List[Dict]) -> List[int]:
+        """从目录列表中提取作业次数"""
+        import re
+        numbers = []
+        
+        for entry in entries:
+            if entry["type"] == "dir":
+                # 匹配 "第N次作业" 或 "第N次实验" 格式
+                match = re.search(r'第(\d+|[一二三四五六七八九十]+)次', entry["name"])
+                if match:
+                    num_str = match.group(1)
+                    # 转换中文数字或阿拉伯数字
+                    try:
+                        numbers.append(int(num_str))
+                    except ValueError:
+                        # 中文数字转换
+                        num = self._chinese_to_number(num_str)
+                        if num:
+                            numbers.append(num)
+        
+        return numbers
+    
+    def _chinese_to_number(self, chinese: str) -> int:
+        """中文数字转阿拉伯数字"""
+        chinese_map = {
+            '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+            '六': 6, '七': 7, '八': 8, '九': 9, '十': 10
+        }
+        
+        if chinese in chinese_map:
+            return chinese_map[chinese]
+        elif chinese.startswith('十'):
+            if len(chinese) == 1:
+                return 10
+            else:
+                return 10 + chinese_map.get(chinese[1], 0)
+        
+        return None
+    
+    def _get_storage_adapter(self, assignment: Assignment) -> StorageAdapter:
+        """获取存储适配器"""
+        if assignment.storage_type == "git":
+            return GitStorageAdapter(
+                git_url=assignment.git_url,
+                branch=assignment.git_branch,
+                username=assignment.git_username,
+                password=CredentialEncryption.decrypt(
+                    assignment.git_password_encrypted
+                )
+            )
+        else:
+            return FileSystemStorageAdapter(assignment.base_path)
+```
+
+### 6. AssignmentManagementService
 
 ```python
 class AssignmentManagementService:
@@ -249,11 +555,36 @@ class AssignmentManagementService:
         storage_type: str,
         **kwargs
     ) -> Assignment:
-        """创建作业配置"""
+        """创建作业配置
+        
+        验证输入并创建作业配置记录。对于文件系统类型，自动生成并创建目录结构。
+        
+        Args:
+            teacher: 创建作业的教师用户
+            course: 关联的课程
+            class_obj: 关联的班级
+            name: 作业名称
+            storage_type: 存储类型（git/filesystem）
+            **kwargs: 其他配置参数（git_url, git_branch等）
+            
+        Returns:
+            创建的 Assignment 对象
+            
+        Raises:
+            ValidationError: 输入验证失败
+            DuplicateAssignmentError: 作业配置已存在
+        """
         
         # 验证输入
         self._validate_assignment_name(name)
         self._validate_course_class(course, class_obj)
+        
+        # 检查重复配置（Requirement 8.5）
+        if self._check_duplicate_assignment(teacher, course, class_obj, name):
+            raise DuplicateAssignmentError(
+                f"作业配置已存在: {course.name}/{class_obj.name}/{name}",
+                "该课程和班级已存在同名作业配置，请使用不同的名称"
+            )
         
         # 创建作业记录
         assignment = Assignment.objects.create(
@@ -266,7 +597,7 @@ class AssignmentManagementService:
             **kwargs
         )
         
-        # 如果是文件系统类型，创建基础目录
+        # 如果是文件系统类型，创建基础目录（Requirement 4.1, 4.6）
         if storage_type == "filesystem":
             base_path = self._generate_base_path(course, class_obj)
             assignment.base_path = base_path
@@ -277,8 +608,57 @@ class AssignmentManagementService:
         
         return assignment
     
+    def list_assignments(
+        self,
+        teacher: User,
+        course: Course = None,
+        class_obj: Class = None
+    ) -> QuerySet:
+        """获取教师的作业配置列表
+        
+        只返回该教师创建的作业，支持按课程和班级筛选。
+        
+        Args:
+            teacher: 教师用户
+            course: 可选的课程筛选
+            class_obj: 可选的班级筛选
+            
+        Returns:
+            作业配置查询集
+        """
+        # 教师隔离（Requirement 5.1）
+        queryset = Assignment.objects.filter(
+            owner=teacher,
+            tenant=teacher.profile.tenant,
+            is_active=True
+        ).select_related('course', 'class_obj')
+        
+        # 课程和班级筛选（Requirement 7.4）
+        if course:
+            queryset = queryset.filter(course=course)
+        if class_obj:
+            queryset = queryset.filter(class_obj=class_obj)
+        
+        return queryset
+    
     def get_assignment_structure(self, assignment: Assignment, path: str = "") -> Dict:
-        """获取作业目录结构"""
+        """获取作业目录结构
+        
+        直接从远程仓库或本地文件系统读取目录结构。
+        
+        Args:
+            assignment: 作业配置对象
+            path: 相对路径（默认为根目录）
+            
+        Returns:
+            包含目录结构的字典，格式：
+            {
+                "success": True/False,
+                "path": "路径",
+                "entries": [{"name": "文件名", "type": "file/dir", ...}],
+                "error": "错误消息"（仅在失败时）
+            }
+        """
         adapter = self._get_storage_adapter(assignment)
         
         try:
@@ -288,12 +668,105 @@ class AssignmentManagementService:
                 "path": path,
                 "entries": entries
             }
+        except RemoteAccessError as e:
+            # 友好的错误消息（Requirement 3.5）
+            logger.error(f"获取作业结构失败: {e.message}", extra={
+                "assignment_id": assignment.id,
+                "path": path,
+                "user_message": e.user_message
+            })
+            return {
+                "success": False,
+                "error": e.user_message
+            }
         except Exception as e:
-            logger.error(f"获取作业结构失败: {e}")
+            logger.error(f"获取作业结构失败: {e}", extra={
+                "assignment_id": assignment.id,
+                "path": path
+            })
             return {
                 "success": False,
                 "error": "无法访问作业目录，请检查配置或稍后重试"
             }
+    
+    def update_assignment(
+        self,
+        assignment: Assignment,
+        **kwargs
+    ) -> Assignment:
+        """更新作业配置
+        
+        更新作业配置，保护已提交的学生作业数据。
+        
+        Args:
+            assignment: 要更新的作业配置
+            **kwargs: 要更新的字段
+            
+        Returns:
+            更新后的 Assignment 对象
+        """
+        # 保护关键字段，避免破坏已提交的作业（Requirement 5.4）
+        protected_fields = {'course', 'class_obj', 'storage_type'}
+        for field in protected_fields:
+            if field in kwargs and getattr(assignment, field) != kwargs[field]:
+                logger.warning(f"尝试修改受保护字段: {field}")
+                # 可以选择抛出异常或忽略
+        
+        # 更新允许的字段
+        for key, value in kwargs.items():
+            if key not in protected_fields and hasattr(assignment, key):
+                setattr(assignment, key, value)
+        
+        assignment.save()
+        return assignment
+    
+    def delete_assignment(self, assignment: Assignment) -> Dict:
+        """删除作业配置
+        
+        软删除作业配置，保留已提交的学生作业数据。
+        
+        Args:
+            assignment: 要删除的作业配置
+            
+        Returns:
+            包含删除结果的字典
+        """
+        # 检查是否有已提交的作业
+        submission_count = assignment.submissions.count()
+        
+        # 软删除（Requirement 5.5）
+        assignment.is_active = False
+        assignment.save()
+        
+        return {
+            "success": True,
+            "message": f"作业配置已删除，保留了 {submission_count} 份学生作业"
+        }
+    
+    def _check_duplicate_assignment(
+        self,
+        teacher: User,
+        course: Course,
+        class_obj: Class,
+        name: str
+    ) -> bool:
+        """检查是否存在重复的作业配置"""
+        return Assignment.objects.filter(
+            owner=teacher,
+            course=course,
+            class_obj=class_obj,
+            name=name,
+            is_active=True
+        ).exists()
+    
+    def _generate_base_path(self, course: Course, class_obj: Class) -> str:
+        """生成文件系统基础路径
+        
+        格式: <课程名称>/<班级名称>/
+        """
+        course_name = PathValidator.sanitize_name(course.name)
+        class_name = PathValidator.sanitize_name(class_obj.name)
+        return f"{course_name}/{class_name}/"
     
     def _get_storage_adapter(self, assignment: Assignment) -> StorageAdapter:
         """获取存储适配器"""
@@ -306,10 +779,81 @@ class AssignmentManagementService:
             )
         else:
             return FileSystemStorageAdapter(assignment.base_path)
+    
+    def _decrypt_password(self, encrypted: str) -> str:
+        """解密密码"""
+        return CredentialEncryption.decrypt(encrypted)
+    
+    def _validate_assignment_name(self, name: str):
+        """验证作业名称
+        
+        Raises:
+            ValidationError: 名称无效
+        """
+        if not name or not name.strip():
+            raise ValidationError("作业名称不能为空", "请输入作业名称")
+        
+        # 验证不包含非法字符（Requirement 8.1）
+        if not PathValidator.validate_name(name):
+            raise ValidationError(
+                f"作业名称包含非法字符: {name}",
+                "作业名称不能包含特殊字符，如 / \\ : * ? \" < > |"
+            )
+    
+    def _validate_course_class(self, course: Course, class_obj: Class):
+        """验证课程和班级关联
+        
+        Raises:
+            ValidationError: 课程和班级不匹配
+        """
+        if class_obj.course != course:
+            raise ValidationError(
+                f"班级 {class_obj.name} 不属于课程 {course.name}",
+                "所选班级不属于该课程，请重新选择"
+            )
 ```
 
 
 ## Data Models
+
+### Course and Class Relationship
+
+为支持 Requirement 7（为不同课程和班级创建独立作业配置），需要明确课程和班级的关系：
+
+**关系模型**:
+```
+Course (课程)
+  ├── name: 课程名称（如"数据结构"）
+  ├── teacher: 授课教师
+  └── classes: 关联的班级列表
+
+Class (班级)
+  ├── name: 班级名称（如"计算机1班"）
+  ├── course: 所属课程
+  └── students: 班级学生列表
+
+Assignment (作业配置)
+  ├── course: 关联课程
+  ├── class_obj: 关联班级
+  └── 约束: class_obj.course == course
+```
+
+**业务规则**:
+1. 一个课程可以有多个班级（Requirement 7.3）
+2. 一个班级只能属于一个课程
+3. 作业配置必须同时关联课程和班级
+4. 同一课程的不同班级有独立的作业目录（Requirement 7.3）
+
+**目录隔离示例**:
+```
+数据结构/
+  ├── 计算机1班/
+  │   ├── 第一次作业/
+  │   └── 第二次作业/
+  └── 计算机2班/
+      ├── 第一次作业/
+      └── 第二次作业/
+```
 
 ### Assignment Model 字段说明
 
@@ -944,6 +1488,57 @@ class PathValidator:
     }
     
     @classmethod
+    def validate_name(cls, name: str) -> bool:
+        """验证名称是否包含非法字符
+        
+        Args:
+            name: 要验证的名称
+            
+        Returns:
+            True 如果名称有效，False 如果包含非法字符
+        """
+        if not name or not name.strip():
+            return False
+        
+        # 检查是否包含非法字符（Requirement 8.1, 8.2）
+        return not any(char in name for char in cls.ILLEGAL_CHARS)
+    
+    @classmethod
+    def validate_assignment_number_format(cls, name: str) -> bool:
+        """验证作业次数格式
+        
+        Args:
+            name: 作业次数名称
+            
+        Returns:
+            True 如果格式正确
+        """
+        import re
+        # 匹配 "第N次作业" 或 "第N次实验" 格式（Requirement 8.3）
+        pattern = r'^第(\d+|[一二三四五六七八九十]+)次(作业|实验)$'
+        return bool(re.match(pattern, name))
+    
+    @classmethod
+    def validate_git_url(cls, url: str) -> bool:
+        """验证 Git URL 格式
+        
+        Args:
+            url: Git 仓库 URL
+            
+        Returns:
+            True 如果格式正确
+        """
+        import re
+        # 支持 http/https/git/ssh 协议（Requirement 8.4）
+        patterns = [
+            r'^https?://[^\s]+\.git$',  # https://github.com/user/repo.git
+            r'^git@[^\s]+:[^\s]+\.git$',  # git@github.com:user/repo.git
+            r'^git://[^\s]+\.git$',  # git://github.com/user/repo.git
+            r'^ssh://[^\s]+\.git$',  # ssh://git@github.com/user/repo.git
+        ]
+        return any(re.match(pattern, url) for pattern in patterns)
+    
+    @classmethod
     def sanitize_name(cls, name: str) -> str:
         """清理名称中的非法字符"""
         if not name:
@@ -1055,6 +1650,58 @@ class CredentialEncryption:
 ```
 
 
+## Documentation and Help
+
+### 用户帮助文档
+
+为满足 Requirement 1.4 和 6.3，系统需要提供面向教师的帮助文档：
+
+**帮助文档内容**:
+
+1. **作业管理快速入门**
+   - 如何创建作业配置
+   - Git 仓库方式 vs 文件上传方式的选择
+   - 课程和班级的关联
+
+2. **Git 仓库配置指南**
+   - 如何获取 Git 仓库 URL
+   - 分支选择说明
+   - 认证凭据配置
+
+3. **文件上传方式指南**
+   - 目录结构说明
+   - 学生提交流程
+   - 文件命名规范
+
+4. **常见问题解答**
+   - 无法访问远程仓库怎么办
+   - 如何修改作业配置
+   - 如何查看学生提交情况
+
+5. **故障排查**
+   - 常见错误消息及解决方案
+   - 联系技术支持的方式
+
+**帮助文档位置**:
+- 每个页面右上角的"帮助"链接
+- 表单字段的提示图标
+- 错误消息中的"了解更多"链接
+
+**实现方式**:
+```python
+# 在模板中添加帮助链接
+<a href="{% url 'grading:help' section='assignment-management' %}" 
+   class="help-link" target="_blank">
+    <i class="fa fa-question-circle"></i> 帮助
+</a>
+
+# 字段级帮助提示
+<span class="help-tooltip" data-toggle="tooltip" 
+      title="Git 仓库 URL 格式示例: https://github.com/user/repo.git">
+    <i class="fa fa-info-circle"></i>
+</span>
+```
+
 ## UI/UX Changes
 
 ### 术语映射
@@ -1101,33 +1748,81 @@ class CredentialEncryption:
 
 #### 2. 创建/编辑作业配置页
 
+**动态表单行为** (Requirement 2.2):
+
+当用户选择不同的提交方式时，表单动态显示相应的配置字段：
+
+- **选择 "Git仓库"**: 显示 Git URL、分支、用户名、密码字段
+- **选择 "文件上传"**: 隐藏 Git 配置，显示目录结构说明
+
+**JavaScript 实现**:
+```javascript
+// 动态切换表单字段
+document.querySelectorAll('input[name="storage_type"]').forEach(radio => {
+    radio.addEventListener('change', function() {
+        const gitFields = document.getElementById('git-config-fields');
+        const fsFields = document.getElementById('filesystem-config-fields');
+        
+        if (this.value === 'git') {
+            gitFields.style.display = 'block';
+            fsFields.style.display = 'none';
+            // 设置 Git 字段为必填
+            document.getElementById('id_git_url').required = true;
+            document.getElementById('id_git_branch').required = true;
+        } else {
+            gitFields.style.display = 'none';
+            fsFields.style.display = 'block';
+            // 移除 Git 字段的必填要求
+            document.getElementById('id_git_url').required = false;
+            document.getElementById('id_git_branch').required = false;
+        }
+    });
+});
+```
+
 **表单结构**:
 ```
 ┌─────────────────────────────────────────────────────────┐
 │ 创建作业配置                                             │
 ├─────────────────────────────────────────────────────────┤
 │ 基本信息                                                 │
-│   作业名称: [________________]                          │
-│   课程:     [选择课程 ▼]                                │
-│   班级:     [选择班级 ▼]                                │
+│   作业名称: [________________] *必填                    │
+│   课程:     [选择课程 ▼] *必填                          │
+│   班级:     [选择班级 ▼] *必填                          │
 │   描述:     [________________]                          │
 │                                                          │
-│ 提交方式                                                 │
+│ 提交方式 *必填                                           │
 │   ○ Git仓库    ● 文件上传                               │
 │                                                          │
 │ [Git仓库配置] (当选择Git仓库时显示)                      │
-│   仓库URL:  [https://github.com/...    ]               │
-│   分支:     [main                      ]               │
-│   用户名:   [________________]                          │
-│   密码:     [****************]                          │
+│   仓库URL:  [https://github.com/...    ] *必填 ⓘ       │
+│   分支:     [main                      ] *必填          │
+│   用户名:   [________________] (可选)                   │
+│   密码:     [****************] (可选)                   │
+│   [测试连接] 按钮                                        │
 │                                                          │
 │ [文件上传配置] (当选择文件上传时显示)                     │
 │   系统将自动创建目录结构:                                │
 │   <课程名称>/<班级名称>/<作业次数>/                      │
+│   例如: 数据结构/计算机1班/第一次作业/                   │
 │                                                          │
 │                              [取消] [保存]               │
 └─────────────────────────────────────────────────────────┘
+
+注: ⓘ 表示有帮助提示图标
 ```
+
+**表单验证** (Requirement 2.5):
+
+前端验证:
+- 必填字段检查
+- Git URL 格式验证
+- 课程和班级关联验证
+
+后端验证:
+- 所有前端验证的重复检查
+- 重复配置检查 (Requirement 8.5)
+- Git 仓库可访问性验证 (可选)
 
 #### 3. 学生作业提交页
 
@@ -1155,20 +1850,43 @@ class CredentialEncryption:
 
 #### 4. 评分界面
 
-**移除的元素**:
+**移除的元素** (Requirement 6.1, 6.4):
 - "同步仓库"按钮
 - "切换分支"选项
+- "克隆"、"拉取"、"推送"等 Git 操作按钮
 - 本地路径显示
+- "最后同步时间"显示
 
 **保留的元素**:
 - 目录树浏览
 - 文件内容查看
 - 评分和评语输入
+- 批量评分功能
+
+**新增元素** (Requirement 6.5):
+- 远程仓库实时状态指示器
+- 数据来源标签（"来自 Git 仓库" 或 "来自本地文件"）
+- 刷新按钮（清除缓存，重新获取远程数据）
 
 **改进**:
 - 添加加载指示器（远程读取时）
+  ```html
+  <div class="loading-indicator" style="display: none;">
+      <i class="fa fa-spinner fa-spin"></i> 正在从远程仓库读取...
+  </div>
+  ```
 - 显示文件来源（Git/本地）
+  ```html
+  <span class="badge badge-info">
+      <i class="fa fa-git"></i> Git 仓库
+  </span>
+  ```
 - 优化大文件预览
+  - 文件大小超过 1MB 时显示下载链接而非直接预览
+  - 支持常见格式的在线预览（PDF、图片、文本）
+- 错误处理
+  - 网络超时时显示友好提示
+  - 提供重试按钮
 
 ### 错误提示改进
 
@@ -1387,4 +2105,75 @@ def validate_file_size(file_size: int) -> bool:
 - [ ] 错误监控已启用
 - [ ] 性能监控已启用
 - [ ] 备份策略已确认
+
+## Requirements Coverage Summary
+
+本设计文档完整覆盖了需求文档中的所有 10 个需求：
+
+### Requirement 1: 术语重构
+- ✅ 导航菜单和页面标题更新为"作业管理"
+- ✅ 使用教育领域术语替代技术术语
+- ✅ 提供面向教师的帮助文档
+
+### Requirement 2: 简化配置流程
+- ✅ 提供 Git 仓库和文件上传两种清晰选项
+- ✅ 动态表单字段显示
+- ✅ 完整的表单验证
+
+### Requirement 3: 远程仓库直接访问
+- ✅ 移除同步按钮和 Git 操作
+- ✅ 使用 Git 远程命令（ls-tree, show）直接读取
+- ✅ 友好的错误消息处理
+- ✅ 无本地克隆约束
+
+### Requirement 4: 自动目录结构
+- ✅ 基于课程和班级生成目录路径
+- ✅ 标准化的目录结构（<课程>/<班级>/<作业次数>/）
+- ✅ 文件名包含学生姓名验证
+- ✅ 自动创建目录
+- ✅ 特殊字符处理
+
+### Requirement 5: 作业配置管理
+- ✅ 教师作业列表隔离
+- ✅ 完整的 CRUD 操作
+- ✅ 编辑时保护已提交数据
+- ✅ 删除确认机制
+
+### Requirement 6: 简洁界面
+- ✅ 移除所有 Git 技术操作按钮
+- ✅ 只显示必要信息
+- ✅ 提供帮助链接
+- ✅ 显示远程仓库实时状态
+
+### Requirement 7: 多课程多班级支持
+- ✅ 课程和班级选择器
+- ✅ 独立的班级目录
+- ✅ 按课程和班级筛选
+- ✅ 清晰的课程区分
+
+### Requirement 8: 输入验证
+- ✅ 课程名称验证
+- ✅ 班级名称验证
+- ✅ 作业次数格式验证
+- ✅ Git URL 格式验证
+- ✅ 重复配置检查
+- ✅ 清晰的错误消息
+
+### Requirement 9: 学生作业提交
+- ✅ 学生课程列表隔离
+- ✅ 作业次数目录列表
+- ✅ 一键创建新作业目录
+- ✅ 自动命名规范
+- ✅ 文件名自动处理
+- ✅ 文件格式验证
+- ✅ 文件覆盖规则
+
+### Requirement 10: 远程访问架构
+- ✅ Git 远程命令使用
+- ✅ 内存缓存机制
+- ✅ 缓存自动刷新
+- ✅ 缓存共享
+- ✅ 凭据安全存储
+
+所有 30 个正确性属性都已在设计中体现，并将在实现阶段通过属性测试验证。
 

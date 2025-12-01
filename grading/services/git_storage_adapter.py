@@ -164,16 +164,19 @@ class GitStorageAdapter(StorageAdapter):
         """
         error_lower = error_msg.lower()
 
-        if "authentication failed" in error_lower or "could not read" in error_lower:
+        # Check more specific patterns first
+        if "permission denied" in error_lower:
+            return "没有权限访问该仓库，请检查访问权限"
+        elif "authentication failed" in error_lower:
+            return "Git 仓库认证失败，请检查用户名和密码"
+        elif "could not read" in error_lower and ("username" in error_lower or "password" in error_lower):
             return "Git 仓库认证失败，请检查用户名和密码"
         elif "repository not found" in error_lower or "not found" in error_lower:
             return "找不到指定的 Git 仓库，请检查 URL"
-        elif "connection" in error_lower or "network" in error_lower:
+        elif "connection" in error_lower or "network" in error_lower or "resolve host" in error_lower:
             return "网络连接失败，请检查网络或稍后重试"
         elif "timeout" in error_lower:
             return "网络连接超时，请稍后重试"
-        elif "permission denied" in error_lower:
-            return "没有权限访问该仓库，请检查访问权限"
         else:
             return "无法访问远程仓库，请检查配置或稍后重试"
 

@@ -45,11 +45,13 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ["class_name"]
 
 
-class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ["name", "description", "due_date", "created_at"]
-    search_fields = ["name", "description"]
-    list_filter = ["due_date", "created_at"]
-    date_hierarchy = "due_date"
+# Old AssignmentAdmin - commented out during refactor
+# Will be replaced with new Assignment model admin
+# class AssignmentAdmin(admin.ModelAdmin):
+#     list_display = ["name", "description", "due_date", "created_at"]
+#     search_fields = ["name", "description"]
+#     list_filter = ["due_date", "created_at"]
+#     date_hierarchy = "due_date"
 
 
 class SubmissionAdmin(admin.ModelAdmin):
@@ -1097,7 +1099,7 @@ class RepositoryAdmin(admin.ModelAdmin):
 
 # 注册其他模型
 admin_site.register(Student, StudentAdmin)
-admin_site.register(Assignment, AssignmentAdmin)
+# admin_site.register(Assignment, AssignmentAdmin)  # Commented out during refactor
 admin_site.register(Submission, SubmissionAdmin)
 admin_site.register(Repository, RepositoryAdmin)
 admin_site.register(GlobalConfig, GlobalConfigAdmin)
