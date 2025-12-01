@@ -12,6 +12,8 @@ from django.utils import timezone
 
 from grading.models import (
     Assignment,
+    Class,
+    CommentTemplate,
     Course,
     CourseSchedule,
     CourseWeekSchedule,
@@ -424,3 +426,400 @@ class CourseWeekScheduleModelTest(BaseTestCase):
             CourseWeekSchedule.objects.create(
                 course_schedule=self.schedule, week_number=5, is_active=False
             )
+
+
+class CourseModelPropertyTest(BaseTestCase):
+    """课程模型属性测试 - Property 1: 课程创建完整性"""
+
+    def setUp(self):
+        super().setUp()
+        self.semester = Semester.objects.create(
+            name="2024年春季学期", start_date=date(2024, 2, 26), end_date=date(2024, 6, 30)
+        )
+
+    def test_course_creation_integrity_all_fields(self):
+        """Property 1: 测试课程创建包含所有指定字段
+        For any valid course data (name, type, description),
+        creating a course should result in a database record
+        containing all specified fields with correct values.
+        Validates: Requirements 1.1
+        """
+        # 测试数据
+        course_data = {
+            "semester": self.semester,
+            "teacher": self.teacher_user,
+            "name": "数据结构与算法",
+            "course_type": "theory",
+            "description": "这是一门关于数据结构的课程",
+        }
+
+        # 创建课程
+        course = Course.objects.create(**course_data)
+
+        # 验证所有字段都正确保存
+        self.assertEqual(course.name, course_data["name"])
+        self.assertEqual(course.course_type, course_data["course_type"])
+        self.assertEqual(course.description, course_data["description"])
+        self.assertEqual(course.semester, course_data["semester"])
+        self.assertEqual(course.teacher, course_data["teacher"])
+
+        # 验证从数据库重新查询也能获取正确的值
+        retrieved_course = Course.objects.get(pk=course.pk)
+        self.assertEqual(retrieved_course.name, course_data["name"])
+        self.assertEqual(retrieved_course.course_type, course_data["course_type"])
+        self.assertEqual(retrieved_course.description, course_data["description"])
+
+    def test_course_creation_integrity_all_types(self):
+        """Property 1: 测试所有课程类型的创建完整性"""
+        course_types = ["theory", "lab", "practice", "mixed"]
+
+        for course_type in course_types:
+            with self.subTest(course_type=course_type):
+                course = Course.objects.create(
+                    semester=self.semester,
+                    teacher=self.teacher_user,
+                    name=f"测试课程-{course_type}",
+                    course_type=course_type,
+                    description=f"测试{course_type}类型课程",
+                )
+
+                # 验证课程类型正确保存
+                self.assertEqual(course.course_type, course_type)
+
+                # 从数据库重新查询验证
+                retrieved = Course.objects.get(pk=course.pk)
+                self.assertEqual(retrieved.course_type, course_type)
+
+
+class ClassModelTest(BaseTestCase):
+    """班级模型测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant = Tenant.objects.create(name="测试租户")
+        self.semester = Semester.objects.create(
+            name="2024年春季学期", start_date=date(2024, 2, 26), end_date=date(2024, 6, 30)
+        )
+        self.course = Course.objects.create(
+            semester=self.semester,
+            teacher=self.teacher_user,
+            name="Python程序设计",
+            course_type="theory",
+        )
+
+    def test_create_class(self):
+        """测试创建班级"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        self.assertEqual(class_obj.name, "计算机1班")
+        self.assertEqual(class_obj.student_count, 30)
+        self.assertEqual(class_obj.course, self.course)
+        self.assertEqual(class_obj.tenant, self.tenant)
+
+    def test_class_course_association(self):
+        """测试班级与课程的关联"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        # 验证班级关联到正确的课程
+        self.assertEqual(class_obj.course, self.course)
+
+        # 验证可以通过课程反向查询班级
+        classes = self.course.classes.all()
+        self.assertIn(class_obj, classes)
+
+    def test_class_str_representation(self):
+        """测试班级字符串表示"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        expected = f"{self.course.name} - 计算机1班"
+        self.assertEqual(str(class_obj), expected)
+
+    def test_multiple_classes_per_course(self):
+        """测试一个课程可以有多个班级"""
+        from grading.models import Class
+
+        class1 = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+        class2 = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机2班", student_count=28
+        )
+
+        classes = self.course.classes.all()
+        self.assertEqual(classes.count(), 2)
+        self.assertIn(class1, classes)
+        self.assertIn(class2, classes)
+
+
+class RepositoryModelExtendedTest(BaseTestCase):
+    """仓库模型扩展测试 - 测试两种配置方式"""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant = Tenant.objects.create(name="测试租户")
+        self.semester = Semester.objects.create(
+            name="2024年春季学期", start_date=date(2024, 2, 26), end_date=date(2024, 6, 30)
+        )
+        self.course = Course.objects.create(
+            semester=self.semester,
+            teacher=self.teacher_user,
+            name="Python程序设计",
+            course_type="theory",
+        )
+
+    def test_create_git_repository(self):
+        """测试创建Git仓库配置"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        repo = Repository.objects.create(
+            owner=self.teacher_user,
+            tenant=self.tenant,
+            class_obj=class_obj,
+            name="Git仓库",
+            repo_type="git",
+            git_url="https://github.com/test/repo.git",
+            git_branch="main",
+            git_username="testuser",
+            git_password="testpass",
+            description="Git仓库测试",
+        )
+
+        self.assertEqual(repo.repo_type, "git")
+        self.assertEqual(repo.git_url, "https://github.com/test/repo.git")
+        self.assertEqual(repo.git_branch, "main")
+        self.assertEqual(repo.git_username, "testuser")
+        self.assertEqual(repo.class_obj, class_obj)
+
+    def test_create_filesystem_repository(self):
+        """测试创建文件系统仓库配置"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        repo = Repository.objects.create(
+            owner=self.teacher_user,
+            tenant=self.tenant,
+            class_obj=class_obj,
+            name="文件系统仓库",
+            repo_type="filesystem",
+            filesystem_path="/home/teacher/repos/class1",
+            allocated_space_mb=2048,
+            description="文件系统仓库测试",
+        )
+
+        self.assertEqual(repo.repo_type, "filesystem")
+        self.assertEqual(repo.filesystem_path, "/home/teacher/repos/class1")
+        self.assertEqual(repo.allocated_space_mb, 2048)
+        self.assertEqual(repo.class_obj, class_obj)
+
+    def test_repository_type_switching(self):
+        """测试仓库类型配置"""
+        from grading.models import Class
+
+        class_obj = Class.objects.create(
+            tenant=self.tenant, course=self.course, name="计算机1班", student_count=30
+        )
+
+        # 创建Git仓库
+        repo = Repository.objects.create(
+            owner=self.teacher_user,
+            tenant=self.tenant,
+            class_obj=class_obj,
+            name="混合仓库",
+            repo_type="git",
+            git_url="https://github.com/test/repo.git",
+        )
+
+        self.assertEqual(repo.repo_type, "git")
+
+        # 切换到文件系统方式
+        repo.repo_type = "filesystem"
+        repo.filesystem_path = "/home/teacher/repos/mixed"
+        repo.save()
+
+        retrieved = Repository.objects.get(pk=repo.pk)
+        self.assertEqual(retrieved.repo_type, "filesystem")
+        self.assertEqual(retrieved.filesystem_path, "/home/teacher/repos/mixed")
+
+    def test_repository_is_git_repository(self):
+        """测试判断是否为Git仓库"""
+        git_repo = Repository.objects.create(
+            owner=self.teacher_user,
+            tenant=self.tenant,
+            name="Git仓库",
+            repo_type="git",
+            url="https://github.com/test/repo.git",
+        )
+
+        fs_repo = Repository.objects.create(
+            owner=self.teacher_user,
+            tenant=self.tenant,
+            name="文件系统仓库",
+            repo_type="filesystem",
+        )
+
+        self.assertTrue(git_repo.is_git_repository())
+        self.assertFalse(fs_repo.is_git_repository())
+
+
+class CommentTemplateModelTest(BaseTestCase):
+    """评价模板模型测试"""
+
+    def setUp(self):
+        super().setUp()
+        self.tenant = Tenant.objects.create(name="测试租户")
+
+    def test_create_personal_template(self):
+        """测试创建个人评价模板"""
+        from grading.models import CommentTemplate
+
+        template = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="作业完成得很好，继续保持！",
+            usage_count=5,
+        )
+
+        self.assertEqual(template.template_type, "personal")
+        self.assertEqual(template.teacher, self.teacher_user)
+        self.assertEqual(template.usage_count, 5)
+
+    def test_create_system_template(self):
+        """测试创建系统评价模板"""
+        from grading.models import CommentTemplate
+
+        template = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=None,
+            template_type="system",
+            comment_text="作业格式规范，内容完整。",
+            usage_count=10,
+        )
+
+        self.assertEqual(template.template_type, "system")
+        self.assertIsNone(template.teacher)
+        self.assertEqual(template.usage_count, 10)
+
+    def test_template_usage_count_increment(self):
+        """测试评价模板使用次数统计"""
+        from grading.models import CommentTemplate
+
+        template = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="需要改进代码结构",
+            usage_count=0,
+        )
+
+        # 模拟使用评价模板
+        template.usage_count += 1
+        template.save()
+
+        retrieved = CommentTemplate.objects.get(pk=template.pk)
+        self.assertEqual(retrieved.usage_count, 1)
+
+        # 再次使用
+        template.usage_count += 1
+        template.save()
+
+        retrieved = CommentTemplate.objects.get(pk=template.pk)
+        self.assertEqual(retrieved.usage_count, 2)
+
+    def test_template_sorting_by_usage_count(self):
+        """测试评价模板按使用次数排序"""
+        from grading.models import CommentTemplate
+
+        template1 = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="评价1",
+            usage_count=3,
+        )
+
+        template2 = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="评价2",
+            usage_count=10,
+        )
+
+        template3 = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="评价3",
+            usage_count=5,
+        )
+
+        # 查询并验证排序
+        templates = CommentTemplate.objects.filter(
+            tenant=self.tenant, teacher=self.teacher_user, template_type="personal"
+        ).order_by("-usage_count")
+
+        templates_list = list(templates)
+        self.assertEqual(templates_list[0], template2)  # usage_count=10
+        self.assertEqual(templates_list[1], template3)  # usage_count=5
+        self.assertEqual(templates_list[2], template1)  # usage_count=3
+
+    def test_template_limit_top_5(self):
+        """测试评价模板限制为前5个"""
+        from grading.models import CommentTemplate
+
+        # 创建7个模板
+        for i in range(7):
+            CommentTemplate.objects.create(
+                tenant=self.tenant,
+                teacher=self.teacher_user,
+                template_type="personal",
+                comment_text=f"评价{i}",
+                usage_count=i,
+            )
+
+        # 查询前5个
+        top_5 = CommentTemplate.objects.filter(
+            tenant=self.tenant, teacher=self.teacher_user, template_type="personal"
+        ).order_by("-usage_count")[:5]
+
+        self.assertEqual(len(list(top_5)), 5)
+
+        # 验证是使用次数最多的5个
+        usage_counts = [t.usage_count for t in top_5]
+        self.assertEqual(usage_counts, [6, 5, 4, 3, 2])
+
+    def test_template_str_representation(self):
+        """测试评价模板字符串表示"""
+        from grading.models import CommentTemplate
+
+        template = CommentTemplate.objects.create(
+            tenant=self.tenant,
+            teacher=self.teacher_user,
+            template_type="personal",
+            comment_text="这是一个很长的评价内容，用于测试字符串表示是否正确截断显示前50个字符",
+            usage_count=1,
+        )
+
+        str_repr = str(template)
+        self.assertIn(self.teacher_user.username, str_repr)
+        self.assertTrue(len(str_repr) < 100)  # 应该被截断

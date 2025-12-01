@@ -37,6 +37,33 @@ ALLOWED_EXTENSIONS = set(
     os.environ.get("ALLOWED_EXTENSIONS", "txt,pdf,png,jpg,jpeg,gif,doc,docx").split(",")
 )
 
+# 缓存配置
+# 使用本地内存缓存（开发环境）或Redis（生产环境）
+CACHES = {
+    "default": {
+        "BACKEND": os.environ.get(
+            "CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"
+        ),
+        "LOCATION": os.environ.get("CACHE_LOCATION", "unique-snowflake"),
+        "TIMEOUT": int(os.environ.get("CACHE_TIMEOUT", "300")),  # 默认5分钟
+        "OPTIONS": {
+            "MAX_ENTRIES": int(os.environ.get("CACHE_MAX_ENTRIES", "1000")),
+        },
+    }
+}
+
+# Redis配置（如果使用Redis作为缓存后端）
+# CACHES = {
+#     "default": {
+#         "BACKEND": "django.core.cache.backends.redis.RedisCache",
+#         "LOCATION": "redis://127.0.0.1:6379/1",
+#         "TIMEOUT": 300,
+#         "OPTIONS": {
+#             "CLIENT_CLASS": "django_redis.client.DefaultClient",
+#         },
+#     }
+# }
+
 # Application definition
 
 INSTALLED_APPS = [

@@ -16,11 +16,14 @@ from django.utils.html import format_html
 
 from .models import (
     Assignment,
+    Class,
+    CommentTemplate,
     Course,
     CourseSchedule,
     CourseWeekSchedule,
     GlobalConfig,
     GradeTypeConfig,
+    Homework,
     Repository,
     Semester,
     SemesterTemplate,
@@ -1195,8 +1198,8 @@ class CourseScheduleInline(admin.TabularInline):
 class CourseAdmin(admin.ModelAdmin):
     """课程管理界面"""
 
-    list_display = ("name", "semester", "teacher", "class_name", "location", "created_at")
-    list_filter = ("semester", "teacher", "created_at")
+    list_display = ("name", "semester", "teacher", "class_name", "location", "course_type", "created_at")
+    list_filter = ("semester", "teacher", "course_type", "created_at")
     search_fields = ("name", "description", "location", "class_name")
     ordering = ("semester", "name")
     readonly_fields = ("created_at", "updated_at")
@@ -1207,6 +1210,24 @@ class CourseAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         if not request.user.is_superuser:
             return qs.filter(teacher=request.user)
+        return qs
+
+
+@admin.register(Class)
+class ClassAdmin(admin.ModelAdmin):
+    """班级管理界面"""
+
+    list_display = ("name", "course", "student_count", "created_at")
+    list_filter = ("course", "created_at")
+    search_fields = ("name", "course__name")
+    ordering = ("course", "name")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request):
+        """只显示当前用户的班级"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(course__teacher=request.user)
         return qs
 
 
@@ -1246,3 +1267,46 @@ admin_site.register(SemesterTemplate, SemesterTemplateAdmin)
 admin_site.register(Course, CourseAdmin)
 admin_site.register(CourseSchedule, CourseScheduleAdmin)
 admin_site.register(CourseWeekSchedule, CourseWeekScheduleAdmin)
+
+
+@admin.register(Homework)
+class HomeworkAdmin(admin.ModelAdmin):
+    """作业管理界面"""
+
+    list_display = ("title", "course", "class_obj", "homework_type", "due_date", "created_at")
+    list_filter = ("course", "homework_type", "created_at")
+    search_fields = ("title", "description", "folder_name", "course__name")
+    ordering = ("course", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request):
+        """只显示当前用户的作业"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(course__teacher=request.user)
+        return qs
+
+
+@admin.register(CommentTemplate)
+class CommentTemplateAdmin(admin.ModelAdmin):
+    """评价模板管理界面"""
+
+    list_display = ("comment_text_short", "template_type", "teacher", "usage_count", "last_used_at")
+    list_filter = ("template_type", "teacher", "tenant")
+    search_fields = ("comment_text", "teacher__username")
+    ordering = ("-usage_count", "-last_used_at")
+    readonly_fields = ("usage_count", "last_used_at", "created_at")
+
+    def comment_text_short(self, obj):
+        """显示评价内容的前50个字符"""
+        return obj.comment_text[:50] + "..." if len(obj.comment_text) > 50 else obj.comment_text
+
+    comment_text_short.short_description = "评价内容"
+
+    def get_queryset(self, request):
+        """只显示当前用户的评价模板"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            # 显示个人模板和系统模板
+            return qs.filter(teacher=request.user) | qs.filter(template_type="system")
+        return qs

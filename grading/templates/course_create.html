@@ -1,0 +1,219 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>创建课程</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            height: 100px;
+            resize: vertical;
+        }
+
+        .required {
+            color: red;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+        }
+
+        .btn:hover {
+            background-color: #45a049;
+        }
+
+        .btn-secondary {
+            background-color: #666;
+        }
+
+        .btn-secondary:hover {
+            background-color: #555;
+        }
+
+        .form-actions {
+            margin-top: 30px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .semester-info {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .error-message {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .success-message {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>创建课程</h1>
+
+        {% if current_semester %}
+        <div class="semester-info">
+            <h3 style="margin-top: 0; color: #2e7d32;">当前学期：{{ current_semester.name }}</h3>
+            <p style="margin-bottom: 0;">
+                {{ current_semester.start_date|date:"Y年m月d日" }} - 
+                {{ current_semester.end_date|date:"Y年m月d日" }}
+            </p>
+        </div>
+        {% else %}
+        <div class="error-message">
+            请先在管理后台设置当前学期
+        </div>
+        {% endif %}
+
+        <form method="post" id="courseForm">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="name">课程名称 <span class="required">*</span></label>
+                <input type="text" id="name" name="name" required>
+                <div class="help-text">例如：数据结构、操作系统</div>
+            </div>
+
+            <div class="form-group">
+                <label for="course_type">课程类型 <span class="required">*</span></label>
+                <select id="course_type" name="course_type" required>
+                    <option value="">请选择课程类型</option>
+                    {% for value, label in course_types %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <div class="help-text">
+                    理论课：纯理论教学 | 实验课：纯实验教学 | 实践课：实践项目 | 混合课：理论+实验
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label for="description">课程描述</label>
+                <textarea id="description" name="description" placeholder="可选：课程简介、教学目标等"></textarea>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn" {% if not current_semester %}disabled{% endif %}>
+                    创建课程
+                </button>
+                <a href="{% url 'grading:course_list' %}" class="btn btn-secondary">取消</a>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+
+        document.getElementById('courseForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+
+            fetch('{% url "grading:course_create" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('课程创建成功！');
+                    window.location.href = '{% url "grading:course_list" %}';
+                } else {
+                    alert('创建失败：' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('创建失败，请重试');
+            });
+        });
+    </script>
+</body>
+</html>

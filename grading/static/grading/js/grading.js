@@ -12,6 +12,8 @@ let currentRepoId = null;  // 当前选择的仓库ID
 let currentCourse = null;  // 当前选择的课程
 let isLabCourse = false;  // 是否为实验课
 let isFileLocked = false;  // 当前文件是否被锁定（格式错误）
+let isLabReport = false;  // 当前文件是否为实验报告
+let hasComment = false;  // 当前文件是否有评价
 
 // 将关键变量暴露到window对象，供其他脚本使用
 window.currentCourse = null;
@@ -104,7 +106,7 @@ window.switchGradeMode = function(mode) {
   console.log('文字评分按钮组:', $('#text-grade-buttons').length);
 
   // 验证模式参数
-  if (mode !== 'letter' && mode !== 'text') {
+  if (mode !== 'letter' && mode !== 'text' && mode !== 'percentage') {
     console.error('无效的评分模式:', mode);
     return;
   }
@@ -127,9 +129,11 @@ window.switchGradeMode = function(mode) {
   if (mode === 'letter') {
     console.log('切换到字母评分方式');
 
-    // 隐藏文字评分按钮组
+    // 隐藏其他评分按钮组
     $('#text-grade-buttons').hide();
+    $('#percentage-grade-input').hide();
     console.log('文字评分按钮组已隐藏');
+    console.log('百分制输入框已隐藏');
 
     // 显示字母评分按钮组
     $('#letter-grade-buttons').show();
@@ -138,6 +142,7 @@ window.switchGradeMode = function(mode) {
     // 验证显示状态
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
 
     // 设置默认评分
     if (!selectedGrade || !['A', 'B', 'C', 'D', 'E'].includes(selectedGrade)) {
@@ -153,9 +158,11 @@ window.switchGradeMode = function(mode) {
   } else if (mode === 'text') {
     console.log('切换到文字评分方式');
 
-    // 隐藏字母评分按钮组
+    // 隐藏其他评分按钮组
     $('#letter-grade-buttons').hide();
+    $('#percentage-grade-input').hide();
     console.log('字母评分按钮组已隐藏');
+    console.log('百分制输入框已隐藏');
 
     // 显示文字评分按钮组
     $('#text-grade-buttons').show();
@@ -164,6 +171,7 @@ window.switchGradeMode = function(mode) {
     // 验证显示状态
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
 
     // 设置默认评分
     if (!selectedGrade || !['优秀', '良好', '中等', '及格', '不及格'].includes(selectedGrade)) {
@@ -175,6 +183,42 @@ window.switchGradeMode = function(mode) {
 
     // 设置按钮状态
     setGradeButtonState(selectedGrade);
+  } else if (mode === 'percentage') {
+    console.log('切换到百分制评分方式');
+
+    // 隐藏其他评分按钮组
+    $('#letter-grade-buttons').hide();
+    $('#text-grade-buttons').hide();
+    console.log('字母评分按钮组已隐藏');
+    console.log('文字评分按钮组已隐藏');
+
+    // 显示百分制输入框
+    $('#percentage-grade-input').show();
+    console.log('百分制输入框已显示');
+
+    // 验证显示状态
+    console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
+
+    // 设置默认评分或恢复之前的百分制评分
+    if (!selectedGrade || isNaN(parseFloat(selectedGrade))) {
+      console.log('设置默认百分制评分: 85');
+      selectedGrade = '85';
+      $('#percentage-input').val('85');
+    } else {
+      console.log('保持当前百分制评分:', selectedGrade);
+      $('#percentage-input').val(selectedGrade);
+    }
+    
+    // 清除可能存在的验证错误
+    $('#percentage-input').removeClass('is-invalid');
+    $('#percentage-input-error').remove();
+    
+    // 聚焦到输入框以便快速输入
+    setTimeout(function() {
+      $('#percentage-input').focus().select();
+    }, 100);
   }
 
   console.log('=== 评分方式切换完成 ===');
@@ -327,6 +371,47 @@ window.handleGradeInfo = function(gradeInfo) {
         // 启用评分方式切换按钮
         $('.grade-mode-btn').prop('disabled', false).removeClass('disabled');
     }
+    
+    // 需求 4.5, 5.2: 检查是否为实验报告以及是否有评价
+    isLabReport = gradeInfo.is_lab_report || false;
+    hasComment = gradeInfo.has_comment || false;
+    console.log('文件类型检查: isLabReport=', isLabReport, ', hasComment=', hasComment);
+    
+    // 如果是实验报告且没有评价，显示警告并禁用确定按钮
+    if (isLabReport && !hasComment) {
+        console.log('实验报告缺少评价，禁用确定按钮');
+        $('#add-grade-to-file').prop('disabled', true);
+        
+        // 显示醒目的警告提示
+        const warningMessage = `
+            <div id="lab-report-warning" class="alert alert-warning alert-dismissible fade show mt-3" role="alert">
+                <h5 class="alert-heading">
+                    <i class="bi bi-exclamation-triangle-fill"></i> 实验报告必须添加评价
+                </h5>
+                <p class="mb-0">
+                    此文件为实验报告，根据评分规则必须包含教师评价。<br>
+                    请先点击 <strong>"教师评价"</strong> 按钮添加评价内容，然后再进行评分。
+                </p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        `;
+        // 移除旧的警告提示（如果存在）
+        $('#lab-report-warning').remove();
+        // 在文件内容前添加警告提示
+        $('#file-content').prepend(warningMessage);
+        
+        // 高亮教师评价按钮
+        $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+    } else {
+        // 移除警告提示（如果存在）
+        $('#lab-report-warning').remove();
+        // 恢复教师评价按钮样式
+        $('#teacher-comment-btn').removeClass('btn-warning').addClass('btn-outline-info');
+        // 如果文件未锁定，启用确定按钮
+        if (!isFileLocked) {
+            $('#add-grade-to-file').prop('disabled', false);
+        }
+    }
 
     if (gradeInfo.has_grade && gradeInfo.grade) {
         // 文件已有评分，设置按钮状态
@@ -339,12 +424,14 @@ window.handleGradeInfo = function(gradeInfo) {
         // 根据评分类型切换评分方式
         if (gradeInfo.grade_type === 'letter') {
             switchGradeMode('letter');
+            setGradeButtonState(gradeInfo.grade);
         } else if (gradeInfo.grade_type === 'text') {
             switchGradeMode('text');
+            setGradeButtonState(gradeInfo.grade);
+        } else if (gradeInfo.grade_type === 'percentage') {
+            switchGradeMode('percentage');
+            $('#percentage-input').val(gradeInfo.grade);
         }
-
-        // 设置评分按钮状态
-        setGradeButtonState(gradeInfo.grade);
 
         console.log('评分按钮状态已更新，当前评分:', selectedGrade, '评分方式:', gradeMode);
     } else {
@@ -365,6 +452,10 @@ window.handleGradeInfo = function(gradeInfo) {
                 console.log('字母评分方式，默认评分:', selectedGrade);
             } else if (gradeMode === 'text') {
                 selectedGrade = selectedGrade || '良好';
+            } else if (gradeMode === 'percentage') {
+                selectedGrade = selectedGrade || '85';
+                $('#percentage-input').val(selectedGrade);
+                console.log('百分制评分方式，默认评分:', selectedGrade);
                 console.log('文字评分方式，默认评分:', selectedGrade);
             }
         }
@@ -862,7 +953,37 @@ window.addGradeToFile = function(grade) {
         },
         error: function(xhr, status, error) {
             console.error('Error adding grade to file:', error);
-            showError('添加评分到文件失败：' + error);
+            console.error('XHR response:', xhr.responseJSON);
+            
+            // 处理特定的错误情况
+            let errorMessage = '添加评分失败';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMessage = xhr.responseJSON.message;
+                
+                // 如果是实验报告缺少评价的错误，显示特殊提示
+                if (errorMessage.includes('实验报告必须添加评价')) {
+                    const warningHtml = `
+                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                            <h5 class="alert-heading">
+                                <i class="bi bi-x-circle-fill"></i> 无法保存评分
+                            </h5>
+                            <p class="mb-0">
+                                ${errorMessage}<br>
+                                请先点击 <strong>"教师评价"</strong> 按钮添加评价内容。
+                            </p>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    `;
+                    $('#file-content').prepend(warningHtml);
+                    // 高亮教师评价按钮
+                    $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+                    return;
+                }
+            } else {
+                errorMessage += '：' + error;
+            }
+            
+            showError(errorMessage);
         },
         complete: function() {
             hideLoading();
@@ -1207,6 +1328,34 @@ document.addEventListener('DOMContentLoaded', function() {
         addGradeToFile(grade);
     });
 
+    // 绑定百分制输入框变化事件
+    $(document).off('input', '#percentage-input').on('input', '#percentage-input', function() {
+        const value = $(this).val();
+        console.log('百分制输入框值变化:', value);
+        
+        // 移除之前的错误提示
+        $(this).removeClass('is-invalid');
+        $('#percentage-input-error').remove();
+        
+        // 验证输入值
+        if (value !== '') {
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) {
+                // 非数字输入
+                $(this).addClass('is-invalid');
+                $(this).after('<div id="percentage-input-error" class="invalid-feedback">请输入有效的数字</div>');
+            } else if (numValue < 0 || numValue > 100) {
+                // 超出范围
+                $(this).addClass('is-invalid');
+                $(this).after('<div id="percentage-input-error" class="invalid-feedback">分数必须在0-100之间</div>');
+            } else {
+                // 有效输入
+                selectedGrade = value;
+                console.log('百分制评分已更新:', selectedGrade);
+            }
+        }
+    });
+
     // 绑定确定按钮点击事件（使用事件委托，避免重复绑定）
     $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function() {
         console.log('确定按钮被点击，当前选中评分:', selectedGrade);
@@ -1223,13 +1372,44 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        if (!selectedGrade) {
+        // 如果是百分制模式，从输入框获取评分并验证
+        let gradeToSubmit = selectedGrade;
+        if (gradeMode === 'percentage') {
+            const percentageValue = $('#percentage-input').val();
+            if (!percentageValue || percentageValue === '') {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">请输入百分制评分（0-100）</div>');
+                return;
+            }
+            const numValue = parseFloat(percentageValue);
+            if (isNaN(numValue)) {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">请输入有效的数字</div>');
+                return;
+            }
+            if (numValue < 0 || numValue > 100) {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">分数必须在0-100之间</div>');
+                return;
+            }
+            // 验证通过，移除错误提示
+            $('#percentage-input').removeClass('is-invalid');
+            $('#percentage-input-error').remove();
+            
+            gradeToSubmit = percentageValue;
+            selectedGrade = percentageValue;  // 更新全局变量
+        }
+
+        if (!gradeToSubmit) {
             showError('请先选择评分');
             return;
         }
 
         // 保存评分并转到下一个文件
-        addGradeToFile(selectedGrade);
+        addGradeToFile(gradeToSubmit);
     });
 
     // 绑定撤销按钮点击事件
@@ -1267,6 +1447,14 @@ document.addEventListener('DOMContentLoaded', function() {
     $(document).on('click', '#saveTeacherComment', function() {
         console.log('保存教师评价按钮被点击');
         saveTeacherComment();
+    });
+
+    // 需求 5.1.1: 绑定评价输入框的自动保存功能（每2秒自动保存）
+    $(document).on('input', '#teacherCommentText', function() {
+        const commentText = $(this).val();
+        if (currentFilePath && window.commentCacheService) {
+            window.commentCacheService.autosave(currentFilePath, commentText);
+        }
     });
 
     // 新增：绑定AI评分按钮点击事件
@@ -1350,8 +1538,20 @@ document.addEventListener('DOMContentLoaded', function() {
             $('#teacherCommentText').val('');
         }
         
+        // 需求 5.2.3: 加载推荐评价模板
+        loadCommentTemplates();
+        
         // 渲染历史评价
         CommentHistory.renderHistory('commentHistoryContainer');
+    });
+
+    // 需求 5.1.2: 模态框关闭时停止自动保存
+    $('#teacherCommentModal').on('hide.bs.modal', function() {
+        console.log('=== 教师评价模态框关闭 ===');
+        if (window.commentCacheService) {
+            window.commentCacheService.stopAutosave();
+            console.log('自动保存已停止');
+        }
     });
 
     // AI评分提示模态框事件处理
@@ -1410,18 +1610,57 @@ window.loadTeacherComment = function(filePath) {
 
             if (response.success) {
                 console.log('获取评价成功，准备更新显示');
-                const commentText = response.comment || '';
-                console.log('评价文本:', commentText);
-                console.log('输入框元素存在:', $('#teacherCommentText').length > 0);
-
-                // 将评价内容载入到输入框中，方便直接修改
-                $('#teacherCommentText').val(commentText);
+                const savedComment = response.comment || '';
+                console.log('已保存的评价文本:', savedComment);
+                
+                // 需求 5.1.3, 5.1.4: 检查是否有缓存的评价
+                const cachedData = window.commentCacheService ? window.commentCacheService.load(filePath) : null;
+                
+                if (cachedData && cachedData.comment) {
+                    console.log('找到缓存的评价:', cachedData.comment);
+                    
+                    // 需求 5.1.4: 如果缓存的评价与已保存的评价不同，提示用户是否恢复
+                    if (cachedData.comment !== savedComment && savedComment !== '暂无评价') {
+                        const restoreCache = confirm(
+                            '检测到未保存的评价内容，是否恢复？\n\n' +
+                            '缓存的评价：\n' + cachedData.comment.substring(0, 100) + 
+                            (cachedData.comment.length > 100 ? '...' : '') +
+                            '\n\n已保存的评价：\n' + savedComment.substring(0, 100) +
+                            (savedComment.length > 100 ? '...' : '')
+                        );
+                        
+                        if (restoreCache) {
+                            // 需求 5.1.5: 恢复缓存内容
+                            $('#teacherCommentText').val(cachedData.comment);
+                            console.log('已恢复缓存的评价内容');
+                        } else {
+                            // 用户选择不恢复，使用已保存的评价
+                            $('#teacherCommentText').val(savedComment);
+                            // 清除缓存
+                            if (window.commentCacheService) {
+                                window.commentCacheService.clear(filePath);
+                            }
+                        }
+                    } else if (savedComment === '暂无评价' || !savedComment) {
+                        // 如果文件中没有评价，直接使用缓存
+                        $('#teacherCommentText').val(cachedData.comment);
+                        console.log('文件中无评价，使用缓存内容');
+                    } else {
+                        // 缓存与已保存内容相同，使用已保存的
+                        $('#teacherCommentText').val(savedComment);
+                    }
+                } else {
+                    // 没有缓存，使用已保存的评价
+                    $('#teacherCommentText').val(savedComment);
+                    console.log('没有缓存，使用已保存的评价');
+                }
 
                 console.log('评价内容已载入到输入框');
                 console.log('输入框当前值:', $('#teacherCommentText').val());
 
                 // 如果评价内容为空或"暂无评价"，显示提示信息
-                if (!commentText || commentText === '暂无评价') {
+                const currentValue = $('#teacherCommentText').val();
+                if (!currentValue || currentValue === '暂无评价') {
                     console.log('文件中没有找到评价内容，显示提示信息');
                     $('#teacherCommentText').attr('placeholder', '文件中没有找到评价内容，请在此输入新的评价...');
                 }
@@ -1583,8 +1822,28 @@ window.saveTeacherComment = function() {
             if (response.success) {
                 console.log('保存成功，准备刷新评价显示');
                 
+                // 需求 5.1.6: 评价成功保存后，清除该文件对应的评价缓存
+                if (window.commentCacheService) {
+                    window.commentCacheService.clear(currentFilePath);
+                    console.log('评价缓存已清除');
+                }
+                
+                // 需求 5.2.1: 记录评价使用次数
+                recordCommentUsage(comment);
+                
                 // 添加到历史记录（包含评分和评价）
                 CommentHistory.addGradeComment(selectedGrade, comment);
+                
+                // 更新全局状态：现在文件有评价了
+                hasComment = true;
+                
+                // 如果是实验报告，移除警告并启用确定按钮
+                if (isLabReport) {
+                    $('#lab-report-warning').remove();
+                    if (!isFileLocked) {
+                        $('#add-grade-to-file').prop('disabled', false);
+                    }
+                }
 
                 // 延迟一点时间再加载评价，确保文件写入完成
                 setTimeout(function() {
@@ -2540,5 +2799,139 @@ function showBatchGradeResultModal(data) {
         $(this).remove();
         // 恢复按钮状态
         restoreBatchGradeButtonState();
+    });
+}
+
+
+// ============================================================================
+// 评价模板功能 - 需求 5.2.1-5.2.12
+// ============================================================================
+
+/**
+ * 需求 5.2.3: 加载推荐评价模板
+ * 
+ * 推荐逻辑：
+ * 1. 先获取个人常用评价（最多5个）
+ * 2. 如果个人评价不足5个，用系统评价补充
+ * 3. 总共返回最多5个模板
+ */
+function loadCommentTemplates() {
+    console.log('=== 加载推荐评价模板 ===');
+    
+    $.ajax({
+        url: '/grading/api/comment-templates/recommended/',
+        method: 'GET',
+        success: function(response) {
+            console.log('评价模板加载成功:', response);
+            
+            if (response.success && response.templates && response.templates.length > 0) {
+                renderCommentTemplates(response.templates);
+            } else {
+                console.log('没有可用的评价模板');
+                // 隐藏模板容器
+                $('#commentTemplatesContainer').hide();
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('加载评价模板失败:', error);
+            console.error('响应状态:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            // 隐藏模板容器
+            $('#commentTemplatesContainer').hide();
+        }
+    });
+}
+
+/**
+ * 需求 5.2.4-5.2.9: 渲染评价模板列表
+ * 
+ * @param {Array} templates - 评价模板数组
+ */
+function renderCommentTemplates(templates) {
+    console.log('=== 渲染评价模板 ===');
+    console.log('模板数量:', templates.length);
+    
+    const container = $('#commentTemplatesList');
+    container.empty();
+    
+    templates.forEach(function(template, index) {
+        // 需求 5.2.7: 先显示个人评价模板，再显示系统评价模板
+        const badgeClass = template.template_type === 'personal' ? 'bg-primary' : 'bg-secondary';
+        const badgeText = template.template_type_display;
+        
+        // 截断过长的评价内容
+        const displayText = template.comment_text.length > 50 
+            ? template.comment_text.substring(0, 50) + '...' 
+            : template.comment_text;
+        
+        const templateButton = $('<button>')
+            .addClass('btn btn-sm btn-outline-secondary position-relative')
+            .attr('type', 'button')
+            .attr('data-template-id', template.id)
+            .attr('data-comment-text', template.comment_text)
+            .attr('title', template.comment_text) // 完整内容作为提示
+            .html(`
+                <span class="badge ${badgeClass} position-absolute top-0 start-0 translate-middle" 
+                      style="font-size: 0.6rem; padding: 0.2rem 0.4rem;">
+                    ${badgeText}
+                </span>
+                ${displayText}
+                <span class="badge bg-info ms-1" style="font-size: 0.7rem;">
+                    ${template.usage_count}次
+                </span>
+            `);
+        
+        // 需求 5.2.5: 点击模板填充评价内容
+        templateButton.on('click', function() {
+            const commentText = $(this).attr('data-comment-text');
+            $('#teacherCommentText').val(commentText);
+            console.log('已填充评价模板:', commentText.substring(0, 50) + '...');
+            
+            // 触发输入事件，启动自动保存
+            $('#teacherCommentText').trigger('input');
+        });
+        
+        container.append(templateButton);
+    });
+    
+    // 显示模板容器
+    $('#commentTemplatesContainer').show();
+    
+    console.log('评价模板渲染完成');
+}
+
+/**
+ * 需求 5.2.1: 记录评价使用次数
+ * 
+ * 当教师保存评价时调用此方法，统计评价使用次数。
+ * 
+ * @param {string} commentText - 评价内容
+ */
+function recordCommentUsage(commentText) {
+    console.log('=== 记录评价使用次数 ===');
+    console.log('评价内容:', commentText.substring(0, 50) + '...');
+    
+    $.ajax({
+        url: '/grading/api/comment-templates/record-usage/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Content-Type': 'application/json'
+        },
+        data: JSON.stringify({
+            comment_text: commentText
+        }),
+        success: function(response) {
+            console.log('评价使用记录成功:', response);
+            if (response.success) {
+                console.log('使用次数:', response.template.usage_count);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('记录评价使用失败:', error);
+            console.error('响应状态:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            // 记录失败不影响主流程，只记录日志
+        }
     });
 }

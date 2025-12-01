@@ -26,12 +26,18 @@ class CacheManager:
     PREFIX_DIR_TREE = "dir_tree"
     PREFIX_FILE_CONTENT = "file_content"
     PREFIX_FILE_METADATA = "file_metadata"
+    PREFIX_COMMENT_TEMPLATE = "comment_template"
+    PREFIX_COURSE_LIST = "course_list"
+    PREFIX_CLASS_LIST = "class_list"
 
     # 缓存过期时间（秒）
     TIMEOUT_FILE_COUNT = 300  # 5分钟
     TIMEOUT_DIR_TREE = 600  # 10分钟
     TIMEOUT_FILE_CONTENT = 180  # 3分钟
     TIMEOUT_FILE_METADATA = 300  # 5分钟
+    TIMEOUT_COMMENT_TEMPLATE = 600  # 10分钟
+    TIMEOUT_COURSE_LIST = 300  # 5分钟
+    TIMEOUT_CLASS_LIST = 300  # 5分钟
 
     # 性能阈值
     MAX_FILES_WARNING = 500  # 文件数量警告阈值
@@ -211,6 +217,216 @@ class CacheManager:
             self._clear_by_pattern(pattern)
             self.logger.debug("缓存清除 - 所有文件内容")
 
+    # ==================== 评价模板缓存 ====================
+
+    def get_comment_templates(
+        self, template_type: str, identifier: str
+    ) -> Optional[list]:
+        """
+        获取缓存的评价模板列表
+
+        Args:
+            template_type: 模板类型 (personal/system/recommended)
+            identifier: 标识符（如teacher_id或tenant_id）
+
+        Returns:
+            评价模板列表，如果缓存不存在则返回None
+        """
+        key = self._make_key(
+            self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
+        )
+        templates = cache.get(key)
+        if templates is not None:
+            self.logger.debug(
+                f"缓存命中 - 评价模板: {template_type}_{identifier}"
+            )
+        return templates
+
+    def set_comment_templates(
+        self, template_type: str, identifier: str, templates: list
+    ) -> None:
+        """
+        设置评价模板缓存
+
+        Args:
+            template_type: 模板类型 (personal/system/recommended)
+            identifier: 标识符（如teacher_id或tenant_id）
+            templates: 评价模板列表
+        """
+        key = self._make_key(
+            self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
+        )
+        cache.set(key, templates, self.TIMEOUT_COMMENT_TEMPLATE)
+        self.logger.debug(
+            f"缓存设置 - 评价模板: {template_type}_{identifier}, "
+            f"数量={len(templates)}"
+        )
+
+    def clear_comment_templates(
+        self, template_type: Optional[str] = None, identifier: Optional[str] = None
+    ) -> None:
+        """
+        清除评价模板缓存
+
+        Args:
+            template_type: 模板类型（可选）
+            identifier: 标识符（可选）
+        """
+        if template_type and identifier:
+            key = self._make_key(
+                self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
+            )
+            cache.delete(key)
+            self.logger.debug(
+                f"缓存清除 - 评价模板: {template_type}_{identifier}"
+            )
+        else:
+            pattern = self._make_key(self.PREFIX_COMMENT_TEMPLATE, "*")
+            self._clear_by_pattern(pattern)
+            self.logger.debug("缓存清除 - 所有评价模板")
+
+    # ==================== 课程列表缓存 ====================
+
+    def get_course_list(self, teacher_id: int, semester_id: Optional[int] = None) -> Optional[list]:
+        """
+        获取缓存的课程列表
+
+        Args:
+            teacher_id: 教师ID
+            semester_id: 学期ID（可选）
+
+        Returns:
+            课程列表，如果缓存不存在则返回None
+        """
+        identifier = f"teacher_{teacher_id}"
+        if semester_id:
+            identifier += f"_semester_{semester_id}"
+        key = self._make_key(self.PREFIX_COURSE_LIST, identifier)
+        courses = cache.get(key)
+        if courses is not None:
+            self.logger.debug(f"缓存命中 - 课程列表: {identifier}")
+        return courses
+
+    def set_course_list(
+        self, teacher_id: int, courses: list, semester_id: Optional[int] = None
+    ) -> None:
+        """
+        设置课程列表缓存
+
+        Args:
+            teacher_id: 教师ID
+            courses: 课程列表
+            semester_id: 学期ID（可选）
+        """
+        identifier = f"teacher_{teacher_id}"
+        if semester_id:
+            identifier += f"_semester_{semester_id}"
+        key = self._make_key(self.PREFIX_COURSE_LIST, identifier)
+        cache.set(key, courses, self.TIMEOUT_COURSE_LIST)
+        self.logger.debug(
+            f"缓存设置 - 课程列表: {identifier}, 数量={len(courses)}"
+        )
+
+    def clear_course_list(
+        self, teacher_id: Optional[int] = None, semester_id: Optional[int] = None
+    ) -> None:
+        """
+        清除课程列表缓存
+
+        Args:
+            teacher_id: 教师ID（可选）
+            semester_id: 学期ID（可选）
+        """
+        if teacher_id:
+            identifier = f"teacher_{teacher_id}"
+            if semester_id:
+                identifier += f"_semester_{semester_id}"
+            key = self._make_key(self.PREFIX_COURSE_LIST, identifier)
+            cache.delete(key)
+            self.logger.debug(f"缓存清除 - 课程列表: {identifier}")
+        else:
+            pattern = self._make_key(self.PREFIX_COURSE_LIST, "*")
+            self._clear_by_pattern(pattern)
+            self.logger.debug("缓存清除 - 所有课程列表")
+
+    # ==================== 班级列表缓存 ====================
+
+    def get_class_list(
+        self, course_id: Optional[int] = None, teacher_id: Optional[int] = None
+    ) -> Optional[list]:
+        """
+        获取缓存的班级列表
+
+        Args:
+            course_id: 课程ID（可选）
+            teacher_id: 教师ID（可选）
+
+        Returns:
+            班级列表，如果缓存不存在则返回None
+        """
+        if course_id:
+            identifier = f"course_{course_id}"
+        elif teacher_id:
+            identifier = f"teacher_{teacher_id}"
+        else:
+            identifier = "all"
+        key = self._make_key(self.PREFIX_CLASS_LIST, identifier)
+        classes = cache.get(key)
+        if classes is not None:
+            self.logger.debug(f"缓存命中 - 班级列表: {identifier}")
+        return classes
+
+    def set_class_list(
+        self,
+        classes: list,
+        course_id: Optional[int] = None,
+        teacher_id: Optional[int] = None,
+    ) -> None:
+        """
+        设置班级列表缓存
+
+        Args:
+            classes: 班级列表
+            course_id: 课程ID（可选）
+            teacher_id: 教师ID（可选）
+        """
+        if course_id:
+            identifier = f"course_{course_id}"
+        elif teacher_id:
+            identifier = f"teacher_{teacher_id}"
+        else:
+            identifier = "all"
+        key = self._make_key(self.PREFIX_CLASS_LIST, identifier)
+        cache.set(key, classes, self.TIMEOUT_CLASS_LIST)
+        self.logger.debug(
+            f"缓存设置 - 班级列表: {identifier}, 数量={len(classes)}"
+        )
+
+    def clear_class_list(
+        self, course_id: Optional[int] = None, teacher_id: Optional[int] = None
+    ) -> None:
+        """
+        清除班级列表缓存
+
+        Args:
+            course_id: 课程ID（可选）
+            teacher_id: 教师ID（可选）
+        """
+        if course_id:
+            identifier = f"course_{course_id}"
+            key = self._make_key(self.PREFIX_CLASS_LIST, identifier)
+            cache.delete(key)
+            self.logger.debug(f"缓存清除 - 班级列表: {identifier}")
+        elif teacher_id:
+            identifier = f"teacher_{teacher_id}"
+            key = self._make_key(self.PREFIX_CLASS_LIST, identifier)
+            cache.delete(key)
+            self.logger.debug(f"缓存清除 - 班级列表: {identifier}")
+        else:
+            pattern = self._make_key(self.PREFIX_CLASS_LIST, "*")
+            self._clear_by_pattern(pattern)
+            self.logger.debug("缓存清除 - 所有班级列表")
+
     # ==================== 文件元数据缓存 ====================
 
     def get_file_metadata(self, file_path: str) -> Optional[Dict]:
@@ -265,6 +481,9 @@ class CacheManager:
         self.clear_dir_tree()
         self.clear_file_content()
         self.clear_file_metadata()
+        self.clear_comment_templates()
+        self.clear_course_list()
+        self.clear_class_list()
         self.logger.info("缓存清除 - 所有缓存")
 
     def clear_user_cache(self) -> None:
@@ -279,6 +498,9 @@ class CacheManager:
             self.PREFIX_DIR_TREE,
             self.PREFIX_FILE_CONTENT,
             self.PREFIX_FILE_METADATA,
+            self.PREFIX_COMMENT_TEMPLATE,
+            self.PREFIX_COURSE_LIST,
+            self.PREFIX_CLASS_LIST,
         ]:
             pattern = self._make_key(prefix, "*")
             self._clear_by_pattern(pattern)
@@ -297,6 +519,9 @@ class CacheManager:
             self.PREFIX_DIR_TREE,
             self.PREFIX_FILE_CONTENT,
             self.PREFIX_FILE_METADATA,
+            self.PREFIX_COMMENT_TEMPLATE,
+            self.PREFIX_COURSE_LIST,
+            self.PREFIX_CLASS_LIST,
         ]:
             pattern = self._make_key(prefix, "*")
             self._clear_by_pattern(pattern)
@@ -395,6 +620,9 @@ class CacheManager:
                 "dir_tree": self.TIMEOUT_DIR_TREE,
                 "file_content": self.TIMEOUT_FILE_CONTENT,
                 "file_metadata": self.TIMEOUT_FILE_METADATA,
+                "comment_template": self.TIMEOUT_COMMENT_TEMPLATE,
+                "course_list": self.TIMEOUT_COURSE_LIST,
+                "class_list": self.TIMEOUT_CLASS_LIST,
             },
             "thresholds": {
                 "max_files_warning": self.MAX_FILES_WARNING,

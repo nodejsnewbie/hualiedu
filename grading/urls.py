@@ -81,6 +81,11 @@ urlpatterns = [
     # 校历功能相关路由
     path("calendar/", views.calendar_view, name="calendar_view"),
     path("course-management/", views.course_management_view, name="course_management"),
+    # 课程和班级管理路由
+    path("courses/", views.course_list_view, name="course_list"),
+    path("courses/create/", views.course_create_view, name="course_create"),
+    path("classes/", views.class_list_view, name="class_list"),
+    path("classes/create/", views.class_create_view, name="class_create"),
     path("semester-management/", views.semester_management_view, name="semester_management"),
     path("semester-status-api/", views.semester_status_api, name="semester_status_api"),
     path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
@@ -99,6 +104,8 @@ urlpatterns = [
     path("update-repository/", views.update_repository_view, name="update_repository"),
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
     path("sync-repository/", views.sync_repository_view, name="sync_repository"),
+    path("validate-git-connection/", views.validate_git_connection_view, name="validate_git_connection"),
+    path("validate-directory-structure/", views.validate_directory_structure_view, name="validate_directory_structure"),
     path("api/repositories/", views.get_repository_list_api, name="get_repository_list_api"),
     # 课程和作业信息API
     path("api/course-info/", views.get_course_info_api, name="get_course_info_api"),
@@ -110,6 +117,15 @@ urlpatterns = [
     # 缓存管理API
     path("api/cache/stats/", views.cache_stats_api, name="cache_stats_api"),
     path("api/cache/clear/", views.clear_cache_api, name="clear_cache_api"),
+    # 学生作业上传功能
+    path("homework-upload/", views.homework_upload_page, name="homework_upload_page"),
+    path("api/student/homework-list/", views.get_student_homework_list, name="get_student_homework_list"),
+    path("api/student/upload/", views.upload_homework, name="upload_homework"),
+    path("api/student/submission-history/", views.get_submission_history, name="get_submission_history"),
+    path("api/student/storage-space/", views.check_storage_space, name="check_storage_space"),
+    # 评价模板API - 需求 5.2.1-5.2.12
+    path("api/comment-templates/recommended/", views.get_recommended_comment_templates, name="get_recommended_comment_templates"),
+    path("api/comment-templates/record-usage/", views.record_comment_usage, name="record_comment_usage"),
     # 测试页面
     path("jquery-test/", views.jquery_test, name="jquery_test"),
     path("test-clean/", views.test_clean, name="test_clean"),

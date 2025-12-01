@@ -6,20 +6,22 @@ inclusion: always
 
 ## Core Stack
 
-- **Python**: 3.13 (conda environment: py313)
+- **Python**: 3.13 (managed by uv)
 - **Django**: 4.2.20
 - **Database**: SQLite (dev), PostgreSQL (prod)
+- **Package Manager**: uv (fast Python package installer)
 
 ## Python Environment (CRITICAL)
 
-**ALL Python commands MUST use conda py313 environment**
+**ALL Python commands MUST use uv**
 
 ```bash
 # Correct command format
-conda run -n py313 python manage.py <command>
+uv run python manage.py <command>
 
 # NEVER use bare python commands
 python manage.py <command>  # ❌ WRONG
+conda run -n py313 python manage.py <command>  # ❌ OLD (deprecated)
 ```
 
 ## Key Dependencies
@@ -38,33 +40,52 @@ python manage.py <command>  # ❌ WRONG
 
 ## Essential Commands
 
+### Environment Setup
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install all dependencies (including dev dependencies)
+uv sync --all-extras
+
+# Or use Makefile
+make install
+```
+
 ### Django Operations
 ```bash
 # Server
-conda run -n py313 python manage.py runserver
+uv run python manage.py runserver
 
 # Database
-conda run -n py313 python manage.py makemigrations
-conda run -n py313 python manage.py migrate
+uv run python manage.py makemigrations
+uv run python manage.py migrate
 
 # Testing
-conda run -n py313 python manage.py test                           # All tests
-conda run -n py313 python manage.py test grading                   # App tests
-conda run -n py313 python manage.py test grading.tests.test_models # Specific test
+uv run python manage.py test                           # All tests
+uv run python manage.py test grading                   # App tests
+uv run python manage.py test grading.tests.test_models # Specific test
 
 # Code quality
-conda run -n py313 black . --line-length=100
-conda run -n py313 isort . --profile=black --line-length=100
-conda run -n py313 flake8 . --max-line-length=120
+uv run black . --line-length=100
+uv run isort . --profile=black --line-length=100
+uv run flake8 . --max-line-length=120
+
+# Or use Makefile (recommended)
+make test
+make runserver
+make migrate
+make format
 ```
 
 ### Custom Management Commands
 ```bash
-conda run -n py313 python manage.py scan_courses          # Scan course directories
-conda run -n py313 python manage.py import_homeworks      # Import homework data
-conda run -n py313 python manage.py semester_management   # Manage semesters
-conda run -n py313 python manage.py create_templates      # Create semester templates
-conda run -n py313 python manage.py update_course_types   # Update course types
+uv run python manage.py scan_courses          # Scan course directories
+uv run python manage.py import_homeworks      # Import homework data
+uv run python manage.py semester_management   # Manage semesters
+uv run python manage.py create_templates      # Create semester templates
+uv run python manage.py update_course_types   # Update course types
+uv run python manage.py clear_cache           # Clear cache
 ```
 
 ## Configuration

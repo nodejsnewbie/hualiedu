@@ -163,9 +163,14 @@ class EndToEndGradingWorkflowTest(TestCase):
         self.assertEqual(comment_read, comment)
         self.assertIn("张老师", sig_read)
         
-        # 步骤4: 更新评分
-        new_grade = "A+"
+        # 步骤4: 更新评分（使用系统支持的评分等级）
+        new_grade = "B"
         new_comment = "修改评价：实验报告非常优秀，超出预期。"
+        
+        # 重新加载文档以获取新的cell对象
+        doc = Document(file_path)
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        _, _, sig_read = extract_grade_and_comment_from_cell(cell)
         
         write_to_teacher_signature_cell(cell, new_grade, new_comment, sig_read)
         doc.save(file_path)
@@ -596,6 +601,327 @@ class EndToEndBatchOperationsTest(TestCase):
         text_content = '\n'.join([p.text for p in doc.paragraphs])
         self.assertIn("【格式错误-已锁定】", text_content)
         self.assertIn("D", text_content)
+
+
+class EndToEndWebInterfaceTest(TestCase):
+    """端到端测试：Web界面完整流程"""
+
+    def setUp(self):
+        """设置测试环境"""
+        self.temp_dir = tempfile.mkdtemp()
+        self.client = Client()
+        
+        # 创建租户
+        self.tenant = Tenant.objects.create(
+            name='测试学校',
+            description='Web界面测试租户',
+            is_active=True,
+            tenant_repo_dir='test_tenant_web'
+        )
+        
+        # 创建教师用户
+        self.teacher = User.objects.create_user(
+            username='webteacher',
+            password='testpass123',
+            is_staff=True
+        )
+        
+        self.teacher_profile = UserProfile.objects.create(
+            user=self.teacher,
+            tenant=self.tenant,
+            is_tenant_admin=False,
+            repo_base_dir=self.temp_dir
+        )
+        
+        # 创建学生用户
+        self.student = User.objects.create_user(
+            username='webstudent',
+            password='testpass123'
+        )
+        
+        self.student_profile = UserProfile.objects.create(
+            user=self.student,
+            tenant=self.tenant,
+            is_tenant_admin=False
+        )
+        
+        # 创建学期
+        self.semester = Semester.objects.create(
+            name='2024春季学期',
+            start_date='2024-02-01',
+            end_date='2024-07-01'
+        )
+
+    def tearDown(self):
+        """清理测试环境"""
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def test_teacher_creates_course_and_class(self):
+        """
+        测试教师创建课程和班级的完整流程
+        需求: 1.1-1.5 (课程和班级创建)
+        """
+        # 步骤1: 教师登录
+        self.client.login(username='webteacher', password='testpass123')
+        
+        # 步骤2: 创建课程
+        from grading.services.course_service import CourseService
+        course_service = CourseService()
+        
+        course = course_service.create_course(
+            teacher=self.teacher,
+            name='Web测试课程',
+            course_type='lab',
+            semester=self.semester,
+            description='这是一个Web界面测试课程'
+        )
+        
+        self.assertIsNotNone(course)
+        self.assertEqual(course.name, 'Web测试课程')
+        self.assertEqual(course.course_type, 'lab')
+        self.assertEqual(course.teacher, self.teacher)
+        
+        # 步骤3: 创建班级
+        from grading.services.class_service import ClassService
+        class_service = ClassService()
+        
+        class_obj = class_service.create_class(
+            course=course,
+            name='计算机1班',
+            student_count=30
+        )
+        
+        self.assertIsNotNone(class_obj)
+        self.assertEqual(class_obj.name, '计算机1班')
+        self.assertEqual(class_obj.course, course)
+        self.assertEqual(class_obj.student_count, 30)
+        
+        # 步骤4: 验证教师只能看到自己的课程
+        courses = course_service.list_courses(teacher=self.teacher)
+        self.assertEqual(len(courses), 1)
+        self.assertEqual(courses[0].id, course.id)
+
+    def test_student_uploads_homework(self):
+        """
+        测试学生上传作业的完整流程
+        需求: 1.4.1-1.4.7 (学生作业上传)
+        """
+        # 步骤1: 创建课程和班级
+        from grading.services.course_service import CourseService
+        from grading.services.class_service import ClassService
+        
+        course_service = CourseService()
+        class_service = ClassService()
+        
+        course = course_service.create_course(
+            teacher=self.teacher,
+            name='作业上传测试课程',
+            course_type='lab',
+            semester=self.semester,
+            description='测试学生上传作业'
+        )
+        
+        class_obj = class_service.create_class(
+            course=course,
+            name='测试班级',
+            student_count=20
+        )
+        
+        # 步骤2: 创建仓库（文件系统方式）
+        from grading.services.repository_service import RepositoryService
+        repo_service = RepositoryService()
+        
+        repository = repo_service.create_filesystem_repository(
+            teacher=self.teacher,
+            class_obj=class_obj,
+            name='学生作业仓库'
+        )
+        
+        self.assertIsNotNone(repository)
+        self.assertEqual(repository.repo_type, 'filesystem')
+        
+        # 步骤3: 创建作业批次
+        homework = Homework.objects.create(
+            course=course,
+            title='第一次作业',
+            folder_name='第一次作业',
+            homework_type='lab_report'
+        )
+        
+        # 步骤4: 学生上传作业
+        from grading.services.file_upload_service import FileUploadService
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        
+        file_service = FileUploadService()
+        
+        # 创建测试文件
+        doc = Document()
+        doc.add_heading('学生作业', 0)
+        doc.add_paragraph('这是学生提交的作业内容')
+        
+        import io
+        file_buffer = io.BytesIO()
+        doc.save(file_buffer)
+        file_buffer.seek(0)
+        
+        uploaded_file = SimpleUploadedFile(
+            "学生作业.docx",
+            file_buffer.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        
+        # 验证文件
+        is_valid, error_msg = file_service.validate_file(uploaded_file)
+        self.assertTrue(is_valid, f"文件验证失败: {error_msg}")
+        
+        # 步骤5: 创建提交记录
+        file_path = f"{repository.filesystem_path}/{homework.folder_name}/学生作业.docx"
+        submission = file_service.create_submission_record(
+            student=self.student,
+            homework=homework,
+            repository=repository,
+            file_path=file_path,
+            file_name='学生作业.docx',
+            file_size=len(file_buffer.getvalue())
+        )
+        
+        self.assertIsNotNone(submission)
+        self.assertEqual(submission.student, self.student)
+        self.assertEqual(submission.homework, homework)
+        self.assertEqual(submission.file_name, '学生作业.docx')
+
+    def test_comment_template_recommendation(self):
+        """
+        测试评价模板推荐功能
+        需求: 5.2.1-5.2.12 (评价模板功能)
+        """
+        from grading.services.comment_template_service import CommentTemplateService
+        from grading.models import CommentTemplate
+        
+        service = CommentTemplateService()
+        
+        # 步骤1: 记录教师使用评价
+        comments = [
+            "实验报告完成得非常出色",
+            "数据分析准确，结论合理",
+            "实验步骤清晰，格式规范",
+            "需要加强对实验原理的理解",
+            "实验报告完成得非常出色",  # 重复使用
+            "数据分析准确，结论合理",  # 重复使用
+            "实验报告完成得非常出色",  # 再次重复
+        ]
+        
+        for comment in comments:
+            service.record_comment_usage(
+                teacher=self.teacher,
+                comment_text=comment
+            )
+        
+        # 步骤2: 获取个人评价模板
+        personal_templates = service.get_personal_templates(
+            teacher=self.teacher,
+            limit=5
+        )
+        
+        self.assertGreater(len(personal_templates), 0)
+        self.assertLessEqual(len(personal_templates), 5)
+        
+        # 步骤3: 验证排序（使用次数最多的在前）
+        if len(personal_templates) >= 2:
+            self.assertGreaterEqual(
+                personal_templates[0].usage_count,
+                personal_templates[1].usage_count
+            )
+        
+        # 步骤4: 验证最常用的评价
+        top_template = personal_templates[0]
+        self.assertEqual(top_template.comment_text, "实验报告完成得非常出色")
+        self.assertEqual(top_template.usage_count, 3)
+        
+        # 步骤5: 获取推荐模板（个人优先）
+        recommended = service.get_recommended_templates(teacher=self.teacher)
+        self.assertGreater(len(recommended), 0)
+        self.assertLessEqual(len(recommended), 5)
+
+    def test_three_grading_methods(self):
+        """
+        测试三种评分方式
+        需求: 4.1-4.4 (手动评分功能 - 三种评分方式)
+        """
+        # 创建测试文件
+        homework_dir = Path(self.temp_dir) / '评分方式测试'
+        homework_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 步骤1: 测试字母评分
+        file_path_letter = homework_dir / '字母评分.docx'
+        doc = Document()
+        doc.add_heading('实验报告', 0)
+        table = doc.add_table(rows=2, cols=2)
+        table.rows[0].cells[0].text = '实验结果'
+        table.rows[0].cells[1].text = '完成'
+        table.rows[1].cells[0].text = '教师（签字）：'
+        doc.save(str(file_path_letter))
+        
+        doc = Document(str(file_path_letter))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        write_to_teacher_signature_cell(cell, "A", "字母评分测试", "教师（签字）：")
+        doc.save(str(file_path_letter))
+        
+        doc = Document(str(file_path_letter))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        grade, _, _ = extract_grade_and_comment_from_cell(cell)
+        self.assertEqual(grade, "A")
+        
+        # 步骤2: 测试文字评分
+        file_path_text = homework_dir / '文字评分.docx'
+        doc = Document()
+        doc.add_heading('实验报告', 0)
+        table = doc.add_table(rows=2, cols=2)
+        table.rows[0].cells[0].text = '实验结果'
+        table.rows[0].cells[1].text = '完成'
+        table.rows[1].cells[0].text = '教师（签字）：'
+        doc.save(str(file_path_text))
+        
+        doc = Document(str(file_path_text))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        write_to_teacher_signature_cell(cell, "优秀", "文字评分测试", "教师（签字）：")
+        doc.save(str(file_path_text))
+        
+        doc = Document(str(file_path_text))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        grade, _, _ = extract_grade_and_comment_from_cell(cell)
+        self.assertEqual(grade, "优秀")
+        
+        # 步骤3: 测试百分制评分
+        # 注意：当前extract函数只识别字母和文字评分，百分制评分需要通过其他方式验证
+        # 这里我们测试写入百分制评分，但验证时检查单元格文本内容
+        file_path_percent = homework_dir / '百分制评分.docx'
+        doc = Document()
+        doc.add_heading('实验报告', 0)
+        table = doc.add_table(rows=2, cols=2)
+        table.rows[0].cells[0].text = '实验结果'
+        table.rows[0].cells[1].text = '完成'
+        table.rows[1].cells[0].text = '教师（签字）：'
+        doc.save(str(file_path_percent))
+        
+        # 重新加载文档
+        doc = Document(str(file_path_percent))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        self.assertIsNotNone(cell, "应该找到教师签字单元格")
+        
+        write_to_teacher_signature_cell(cell, "85", "百分制评分测试", "教师（签字）：")
+        doc.save(str(file_path_percent))
+        
+        # 再次重新加载文档以读取
+        doc = Document(str(file_path_percent))
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        self.assertIsNotNone(cell, "重新加载后应该找到教师签字单元格")
+        
+        # 验证单元格包含百分制评分（通过文本内容）
+        cell_text = cell.text
+        self.assertIn("85", cell_text, "单元格应该包含百分制评分85")
+        self.assertIn("百分制评分测试", cell_text, "单元格应该包含评价内容")
 
 
 class EndToEndPerformanceTest(TestCase):

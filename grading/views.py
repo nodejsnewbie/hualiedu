@@ -40,6 +40,7 @@ except ImportError:
     logger.warning("volcenginesdkarkruntime not available, AI scoring will be disabled")
 
 from .models import (
+    Class,
     Course,
     CourseSchedule,
     GlobalConfig,
@@ -47,11 +48,19 @@ from .models import (
     Homework,
     Repository,
     Semester,
+    Submission,
 )
+from .services.file_upload_service import FileUploadService
 from .utils import FileHandler, GitHandler
 from grading.services.grade_registry_writer_service import (
     GradeRegistryWriterService,
     BatchGradeProgressTracker,
+)
+from .query_optimization import (
+    optimize_repository_queryset,
+    optimize_course_queryset,
+    get_user_repositories_optimized,
+    get_user_courses_optimized,
 )
 
 # Create your views here.
@@ -107,7 +116,9 @@ def validate_file_path(file_path, base_dir=None, request=None, repo_id=None, cou
         # 如果提供了仓库ID，使用仓库路径
         if repo_id and request:
             try:
-                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                repo = Repository.objects.select_related(
+                    'owner', 'tenant', 'class_obj', 'class_obj__course'
+                ).get(id=repo_id, owner=request.user, is_active=True)
                 base_dir = repo.get_full_path()
                 # 如果指定了课程，则基础目录为课程目录
                 if course:
@@ -606,7 +617,9 @@ def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, b
     if course_name and homework_folder:
         try:
             from grading.models import Homework, Course
-            homework = Homework.objects.filter(
+            homework = Homework.objects.select_related(
+                'course', 'course__teacher', 'course__semester', 'tenant', 'class_obj'
+            ).filter(
                 course__name=course_name,
                 folder_name=homework_folder
             ).first()
@@ -875,8 +888,10 @@ def index(request):
         repository_stats = {}
 
         if request.user.is_authenticated:
-            user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
-            user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
+            user_courses = get_user_courses_optimized(
+                request.user, semester=current_semester
+            )
+            user_repositories = get_user_repositories_optimized(request.user, is_active=True)
 
             # 统计仓库信息
             repository_stats = {
@@ -951,7 +966,7 @@ def grading_simple(request):
 
         # 准备初始数据
         context = {
-            "repositories": Repository.objects.filter(owner=request.user, is_active=True),
+            "repositories": get_user_repositories_optimized(request.user, is_active=True),
             "initial_tree_data": "[]",  # 初始为空，通过AJAX加载
             "page_title": "简化评分页面",
             "base_dir": base_dir,
@@ -1015,7 +1030,7 @@ def grading_page(request):
     """评分页面视图 - 基于用户仓库的评分系统"""
     try:
         # 获取用户的仓库列表
-        user_repositories = Repository.objects.filter(owner=request.user, is_active=True)
+        user_repositories = get_user_repositories_optimized(request.user, is_active=True)
 
         # 准备初始数据
         context = {
@@ -1142,7 +1157,7 @@ def serve_file(request, file_path):
 def change_branch(request, repo_id):
     """切换仓库分支"""
     try:
-        repo = Repository.objects.get(id=repo_id)
+        repo = Repository.objects.select_related('owner', 'tenant').get(id=repo_id)
         if request.method == "POST":
             branch = request.POST.get("branch")
             if branch in repo.branches:
@@ -1415,7 +1430,9 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
                     if course_name and file_path and '/' not in file_path:
                         # 这是班级下的作业文件夹
                         try:
-                            course = Course.objects.get(name=course_name)
+                            course = Course.objects.select_related(
+                                'semester', 'teacher', 'tenant'
+                            ).get(name=course_name)
                             try:
                                 homework = Homework.objects.get(course=course, folder_name=item)
                                 node["data"]["homework_type"] = homework.homework_type
@@ -1476,7 +1493,9 @@ def get_course_info_api(request):
             return JsonResponse({"success": False, "message": "未提供课程名称"})
         
         try:
-            course = Course.objects.filter(name=course_name).first()
+            course = Course.objects.select_related(
+                'semester', 'teacher', 'tenant'
+            ).filter(name=course_name).first()
             
             if not course and auto_create:
                 # 课程不存在，自动创建
@@ -1778,8 +1797,16 @@ def get_directory_tree_view(request):
         return JsonResponse({"children": []}, safe=False)
 
 
-def get_file_grade_info(full_path):
-    """获取文件中的评分信息"""
+def get_file_grade_info(full_path, base_dir=None):
+    """获取文件中的评分信息
+    
+    Args:
+        full_path: 文件完整路径
+        base_dir: 基础目录（用于判断作业类型）
+    
+    Returns:
+        dict: 包含评分信息的字典
+    """
     try:
         # 获取文件扩展名
         _, ext = os.path.splitext(full_path)
@@ -1788,11 +1815,16 @@ def get_file_grade_info(full_path):
         grade_info = {
             "has_grade": False,
             "grade": None,
-            "grade_type": None,  # 'letter' 或 'text'
+            "grade_type": None,  # 'letter' 或 'text' 或 'percentage'
             "in_table": False,
             "ai_grading_disabled": False,
             "locked": False,  # 是否被锁定（格式错误的实验报告）
+            "is_lab_report": False,  # 是否为实验报告
+            "has_comment": False,  # 是否有评价
         }
+        
+        # 判断是否为实验报告
+        grade_info["is_lab_report"] = is_lab_report_file(file_path=full_path, base_dir=base_dir)
 
         if ext == ".docx":
             # 对于 Word 文档，使用 python-docx 检查评分
@@ -1847,9 +1879,20 @@ def get_file_grade_info(full_path):
                                         grade_info["grade_type"] = "letter"
                                     elif extracted_grade in ["优秀", "良好", "中等", "及格", "不及格"]:
                                         grade_info["grade_type"] = "text"
+                                    else:
+                                        # 尝试判断是否为百分制（数字）
+                                        try:
+                                            grade_value = float(extracted_grade)
+                                            if 0 <= grade_value <= 100:
+                                                grade_info["grade_type"] = "percentage"
+                                            else:
+                                                grade_info["grade_type"] = "letter"  # 默认
+                                        except (ValueError, TypeError):
+                                            grade_info["grade_type"] = "letter"  # 默认
                                     # 保存评价（如果有）
-                                    if extracted_comment:
+                                    if extracted_comment and extracted_comment.strip():
                                         grade_info["comment"] = extracted_comment
+                                        grade_info["has_comment"] = True
                                     logger.info(f"使用统一提取函数获取评分: {extracted_grade}, 评价: {extracted_comment}")
                                     break
                         
@@ -1868,6 +1911,13 @@ def get_file_grade_info(full_path):
                             grade_info["locked"] = True
                             logger.info("检测到文件已被锁定")
                         
+                        # 检查评价
+                        if text.startswith(("教师评价：", "AI评价：", "评价：")):
+                            comment_text = text.split("：", 1)[1].strip() if "：" in text else text
+                            if comment_text:
+                                grade_info["has_comment"] = True
+                                grade_info["comment"] = comment_text
+                        
                         if text.startswith("老师评分："):
                             grade_text = text.replace("老师评分：", "").strip()
                             if grade_text:
@@ -1884,6 +1934,16 @@ def get_file_grade_info(full_path):
                                     "不及格",
                                 ]:
                                     grade_info["grade_type"] = "text"
+                                else:
+                                    # 尝试判断是否为百分制（数字）
+                                    try:
+                                        grade_value = float(grade_text)
+                                        if 0 <= grade_value <= 100:
+                                            grade_info["grade_type"] = "percentage"
+                                        else:
+                                            grade_info["grade_type"] = "letter"  # 默认
+                                    except (ValueError, TypeError):
+                                        grade_info["grade_type"] = "letter"  # 默认
                         
                         if grade_info["has_grade"] and grade_info["locked"]:
                             break
@@ -1914,6 +1974,16 @@ def get_file_grade_info(full_path):
                                     "不及格",
                                 ]:
                                     grade_info["grade_type"] = "text"
+                                else:
+                                    # 尝试判断是否为百分制（数字）
+                                    try:
+                                        grade_value = float(grade_text)
+                                        if 0 <= grade_value <= 100:
+                                            grade_info["grade_type"] = "percentage"
+                                        else:
+                                            grade_info["grade_type"] = "letter"  # 默认
+                                    except (ValueError, TypeError):
+                                        grade_info["grade_type"] = "letter"  # 默认
                                 break
 
             except Exception as e:
@@ -2117,7 +2187,7 @@ def get_file_content(request):
                         final_content = css + f'<div class="docx-content">{html_content}</div>'
 
                         # 获取文件评分信息
-                        grade_info = get_file_grade_info(full_path)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
                         
                         logger.info(f"成功处理Word文档，内容长度: {len(final_content)}")
                         logger.info(f"评分信息: {grade_info}")
@@ -2246,7 +2316,7 @@ def get_file_content(request):
                         """
 
                         final_content = css + ''.join(html_content)
-                        grade_info = get_file_grade_info(full_path)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
 
                         return JsonResponse(
                             {
@@ -2302,7 +2372,7 @@ def get_file_content(request):
                         )
 
                         # 获取文件评分信息
-                        grade_info = get_file_grade_info(full_path)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
 
                         return JsonResponse(
                             {
@@ -2326,7 +2396,7 @@ def get_file_content(request):
                         with open(full_path, "r", encoding="utf-8") as f:
                             content = f.read()
                             # 获取文件评分信息
-                            grade_info = get_file_grade_info(full_path)
+                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
 
                             return JsonResponse(
                                 {
@@ -2341,7 +2411,7 @@ def get_file_content(request):
                         try:
                             with open(full_path, "r", encoding="gbk") as f:
                                 content = f.read()
-                                grade_info = get_file_grade_info(full_path)
+                                grade_info = get_file_grade_info(full_path, base_dir=base_dir)
                                 return JsonResponse(
                                     {
                                         "status": "success",
@@ -2433,7 +2503,7 @@ def get_file_content(request):
                             final_content = css + f'<div class="docx-content">{html_content}</div>'
 
                             # 获取文件评分信息
-                            grade_info = get_file_grade_info(full_path)
+                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
 
                             return JsonResponse(
                                 {
@@ -2599,7 +2669,7 @@ def get_file_content(request):
                 try:
                     with open(full_path, "r", encoding="utf-8") as f:
                         content = f.read()
-                        grade_info = get_file_grade_info(full_path)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
                         return JsonResponse(
                             {
                                 "status": "success",
@@ -2612,7 +2682,7 @@ def get_file_content(request):
                     try:
                         with open(full_path, "r", encoding="gbk") as f:
                             content = f.read()
-                            grade_info = get_file_grade_info(full_path)
+                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
                             return JsonResponse(
                                 {
                                     "status": "success",
@@ -2651,16 +2721,17 @@ def add_grade_to_file(request):
     支持：
     - 字母评分（A/B/C/D/E）
     - 文字评分（优秀/良好/中等/及格/不及格）
+    - 百分制评分（0-100）
     - 评分方式切换
     - 统一文件写入接口
     
-    需求: 4.1, 4.2, 4.3, 4.8
+    需求: 4.1, 4.2, 4.3, 4.4, 4.8
     """
     logger.info("=== 开始处理手动评分请求 ===")
 
     # 获取请求参数
     grade = request.POST.get("grade")
-    grade_type = request.POST.get("grade_type", "letter")  # 评分方式：letter 或 text
+    grade_type = request.POST.get("grade_type", "letter")  # 评分方式：letter, text 或 percentage
     course = request.POST.get("course", "").strip()
     is_lab_report = request.POST.get("is_lab_report", "false").lower() == "true"
     
@@ -2681,6 +2752,23 @@ def add_grade_to_file(request):
     if grade_type == "text" and grade not in text_grades:
         logger.error(f"无效的文字评分: {grade}")
         return create_error_response(f"无效的文字评分: {grade}")
+    
+    if grade_type == "percentage":
+        # 验证百分制评分：必须是0-100之间的数字
+        try:
+            grade_value = float(grade)
+            if grade_value < 0 or grade_value > 100:
+                logger.error(f"百分制评分超出范围: {grade}")
+                return create_error_response(f"百分制评分必须在0-100之间，当前值: {grade}")
+            # 格式化为整数或保留一位小数
+            if grade_value == int(grade_value):
+                grade = str(int(grade_value))
+            else:
+                grade = f"{grade_value:.1f}"
+            logger.info(f"百分制评分验证通过: {grade}")
+        except (ValueError, TypeError):
+            logger.error(f"无效的百分制评分: {grade}")
+            return create_error_response(f"百分制评分必须是数字，当前值: {grade}")
 
     # 使用统一函数添加评分
     try:
@@ -2692,6 +2780,27 @@ def add_grade_to_file(request):
         if not is_lab_report:
             is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
             logger.info(f"自动判断文件类型: is_lab_report={is_lab_report}")
+        
+        # 需求 4.5, 5.2: 实验报告强制评价验证
+        # 如果是实验报告且没有提供评价，阻止保存
+        if is_lab_report:
+            # 检查是否已有评价（从文件中读取）
+            existing_comment = None
+            try:
+                _, ext = os.path.splitext(full_path)
+                if ext.lower() == ".docx":
+                    doc = Document(full_path)
+                    # 尝试从实验报告表格中提取评价
+                    cell, _, _, _ = find_teacher_signature_cell(doc)
+                    if cell:
+                        _, existing_comment, _ = extract_grade_and_comment_from_cell(cell)
+            except Exception as e:
+                logger.warning(f"检查现有评价时出错: {e}")
+            
+            # 如果文件中没有评价，则必须提供评价
+            if not existing_comment or existing_comment.strip() == "":
+                logger.error("实验报告必须添加评价")
+                return create_error_response("实验报告必须添加评价，请先点击'教师评价'按钮添加评价内容")
         
         logger.info(f"调用统一写入接口: 路径={request.POST.get('path')}, 评分={grade}, 评分方式={grade_type}, 实验报告={is_lab_report}")
         
@@ -3093,6 +3202,11 @@ def save_teacher_comment(request):
         base_dir = get_base_directory(request)
         is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
         
+        # 需求 4.5, 5.2: 实验报告强制评价验证
+        if is_lab_report and (not comment or comment.strip() == ""):
+            logger.error("实验报告必须添加评价")
+            return create_error_response("实验报告必须添加评价内容", response_format="success")
+        
         logger.info(f"请求保存教师评价和评分，路径: {full_path}, 评分: {grade}, 评价: {comment}, 课程: {course}, 实验报告: {is_lab_report}")
         
         # 使用统一函数同时写入评分和评价
@@ -3158,7 +3272,7 @@ def get_file_grade_info_api(request):
             return JsonResponse({"has_grade": False, "error": "路径不是文件"}, status=400)
 
         # 获取评分信息
-        grade_info = get_file_grade_info(full_path)
+        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
         logger.info(f"评分信息: {grade_info}")
 
         # 构造前端期望的响应格式
@@ -3205,7 +3319,7 @@ def get_teacher_comment(request):
         # 如果没有提供repo_id，尝试从用户的所有仓库中查找文件
         if not repo_id:
             logger.info("未提供repo_id，尝试从所有仓库中查找文件")
-            user_repos = Repository.objects.filter(owner=request.user, is_active=True)
+            user_repos = get_user_repositories_optimized(request.user, is_active=True)
             
             for repo in user_repos:
                 # 尝试不同的路径组合
@@ -3769,10 +3883,24 @@ def _perform_ai_scoring_for_file(full_path, base_dir, user=None):
             logger.error("文件内容为空")
             raise ValueError("文件内容为空，无法评分")
 
+        # 判断是否是实验报告（需要在AI评分前判断，以便验证评价）
+        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        logger.info(f"判定为实验报告: {is_lab_report}")
+
         logger.info("开始调用火山引擎AI评分...")
         # 调用AI评分
         score, comment = volcengine_score_homework(content)
         logger.info(f"AI评分结果 - 分数: {score}, 评语长度: {len(comment) if comment else 0}")
+
+        # 验证AI返回结果的完整性 - 需求 6.3, 6.4
+        if score is None:
+            logger.error("AI评分失败：未返回有效分数")
+            raise ValueError("AI评分失败，请重试")
+        
+        # 实验报告必须有评价 - 需求 6.3, 6.4
+        if is_lab_report and (not comment or not comment.strip()):
+            logger.error("实验报告AI评分缺少评价内容")
+            raise ValueError("实验报告必须包含评价内容，请重新生成AI评分")
 
         # 获取班级的评分类型配置
         from .grade_type_manager import (
@@ -3811,10 +3939,6 @@ def _perform_ai_scoring_for_file(full_path, base_dir, user=None):
         logger.info(f"转换后的等级: {grade} (评分类型: {grade_config.grade_type})")
 
         logger.info("开始写入AI评价和评分到文件...")
-        
-        # 判断是否是实验报告（从文件路径中提取课程名称）
-        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
-        logger.info(f"判定为实验报告: {is_lab_report}")
         
         # 使用统一函数写入AI评价和评分
         write_grade_and_comment_to_file(full_path, grade=grade, comment=comment, base_dir=base_dir, is_lab_report=is_lab_report)
@@ -3877,7 +4001,7 @@ def ai_score_view(request):
 
         # 检查文件是否已有评分
         logger.info("检查文件是否已有评分...")
-        grade_info = get_file_grade_info(full_path)
+        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
 
         if grade_info["has_grade"]:
             logger.info(f"文件已有评分: {grade_info['grade']}，跳过AI评分")
@@ -3916,19 +4040,25 @@ def ai_score_view(request):
 @login_required
 @require_http_methods(["POST"])
 def batch_ai_score_view(request):
-    """对指定目录下的所有文件进行批量AI评分"""
+    """对指定目录下的所有文件进行批量AI评分
+    
+    需求: 8.1-8.7 (批量AI评分), 6.3-6.4 (实验报告评价验证)
+    """
     try:
-        logger.info("开始处理批量AI评分请求")
+        logger.info("=== 开始处理批量AI评分请求 ===")
         path = request.POST.get("path")
         if not path:
+            logger.error("批量AI评分请求缺少目录路径参数")
             return JsonResponse({"status": "error", "message": "未提供目录路径"}, status=400)
 
         repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
         if not repo_base_dir:
+            logger.error("未配置仓库基础目录")
             return JsonResponse({"status": "error", "message": "未配置仓库基础目录"}, status=500)
 
         base_dir = os.path.expanduser(repo_base_dir)
         full_path = os.path.join(base_dir, path)
+        logger.info(f"批量AI评分目录: {full_path}")
 
         if not os.path.isdir(full_path):
             # 为兼容测试用例：路径不是目录时，返回成功但结果为空
@@ -3944,14 +4074,36 @@ def batch_ai_score_view(request):
         results = []
         success_count = 0
         error_count = 0
+        skipped_count = 0
 
+        # 获取所有待处理文件
+        files_to_process = []
         for filename in os.listdir(full_path):
             file_path = os.path.join(full_path, filename)
             # 只处理文件，不处理子目录
             if os.path.isfile(file_path) and (
                 filename.endswith(".docx") or filename.endswith(".txt")
             ):
-                # 检查文件是否已有评分
+                files_to_process.append((filename, file_path))
+        
+        logger.info(f"找到 {len(files_to_process)} 个待处理文件")
+        
+        if not files_to_process:
+            logger.warning("目录中没有可处理的文件")
+            return JsonResponse(
+                {
+                    "status": "success",
+                    "message": "目录中没有可处理的文件",
+                    "results": [],
+                }
+            )
+
+        # 处理每个文件 - 需求 8.2
+        for filename, file_path in files_to_process:
+            logger.info(f"--- 处理文件: {filename} ---")
+            
+            try:
+                # 检查文件是否已有评分 - 需求 8.4
                 grade_info = get_file_grade_info(file_path)
                 if grade_info["has_grade"]:
                     logger.info(f"文件 {filename} 已有评分: {grade_info['grade']}，跳过AI评分")
@@ -3959,29 +4111,85 @@ def batch_ai_score_view(request):
                         {
                             "file": filename,
                             "success": False,
+                            "skipped": True,
                             "error": f"该作业已有评分：{grade_info['grade']}，无需重复评分",
                         }
                     )
-                    error_count += 1
+                    skipped_count += 1
+                    continue
+                
+                # 检查文件是否被锁定
+                if grade_info.get("locked", False):
+                    logger.info(f"文件 {filename} 已被锁定，跳过AI评分")
+                    results.append(
+                        {
+                            "file": filename,
+                            "success": False,
+                            "skipped": True,
+                            "error": "文件已被锁定（格式错误），无法评分",
+                        }
+                    )
+                    skipped_count += 1
+                    continue
+                
+                # 执行AI评分 - 需求 8.4, 6.3, 6.4
+                result = _perform_ai_scoring_for_file(file_path, base_dir, request.user)
+                
+                if result["success"]:
+                    logger.info(f"文件 {filename} AI评分成功")
+                    success_count += 1
+                    results.append({
+                        "file": filename,
+                        "success": True,
+                        "grade": result.get("grade"),
+                        "score": result.get("score"),
+                        "comment": result.get("comment"),
+                    })
                 else:
-                    result = _perform_ai_scoring_for_file(file_path, base_dir, request.user)
-                    if result["success"]:
-                        success_count += 1
-                    else:
-                        error_count += 1
-                    results.append({"file": filename, **result})
+                    # 需求 8.6: 某个文件失败，继续处理其他文件
+                    logger.warning(f"文件 {filename} AI评分失败: {result.get('error')}")
+                    error_count += 1
+                    results.append({
+                        "file": filename,
+                        "success": False,
+                        "error": result.get("error", "未知错误"),
+                    })
+                    
+            except Exception as e:
+                # 需求 8.6: 记录错误但继续处理
+                logger.error(f"处理文件 {filename} 时发生异常: {str(e)}")
+                error_count += 1
+                results.append({
+                    "file": filename,
+                    "success": False,
+                    "error": str(e),
+                })
 
+        # 需求 8.7: 显示处理结果摘要
+        summary_message = f"批量评分完成，成功 {success_count} 个，失败 {error_count} 个，跳过 {skipped_count} 个。"
+        logger.info(f"=== 批量AI评分完成 === {summary_message}")
+        
         return JsonResponse(
             {
                 "status": "success",
-                "message": f"批量评分完成，成功 {success_count} 个，失败 {error_count} 个。",
+                "message": summary_message,
+                "total": len(files_to_process),
+                "success": success_count,
+                "failed": error_count,
+                "skipped": skipped_count,
                 "results": results,
             }
         )
 
     except Exception as e:
         logger.error(f"批量AI评分视图异常: {str(e)}\n{traceback.format_exc()}")
-        return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
+        return JsonResponse(
+            {
+                "status": "error",
+                "message": f"服务器内部错误: {str(e)}"
+            },
+            status=500
+        )
 
 
 @login_required
@@ -4928,10 +5136,14 @@ def grade_type_management_view(request):
         # 根据用户权限获取评分类型配置
         if request.user.is_superuser:
             # 超级管理员可以看到所有配置
-            configs = GradeTypeConfig.objects.all().order_by("class_identifier")
+            configs = GradeTypeConfig.objects.select_related(
+                'tenant', 'class_obj', 'class_obj__course'
+            ).all().order_by("class_identifier")
         else:
             # 普通用户只能看到自己租户的配置
-            configs = GradeTypeConfig.objects.filter(tenant=tenant).order_by("class_identifier")
+            configs = GradeTypeConfig.objects.select_related(
+                'tenant', 'class_obj', 'class_obj__course'
+            ).filter(tenant=tenant).order_by("class_identifier")
 
         # 获取评分类型选项
         grade_type_choices = GradeTypeConfig.GRADE_TYPE_CHOICES
@@ -5052,7 +5264,9 @@ def calendar_view(request):
                 week_number = 1
 
         # 获取当前用户的课程安排
-        user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+        user_courses = get_user_courses_optimized(
+            request.user, semester=current_semester
+        ).prefetch_related('schedules', 'schedules__week_schedules')
 
         # 构建课程表数据
         schedule_data = []
@@ -5100,7 +5314,9 @@ def course_management_view(request):
             return redirect("admin:grading_semester_add")
 
         # 获取当前用户的课程
-        user_courses = Course.objects.filter(teacher=request.user, semester=current_semester)
+        user_courses = get_user_courses_optimized(
+            request.user, semester=current_semester
+        )
 
         context = {
             "current_semester": current_semester,
@@ -5113,6 +5329,284 @@ def course_management_view(request):
         logger.error(f"课程管理页面加载失败: {str(e)}")
         messages.error(request, f"课程管理页面加载失败: {str(e)}")
         return redirect("grading:index")
+
+
+@login_required
+def course_list_view(request):
+    """课程列表视图 - 显示教师的所有课程"""
+    try:
+        from grading.services.course_service import CourseService
+
+        course_service = CourseService()
+
+        # 获取当前租户
+        tenant = None
+        if hasattr(request, "tenant"):
+            tenant = request.tenant
+
+        # 获取当前活跃学期
+        current_semester = Semester.objects.filter(is_active=True).first()
+
+        # 获取教师的所有课程（按学期过滤）
+        courses = course_service.list_courses(
+            teacher=request.user, tenant=tenant, semester=current_semester
+        )
+
+        context = {
+            "courses": courses,
+            "current_semester": current_semester,
+            "tenant": tenant,
+        }
+
+        return render(request, "course_list.html", context)
+
+    except Exception as e:
+        logger.error(f"课程列表加载失败: {str(e)}")
+        messages.error(request, f"课程列表加载失败: {str(e)}")
+        return redirect("grading:index")
+
+
+@login_required
+def course_create_view(request):
+    """课程创建视图"""
+    if request.method == "GET":
+        # 显示课程创建表单
+        try:
+            # 获取当前活跃学期
+            current_semester = Semester.objects.filter(is_active=True).first()
+
+            # 获取租户
+            tenant = None
+            if hasattr(request, "tenant"):
+                tenant = request.tenant
+
+            context = {
+                "current_semester": current_semester,
+                "tenant": tenant,
+                "course_types": Course.COURSE_TYPE_CHOICES,
+            }
+
+            return render(request, "course_create.html", context)
+
+        except Exception as e:
+            logger.error(f"课程创建页面加载失败: {str(e)}")
+            messages.error(request, f"课程创建页面加载失败: {str(e)}")
+            return redirect("grading:course_list")
+
+    elif request.method == "POST":
+        # 处理课程创建请求
+        try:
+            from grading.services.course_service import CourseService
+
+            course_service = CourseService()
+
+            # 获取表单数据
+            name = request.POST.get("name", "").strip()
+            course_type = request.POST.get("course_type", "").strip()
+            description = request.POST.get("description", "").strip()
+
+            # 获取当前活跃学期
+            current_semester = Semester.objects.filter(is_active=True).first()
+            if not current_semester:
+                return JsonResponse({"status": "error", "message": "请先设置当前学期"})
+
+            # 获取租户
+            tenant = None
+            if hasattr(request, "tenant"):
+                tenant = request.tenant
+
+            # 创建课程
+            course = course_service.create_course(
+                teacher=request.user,
+                name=name,
+                course_type=course_type,
+                description=description,
+                semester=current_semester,
+                tenant=tenant,
+            )
+
+            # 检查是否是AJAX请求
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse(
+                    {
+                        "status": "success",
+                        "message": "课程创建成功",
+                        "course_id": course.id,
+                        "course_name": course.name,
+                    }
+                )
+            else:
+                messages.success(request, f"课程 {course.name} 创建成功")
+                return redirect("grading:course_list")
+
+        except ValueError as e:
+            logger.warning(f"课程创建参数错误: {str(e)}")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"status": "error", "message": str(e)})
+            else:
+                messages.error(request, str(e))
+                return redirect("grading:course_create")
+
+        except Exception as e:
+            logger.error(f"课程创建失败: {str(e)}")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"status": "error", "message": f"课程创建失败: {str(e)}"})
+            else:
+                messages.error(request, f"课程创建失败: {str(e)}")
+                return redirect("grading:course_create")
+
+
+@login_required
+def class_list_view(request):
+    """班级列表视图 - 显示指定课程的所有班级"""
+    try:
+        from grading.services.class_service import ClassService
+
+        class_service = ClassService()
+
+        # 获取课程ID（可选）
+        course_id = request.GET.get("course_id")
+
+        # 获取租户
+        tenant = None
+        if hasattr(request, "tenant"):
+            tenant = request.tenant
+
+        # 如果提供了课程ID，获取该课程的班级
+        course = None
+        if course_id:
+            try:
+                course = Course.objects.get(id=course_id, teacher=request.user)
+                classes = class_service.list_classes(course=course)
+            except Course.DoesNotExist:
+                messages.error(request, "课程不存在或无权访问")
+                return redirect("grading:course_list")
+        else:
+            # 否则获取该租户下所有班级（通过教师的课程）
+            teacher_courses = Course.objects.filter(teacher=request.user)
+            classes = class_service.list_classes(tenant=tenant)
+            # 过滤只显示教师自己课程的班级
+            classes = [c for c in classes if c.course in teacher_courses]
+
+        context = {
+            "classes": classes,
+            "course": course,
+            "tenant": tenant,
+        }
+
+        return render(request, "class_list.html", context)
+
+    except Exception as e:
+        logger.error(f"班级列表加载失败: {str(e)}")
+        messages.error(request, f"班级列表加载失败: {str(e)}")
+        return redirect("grading:course_list")
+
+
+@login_required
+def class_create_view(request):
+    """班级创建视图"""
+    if request.method == "GET":
+        # 显示班级创建表单
+        try:
+            # 获取教师的所有课程
+            from grading.services.course_service import CourseService
+
+            course_service = CourseService()
+
+            # 获取租户
+            tenant = None
+            if hasattr(request, "tenant"):
+                tenant = request.tenant
+
+            # 获取当前学期的课程
+            current_semester = Semester.objects.filter(is_active=True).first()
+            courses = course_service.list_courses(
+                teacher=request.user, tenant=tenant, semester=current_semester
+            )
+
+            # 获取预选的课程ID（如果有）
+            preselected_course_id = request.GET.get("course_id")
+
+            context = {
+                "courses": courses,
+                "preselected_course_id": preselected_course_id,
+                "tenant": tenant,
+            }
+
+            return render(request, "class_create.html", context)
+
+        except Exception as e:
+            logger.error(f"班级创建页面加载失败: {str(e)}")
+            messages.error(request, f"班级创建页面加载失败: {str(e)}")
+            return redirect("grading:course_list")
+
+    elif request.method == "POST":
+        # 处理班级创建请求
+        try:
+            from grading.services.class_service import ClassService
+
+            class_service = ClassService()
+
+            # 获取表单数据
+            course_id = request.POST.get("course_id", "").strip()
+            name = request.POST.get("name", "").strip()
+            student_count_str = request.POST.get("student_count", "0").strip()
+
+            # 验证课程ID
+            if not course_id:
+                raise ValueError("必须选择所属课程")
+
+            # 获取课程（验证权限）
+            try:
+                course = Course.objects.get(id=course_id, teacher=request.user)
+            except Course.DoesNotExist:
+                raise ValueError("课程不存在或无权访问")
+
+            # 解析学生人数
+            try:
+                student_count = int(student_count_str)
+            except ValueError:
+                student_count = 0
+
+            # 获取租户
+            tenant = None
+            if hasattr(request, "tenant"):
+                tenant = request.tenant
+
+            # 创建班级
+            class_obj = class_service.create_class(
+                course=course, name=name, student_count=student_count, tenant=tenant
+            )
+
+            # 检查是否是AJAX请求
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse(
+                    {
+                        "status": "success",
+                        "message": "班级创建成功",
+                        "class_id": class_obj.id,
+                        "class_name": class_obj.name,
+                    }
+                )
+            else:
+                messages.success(request, f"班级 {class_obj.name} 创建成功")
+                return redirect("grading:class_list")
+
+        except ValueError as e:
+            logger.warning(f"班级创建参数错误: {str(e)}")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"status": "error", "message": str(e)})
+            else:
+                messages.error(request, str(e))
+                return redirect("grading:class_create")
+
+        except Exception as e:
+            logger.error(f"班级创建失败: {str(e)}")
+            if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+                return JsonResponse({"status": "error", "message": f"班级创建失败: {str(e)}"})
+            else:
+                messages.error(request, f"班级创建失败: {str(e)}")
+                return redirect("grading:class_create")
 
 
 @login_required
@@ -5178,8 +5672,11 @@ def semester_management_view(request):
         semesters = semester_manager.get_sorted_semesters_for_display()
 
         # 为每个学期添加课程数量和状态信息
+        # 使用 annotate 优化查询，避免 N+1 问题
+        from django.db.models import Count
+        semesters = semesters.annotate(courses_count=Count('courses'))
+        
         for semester in semesters:
-            semester.courses_count = Course.objects.filter(semester=semester).count()
             semester.can_delete = not semester.is_active and semester.courses_count == 0
 
             # 添加状态信息
@@ -5749,13 +6246,21 @@ def delete_course_view(request):
 def repository_management_view(request):
     """仓库管理页面"""
     try:
-        # 获取用户的仓库列表
-        repositories = Repository.objects.filter(owner=request.user, is_active=True).order_by(
-            "-created_at"
-        )
+        from grading.services.repository_service import RepositoryService
+        
+        # 使用RepositoryService获取仓库列表
+        service = RepositoryService()
+        tenant = getattr(request, 'tenant', None)
+        repositories = service.list_repositories(request.user, tenant=tenant)
+        
+        # 获取用户的所有班级（用于创建仓库时选择）
+        from grading.services.class_service import ClassService
+        class_service = ClassService()
+        classes = class_service.list_classes_by_teacher(request.user, tenant=tenant)
 
         context = {
             "repositories": repositories,
+            "classes": classes,
             "page_title": "仓库管理",
         }
 
@@ -5772,45 +6277,56 @@ def repository_management_view(request):
 def add_repository_view(request):
     """添加仓库"""
     try:
+        from grading.services.repository_service import RepositoryService
+        from grading.models import Class
+        
+        service = RepositoryService()
+        
         name = request.POST.get("name", "").strip()
-        path = request.POST.get("path", "").strip()
-        url = request.POST.get("url", "").strip()
-        branch = request.POST.get("branch", "main").strip()
+        repo_type = request.POST.get("repo_type", "filesystem")
         description = request.POST.get("description", "").strip()
-        repo_type = request.POST.get("repo_type", "local")
-
-        if not name:
-            return JsonResponse({"status": "error", "message": "仓库名称不能为空"})
-
-        # 检查仓库名称是否已存在
-        if Repository.objects.filter(owner=request.user, name=name).exists():
-            return JsonResponse({"status": "error", "message": "仓库名称已存在"})
-
-        # 验证仓库类型和必需字段
-        if repo_type == "git" and not url:
-            return JsonResponse({"status": "error", "message": "Git仓库必须提供URL"})
-
-        if repo_type == "local" and not path:
-            return JsonResponse({"status": "error", "message": "本地仓库必须提供路径"})
-
-        # 获取用户租户
-        tenant = None
-        if hasattr(request, "tenant"):
-            tenant = request.tenant
-
-        # 创建仓库
-        repository = Repository.objects.create(
-            owner=request.user,
-            tenant=tenant,
-            name=name,
-            path=path,
-            url=url,
-            branch=branch,
-            description=description,
-            repo_type=repo_type,
-        )
-
-        logger.info(f"用户 {request.user.username} 创建了仓库: {name} ({repo_type})")
+        class_id = request.POST.get("class_id", "").strip()
+        
+        # 获取班级对象
+        class_obj = None
+        if class_id:
+            try:
+                class_obj = Class.objects.get(id=class_id, course__teacher=request.user)
+            except Class.DoesNotExist:
+                return JsonResponse({"status": "error", "message": "班级不存在或无权限访问"})
+        
+        # 获取租户
+        tenant = getattr(request, 'tenant', None)
+        
+        # 根据仓库类型创建
+        if repo_type == "git":
+            git_url = request.POST.get("git_url", "").strip()
+            git_branch = request.POST.get("git_branch", "main").strip()
+            git_username = request.POST.get("git_username", "").strip()
+            git_password = request.POST.get("git_password", "").strip()
+            
+            repository = service.create_git_repository(
+                teacher=request.user,
+                class_obj=class_obj,
+                name=name,
+                git_url=git_url,
+                branch=git_branch,
+                username=git_username,
+                password=git_password,
+                description=description,
+                tenant=tenant
+            )
+        else:  # filesystem
+            allocated_space_mb = int(request.POST.get("allocated_space_mb", "1024"))
+            
+            repository = service.create_filesystem_repository(
+                teacher=request.user,
+                class_obj=class_obj,
+                name=name,
+                allocated_space_mb=allocated_space_mb,
+                description=description,
+                tenant=tenant
+            )
 
         return JsonResponse(
             {
@@ -5819,7 +6335,7 @@ def add_repository_view(request):
                 "repository": {
                     "id": repository.id,
                     "name": repository.name,
-                    "type": repository.repo_type,
+                    "type": repository.get_repo_type_display(),
                     "path": repository.get_display_path(),
                     "description": repository.description,
                     "created_at": repository.created_at.strftime("%Y-%m-%d %H:%M"),
@@ -5827,6 +6343,9 @@ def add_repository_view(request):
             }
         )
 
+    except ValueError as e:
+        logger.error(f"创建仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": str(e)})
     except Exception as e:
         logger.error(f"创建仓库失败: {str(e)}")
         return JsonResponse({"status": "error", "message": f"创建仓库失败: {str(e)}"})
@@ -5837,46 +6356,65 @@ def add_repository_view(request):
 def update_repository_view(request):
     """更新仓库信息"""
     try:
+        from grading.services.repository_service import RepositoryService
+        
+        service = RepositoryService()
+        
         repository_id = request.POST.get("repository_id")
         if not repository_id:
             return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
 
-        repository = get_object_or_404(Repository, id=repository_id, owner=request.user)
-
-        # 更新字段
+        # 准备更新参数
+        update_params = {
+            "repo_id": int(repository_id),
+            "teacher": request.user
+        }
+        
+        # 基本字段
         name = request.POST.get("name", "").strip()
-        path = request.POST.get("path", "").strip()
-        url = request.POST.get("url", "").strip()
-        branch = request.POST.get("branch", "main").strip()
-        description = request.POST.get("description", "").strip()
-
-        if name and name != repository.name:
-            # 检查新名称是否已存在
-            if (
-                Repository.objects.filter(owner=request.user, name=name)
-                .exclude(id=repository.id)
-                .exists()
-            ):
-                return JsonResponse({"status": "error", "message": "仓库名称已存在"})
-            repository.name = name
-
-        if path:
-            repository.path = path
-        if url:
-            repository.url = url
-        if branch:
-            repository.branch = branch
+        if name:
+            update_params["name"] = name
+            
+        description = request.POST.get("description")
         if description is not None:
-            repository.description = description
-
-        repository.save()
-
-        logger.info(f"用户 {request.user.username} 更新了仓库: {repository.name}")
+            update_params["description"] = description
+            
+        is_active = request.POST.get("is_active")
+        if is_active is not None:
+            update_params["is_active"] = is_active.lower() == "true"
+        
+        # Git仓库特定字段
+        git_url = request.POST.get("git_url")
+        if git_url is not None:
+            update_params["git_url"] = git_url.strip()
+            
+        git_branch = request.POST.get("git_branch")
+        if git_branch is not None:
+            update_params["git_branch"] = git_branch.strip()
+            
+        git_username = request.POST.get("git_username")
+        if git_username is not None:
+            update_params["git_username"] = git_username.strip()
+            
+        git_password = request.POST.get("git_password")
+        if git_password is not None:
+            update_params["git_password"] = git_password
+        
+        # 文件系统仓库特定字段
+        allocated_space_mb = request.POST.get("allocated_space_mb")
+        if allocated_space_mb is not None:
+            update_params["allocated_space_mb"] = int(allocated_space_mb)
+        
+        # 执行更新
+        repository = service.update_repository(**update_params)
 
         return JsonResponse({"status": "success", "message": f"仓库 '{repository.name}' 更新成功"})
 
     except Repository.DoesNotExist:
         return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except ValueError as e:
+        logger.error(f"更新仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": str(e)})
     except Exception as e:
         logger.error(f"更新仓库失败: {str(e)}")
         return JsonResponse({"status": "error", "message": f"更新仓库失败: {str(e)}"})
@@ -5885,22 +6423,27 @@ def update_repository_view(request):
 @login_required
 @require_http_methods(["POST"])
 def delete_repository_view(request):
-    """删除仓库"""
+    """删除仓库配置（不删除物理文件）"""
     try:
+        from grading.services.repository_service import RepositoryService
+        
+        service = RepositoryService()
+        
         repository_id = request.POST.get("repository_id")
         if not repository_id:
             return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
 
-        repository = get_object_or_404(Repository, id=repository_id, owner=request.user)
+        # 获取仓库名称用于返回消息
+        repository = service.get_repository_by_id(int(repository_id), teacher=request.user)
         repository_name = repository.name
 
-        # 软删除：设置为非激活状态
-        repository.is_active = False
-        repository.save()
+        # 删除仓库配置
+        service.delete_repository(int(repository_id), teacher=request.user)
 
-        logger.info(f"用户 {request.user.username} 删除了仓库: {repository_name}")
-
-        return JsonResponse({"status": "success", "message": f"仓库 '{repository_name}' 删除成功"})
+        return JsonResponse({
+            "status": "success", 
+            "message": f"仓库 '{repository_name}' 配置已删除（物理文件未删除）"
+        })
 
     except Repository.DoesNotExist:
         return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
@@ -5969,6 +6512,94 @@ def sync_repository_view(request):
                 ),
             }
         )
+    except Repository.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except Exception as e:
+        logger.error(f"同步仓库失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"同步仓库失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def validate_git_connection_view(request):
+    """验证Git连接"""
+    try:
+        from grading.services.repository_service import RepositoryService
+        
+        service = RepositoryService()
+        
+        git_url = request.POST.get("git_url", "").strip()
+        git_branch = request.POST.get("git_branch", "main").strip()
+        git_username = request.POST.get("git_username", "").strip()
+        git_password = request.POST.get("git_password", "").strip()
+        
+        if not git_url:
+            return JsonResponse({"status": "error", "message": "Git仓库URL不能为空"})
+        
+        # 验证Git连接
+        is_valid, error_message = service.validate_git_connection(
+            git_url=git_url,
+            branch=git_branch,
+            username=git_username,
+            password=git_password
+        )
+        
+        if is_valid:
+            return JsonResponse({
+                "status": "success",
+                "message": "Git连接验证成功"
+            })
+        else:
+            return JsonResponse({
+                "status": "error",
+                "message": error_message
+            })
+    
+    except Exception as e:
+        logger.error(f"Git连接验证失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"验证失败: {str(e)}"})
+
+
+@login_required
+@require_http_methods(["POST"])
+def validate_directory_structure_view(request):
+    """验证目录结构"""
+    try:
+        from grading.services.repository_service import RepositoryService
+        import os
+        
+        service = RepositoryService()
+        
+        repository_id = request.POST.get("repository_id")
+        if not repository_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
+        
+        # 获取仓库
+        repository = service.get_repository_by_id(int(repository_id), teacher=request.user)
+        
+        # 获取仓库路径
+        repo_path = repository.get_full_path()
+        
+        # 验证目录结构
+        is_valid, error_message, suggestions = service.validate_directory_structure(repo_path)
+        
+        if is_valid:
+            return JsonResponse({
+                "status": "success",
+                "message": "目录结构验证通过"
+            })
+        else:
+            return JsonResponse({
+                "status": "error",
+                "message": error_message,
+                "suggestions": suggestions
+            })
+    
+    except Repository.DoesNotExist:
+        return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
+    except Exception as e:
+        logger.error(f"目录结构验证失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"验证失败: {str(e)}"})
 
     except Repository.DoesNotExist:
         return JsonResponse({"status": "error", "message": "仓库不存在或无权限访问"})
@@ -6383,10 +7014,14 @@ def batch_ai_score_view(request):
                     })
                     continue
                 
+                # 判断是否是实验报告 - 需求 6.3
+                is_lab_report = is_lab_report_file(file_path=file_path, base_dir=base_dir)
+                
                 # 调用AI评分服务（自动应用速率限制）
                 try:
                     score, comment = volcengine_score_homework(content)
                     
+                    # 验证AI返回结果的完整性 - 需求 6.3, 6.4
                     if score is None:
                         logger.error(f"AI评分失败: {file_name}, 原因: {comment}")
                         results["failed"] += 1
@@ -6394,6 +7029,17 @@ def batch_ai_score_view(request):
                             "file": file_name,
                             "status": "failed",
                             "message": f"AI评分失败: {comment}"
+                        })
+                        continue
+                    
+                    # 实验报告必须有评价 - 需求 6.3, 6.4
+                    if is_lab_report and (not comment or not comment.strip()):
+                        logger.error(f"实验报告AI评分缺少评价内容: {file_name}")
+                        results["failed"] += 1
+                        results["details"].append({
+                            "file": file_name,
+                            "status": "failed",
+                            "message": "实验报告必须包含评价内容，请重新生成AI评分"
                         })
                         continue
                     
@@ -6409,12 +7055,13 @@ def batch_ai_score_view(request):
                     else:
                         grade = "E"
                     
-                    # 写入评分和评价
+                    # 写入评分和评价 - 需求 8.4
                     format_warning = write_grade_and_comment_to_file(
                         full_path=file_path,
                         grade=grade,
                         comment=f"AI评价：{comment}",
-                        base_dir=base_dir
+                        base_dir=base_dir,
+                        is_lab_report=is_lab_report
                     )
                     
                     results["success"] += 1
@@ -6928,3 +7575,446 @@ def clear_cache_api(request):
             {"success": False, "message": f"清除缓存失败: {str(e)}"},
             status=500
         )
+
+
+
+# ============================================================================
+# 学生作业上传功能
+# ============================================================================
+
+@login_required
+def homework_upload_page(request):
+    """学生作业上传页面
+    
+    仅支持文件系统方式的仓库
+    """
+    return render(request, "homework_upload.html")
+
+
+@login_required
+@require_http_methods(["GET"])
+def get_student_homework_list(request):
+    """获取学生可上传的作业列表
+    
+    Returns:
+        JSON响应，包含作业列表和提交历史
+    """
+    try:
+        user = request.user
+        
+        # 获取用户所属的班级（通过课程关联）
+        # 这里假设学生通过某种方式关联到班级
+        # 实际实现可能需要根据具体的用户-班级关联方式调整
+        
+        # 获取所有文件系统方式的仓库对应的班级
+        filesystem_repos = Repository.objects.filter(
+            repo_type="filesystem",
+            is_active=True
+        ).select_related('class_obj', 'class_obj__course')
+        
+        # 获取这些班级的作业
+        class_ids = [repo.class_obj.id for repo in filesystem_repos if repo.class_obj]
+        
+        homeworks = Homework.objects.filter(
+            class_obj_id__in=class_ids
+        ).select_related('course', 'class_obj').order_by('-created_at')
+        
+        homework_list = []
+        for homework in homeworks:
+            # 获取该学生的提交历史
+            submissions = Submission.objects.filter(
+                homework=homework,
+                student=user
+            ).order_by('-version')
+            
+            # 检查是否过期
+            is_overdue = False
+            if homework.due_date:
+                is_overdue = timezone.now() > homework.due_date
+            
+            homework_data = {
+                'id': homework.id,
+                'title': homework.title,
+                'description': homework.description,
+                'homework_type': homework.homework_type,
+                'course_name': homework.course.name if homework.course else '',
+                'class_name': homework.class_obj.name if homework.class_obj else '',
+                'due_date': homework.due_date.isoformat() if homework.due_date else None,
+                'is_overdue': is_overdue,
+                'submissions': [
+                    {
+                        'id': sub.id,
+                        'file_name': sub.file_name,
+                        'file_size': sub.file_size,
+                        'version': sub.version,
+                        'submitted_at': sub.submitted_at.isoformat(),
+                        'grade': sub.grade,
+                    }
+                    for sub in submissions
+                ]
+            }
+            homework_list.append(homework_data)
+        
+        return JsonResponse({
+            'success': True,
+            'homeworks': homework_list
+        })
+        
+    except Exception as e:
+        logger.error(f"获取作业列表失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'获取作业列表失败: {str(e)}'
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def upload_homework(request):
+    """处理学生作业上传
+    
+    POST参数:
+        - file: 上传的文件
+        - homework_id: 作业ID
+    
+    Returns:
+        JSON响应，包含上传结果
+    """
+    try:
+        # 获取参数
+        homework_id = request.POST.get('homework_id')
+        uploaded_file = request.FILES.get('file')
+        
+        if not homework_id:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少作业ID'
+            }, status=400)
+        
+        if not uploaded_file:
+            return JsonResponse({
+                'success': False,
+                'message': '未选择文件'
+            }, status=400)
+        
+        # 获取作业对象
+        try:
+            homework = Homework.objects.select_related(
+                'course', 'class_obj'
+            ).get(id=homework_id)
+        except Homework.DoesNotExist:
+            return JsonResponse({
+                'success': False,
+                'message': '作业不存在'
+            }, status=404)
+        
+        # 检查作业是否过期
+        if homework.due_date and timezone.now() > homework.due_date:
+            return JsonResponse({
+                'success': False,
+                'message': '作业已过期，无法上传'
+            }, status=400)
+        
+        # 获取仓库
+        repository = Repository.objects.filter(
+            class_obj=homework.class_obj,
+            repo_type="filesystem",
+            is_active=True
+        ).first()
+        
+        if not repository:
+            return JsonResponse({
+                'success': False,
+                'message': '该班级没有配置文件系统仓库'
+            }, status=400)
+        
+        # 使用文件上传服务处理上传
+        upload_service = FileUploadService()
+        
+        try:
+            submission = upload_service.upload_submission(
+                student=request.user,
+                homework=homework,
+                file=uploaded_file,
+                repository=repository
+            )
+            
+            logger.info(
+                f"学生 {request.user.username} 成功上传作业: "
+                f"{homework.title} (版本: {submission.version})"
+            )
+            
+            return JsonResponse({
+                'success': True,
+                'message': f'上传成功！版本号: {submission.version}',
+                'submission': {
+                    'id': submission.id,
+                    'file_name': submission.file_name,
+                    'file_size': submission.file_size,
+                    'version': submission.version,
+                    'submitted_at': submission.submitted_at.isoformat()
+                }
+            })
+            
+        except ValueError as e:
+            # 验证错误
+            return JsonResponse({
+                'success': False,
+                'message': str(e)
+            }, status=400)
+        
+    except Exception as e:
+        logger.error(f"上传作业失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'上传失败: {str(e)}'
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def get_submission_history(request):
+    """获取学生的作业提交历史
+    
+    GET参数:
+        - homework_id: 作业ID
+    
+    Returns:
+        JSON响应，包含提交历史列表
+    """
+    try:
+        homework_id = request.GET.get('homework_id')
+        
+        if not homework_id:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少作业ID'
+            }, status=400)
+        
+        # 获取作业对象
+        try:
+            homework = Homework.objects.get(id=homework_id)
+        except Homework.DoesNotExist:
+            return JsonResponse({
+                'success': False,
+                'message': '作业不存在'
+            }, status=404)
+        
+        # 获取提交历史
+        submissions = Submission.objects.filter(
+            homework=homework,
+            student=request.user
+        ).order_by('-version')
+        
+        submission_list = [
+            {
+                'id': sub.id,
+                'file_name': sub.file_name,
+                'file_size': sub.file_size,
+                'version': sub.version,
+                'submitted_at': sub.submitted_at.isoformat(),
+                'grade': sub.grade,
+                'comment': sub.comment,
+                'graded_at': sub.graded_at.isoformat() if sub.graded_at else None
+            }
+            for sub in submissions
+        ]
+        
+        return JsonResponse({
+            'success': True,
+            'submissions': submission_list
+        })
+        
+    except Exception as e:
+        logger.error(f"获取提交历史失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'获取提交历史失败: {str(e)}'
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+def check_storage_space(request):
+    """检查仓库存储空间使用情况
+    
+    GET参数:
+        - repository_id: 仓库ID
+    
+    Returns:
+        JSON响应，包含空间使用信息
+    """
+    try:
+        repository_id = request.GET.get('repository_id')
+        
+        if not repository_id:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少仓库ID'
+            }, status=400)
+        
+        # 获取仓库对象
+        try:
+            repository = Repository.objects.get(id=repository_id)
+        except Repository.DoesNotExist:
+            return JsonResponse({
+                'success': False,
+                'message': '仓库不存在'
+            }, status=404)
+        
+        # 检查权限（只有仓库所有者或管理员可以查看）
+        if repository.owner != request.user and not request.user.is_staff:
+            return JsonResponse({
+                'success': False,
+                'message': '无权限查看该仓库信息'
+            }, status=403)
+        
+        # 使用文件上传服务检查空间
+        upload_service = FileUploadService()
+        used_mb, total_mb, usage_percentage = upload_service.check_storage_space(repository)
+        
+        return JsonResponse({
+            'success': True,
+            'storage': {
+                'used_mb': used_mb,
+                'total_mb': total_mb,
+                'usage_percentage': round(usage_percentage, 2),
+                'available_mb': total_mb - used_mb
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"检查存储空间失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'检查存储空间失败: {str(e)}'
+        }, status=500)
+
+
+# ============================================================================
+# 评价模板API - 需求 5.2.1-5.2.12
+# ============================================================================
+
+@login_required
+@require_http_methods(["GET"])
+def get_recommended_comment_templates(request):
+    """获取推荐的评价模板
+    
+    推荐逻辑：
+    1. 先获取个人常用评价（最多5个）
+    2. 如果个人评价不足5个，用系统评价补充
+    3. 总共返回最多5个模板
+    
+    Returns:
+        JSON响应，包含推荐的评价模板列表
+    """
+    try:
+        from grading.services.comment_template_service import CommentTemplateService
+        
+        service = CommentTemplateService()
+        templates = service.get_recommended_templates(request.user)
+        
+        # 转换为JSON格式
+        templates_data = [
+            {
+                'id': template.id,
+                'comment_text': template.comment_text,
+                'usage_count': template.usage_count,
+                'template_type': template.template_type,
+                'template_type_display': template.get_template_type_display(),
+                'last_used_at': template.last_used_at.isoformat() if template.last_used_at else None
+            }
+            for template in templates
+        ]
+        
+        logger.info(
+            f"为用户 {request.user.username} 返回 {len(templates_data)} 个推荐评价模板"
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'templates': templates_data
+        })
+        
+    except Exception as e:
+        logger.error(f"获取推荐评价模板失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'获取推荐评价模板失败: {str(e)}'
+        }, status=500)
+
+
+@login_required
+@require_http_methods(["POST"])
+def record_comment_usage(request):
+    """记录评价使用次数
+    
+    当教师保存评价时调用此方法，统计评价使用次数。
+    
+    POST参数:
+        - comment_text: 评价内容
+    
+    Returns:
+        JSON响应，包含操作结果
+    """
+    try:
+        import json
+        from grading.services.comment_template_service import CommentTemplateService
+        
+        # 解析请求数据
+        data = json.loads(request.body)
+        comment_text = data.get('comment_text', '').strip()
+        
+        if not comment_text:
+            return JsonResponse({
+                'success': False,
+                'message': '评价内容不能为空'
+            }, status=400)
+        
+        # 获取租户信息
+        tenant = None
+        if hasattr(request.user, 'profile'):
+            tenant = request.user.profile.tenant
+        
+        if not tenant:
+            return JsonResponse({
+                'success': False,
+                'message': '无法确定租户信息'
+            }, status=400)
+        
+        # 记录评价使用
+        service = CommentTemplateService()
+        template = service.record_comment_usage(
+            teacher=request.user,
+            comment_text=comment_text,
+            tenant=tenant
+        )
+        
+        logger.info(
+            f"记录评价使用: 用户={request.user.username}, "
+            f"使用次数={template.usage_count}, "
+            f"内容={comment_text[:50]}..."
+        )
+        
+        return JsonResponse({
+            'success': True,
+            'message': '评价使用记录成功',
+            'template': {
+                'id': template.id,
+                'usage_count': template.usage_count,
+                'template_type': template.template_type
+            }
+        })
+        
+    except ValueError as e:
+        logger.warning(f"记录评价使用失败: {str(e)}")
+        return JsonResponse({
+            'success': False,
+            'message': str(e)
+        }, status=400)
+    except Exception as e:
+        logger.error(f"记录评价使用失败: {str(e)}", exc_info=True)
+        return JsonResponse({
+            'success': False,
+            'message': f'记录评价使用失败: {str(e)}'
+        }, status=500)

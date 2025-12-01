@@ -76,9 +76,14 @@
                                         {% if repo.repo_type == 'git' %}
                                             <i class="bi bi-git"></i> Git仓库
                                         {% else %}
-                                            <i class="bi bi-folder"></i> 本地目录
+                                            <i class="bi bi-folder"></i> 文件系统
                                         {% endif %}
                                     </span>
+                                    {% if repo.class_obj %}
+                                    <span class="badge bg-secondary ms-2">
+                                        <i class="bi bi-people"></i> {{ repo.class_obj.name }}
+                                    </span>
+                                    {% endif %}
                                 </div>
 
                                 <div class="repository-path mb-2">
@@ -94,6 +99,9 @@
                                     {% if repo.last_sync %}
                                         | <i class="bi bi-arrow-repeat"></i> 最后同步: {{ repo.last_sync|date:"Y-m-d H:i" }}
                                     {% endif %}
+                                    {% if repo.repo_type == 'filesystem' %}
+                                        | <i class="bi bi-hdd"></i> 分配空间: {{ repo.allocated_space_mb }}MB
+                                    {% endif %}
                                 </div>
                             </div>
 
@@ -105,12 +113,20 @@
                                         <i class="bi bi-arrow-repeat"></i> 同步
                                     </button>
                                     {% endif %}
+                                    
+                                    <button type="button" class="btn btn-outline-info btn-sm validate-structure-btn"
+                                            data-repo-id="{{ repo.id }}" data-repo-name="{{ repo.name }}">
+                                        <i class="bi bi-check-circle"></i> 验证结构
+                                    </button>
 
                                     <button type="button" class="btn btn-outline-primary btn-sm edit-repo-btn"
                                             data-repo-id="{{ repo.id }}" data-repo-name="{{ repo.name }}"
-                                            data-repo-path="{{ repo.path }}" data-repo-url="{{ repo.url }}"
-                                            data-repo-branch="{{ repo.branch }}" data-repo-description="{{ repo.description }}"
-                                            data-repo-type="{{ repo.repo_type }}">
+                                            data-repo-path="{{ repo.filesystem_path|default:repo.path }}" 
+                                            data-repo-url="{{ repo.git_url|default:repo.url }}"
+                                            data-repo-branch="{{ repo.git_branch|default:repo.branch }}" 
+                                            data-repo-description="{{ repo.description }}"
+                                            data-repo-type="{{ repo.repo_type }}"
+                                            data-class-id="{{ repo.class_obj.id|default:'' }}">
                                         <i class="bi bi-pencil"></i> 编辑
                                     </button>
 
@@ -150,32 +166,68 @@
                         <label for="repoName" class="form-label">仓库名称 <span class="text-danger">*</span></label>
                         <input type="text" class="form-control" id="repoName" name="name" required>
                     </div>
+                    
+                    <div class="form-group mb-3">
+                        <label for="repoClass" class="form-label">关联班级</label>
+                        <select class="form-select" id="repoClass" name="class_id">
+                            <option value="">不关联班级</option>
+                            {% for class in classes %}
+                            <option value="{{ class.id }}">{{ class.course.name }} - {{ class.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <div class="form-text">可选：将仓库关联到特定班级</div>
+                    </div>
 
                     <div class="form-group mb-3">
                         <label for="repoType" class="form-label">仓库类型 <span class="text-danger">*</span></label>
                         <select class="form-select" id="repoType" name="repo_type" required>
-                            <option value="local">本地目录</option>
+                            <option value="filesystem">文件系统</option>
                             <option value="git">Git仓库</option>
                         </select>
                     </div>
 
-                    <div class="form-group mb-3" id="pathGroup">
-                        <label for="repoPath" class="form-label">本地路径 <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="repoPath" name="path"
-                               placeholder="例如: my-project">
-                        <div class="form-text">相对于用户基础目录的路径</div>
+                    <!-- Git仓库字段 -->
+                    <div id="gitFields" style="display: none;">
+                        <div class="form-group mb-3">
+                            <label for="gitUrl" class="form-label">Git仓库URL <span class="text-danger">*</span></label>
+                            <input type="url" class="form-control" id="gitUrl" name="git_url"
+                                   placeholder="https://github.com/user/repo.git">
+                        </div>
+
+                        <div class="form-group mb-3">
+                            <label for="gitBranch" class="form-label">默认分支</label>
+                            <input type="text" class="form-control" id="gitBranch" name="git_branch"
+                                   value="main" placeholder="main">
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <label for="gitUsername" class="form-label">Git用户名（可选）</label>
+                            <input type="text" class="form-control" id="gitUsername" name="git_username"
+                                   placeholder="用于私有仓库认证">
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <label for="gitPassword" class="form-label">Git密码/Token（可选）</label>
+                            <input type="password" class="form-control" id="gitPassword" name="git_password"
+                                   placeholder="用于私有仓库认证">
+                        </div>
+                        
+                        <div class="form-group mb-3">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" id="validateGitBtn">
+                                <i class="bi bi-check-circle"></i> 验证Git连接
+                            </button>
+                            <span id="gitValidationResult" class="ms-2"></span>
+                        </div>
                     </div>
 
-                    <div class="form-group mb-3" id="urlGroup" style="display: none;">
-                        <label for="repoUrl" class="form-label">Git仓库URL <span class="text-danger">*</span></label>
-                        <input type="url" class="form-control" id="repoUrl" name="url"
-                               placeholder="https://github.com/user/repo.git">
-                    </div>
-
-                    <div class="form-group mb-3" id="branchGroup" style="display: none;">
-                        <label for="repoBranch" class="form-label">默认分支</label>
-                        <input type="text" class="form-control" id="repoBranch" name="branch"
-                               value="main" placeholder="main">
+                    <!-- 文件系统字段 -->
+                    <div id="filesystemFields">
+                        <div class="form-group mb-3">
+                            <label for="allocatedSpace" class="form-label">分配空间（MB）</label>
+                            <input type="number" class="form-control" id="allocatedSpace" name="allocated_space_mb"
+                                   value="1024" min="1" placeholder="1024">
+                            <div class="form-text">为该仓库分配的存储空间</div>
+                        </div>
                     </div>
 
                     <div class="form-group mb-3">
@@ -260,18 +312,58 @@ $(document).ready(function() {
     $('#repoType').change(function() {
         const type = $(this).val();
         if (type === 'git') {
-            $('#pathGroup').hide();
-            $('#urlGroup').show();
-            $('#branchGroup').show();
-            $('#repoPath').removeAttr('required');
-            $('#repoUrl').attr('required', true);
+            $('#filesystemFields').hide();
+            $('#gitFields').show();
+            $('#gitUrl').attr('required', true);
         } else {
-            $('#pathGroup').show();
-            $('#urlGroup').hide();
-            $('#branchGroup').hide();
-            $('#repoPath').attr('required', true);
-            $('#repoUrl').removeAttr('required');
+            $('#filesystemFields').show();
+            $('#gitFields').hide();
+            $('#gitUrl').removeAttr('required');
         }
+    });
+    
+    // 验证Git连接
+    $('#validateGitBtn').click(function() {
+        const btn = $(this);
+        const resultSpan = $('#gitValidationResult');
+        
+        const gitUrl = $('#gitUrl').val().trim();
+        const gitBranch = $('#gitBranch').val().trim() || 'main';
+        const gitUsername = $('#gitUsername').val().trim();
+        const gitPassword = $('#gitPassword').val();
+        
+        if (!gitUrl) {
+            resultSpan.html('<span class="text-danger">请输入Git仓库URL</span>');
+            return;
+        }
+        
+        btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 验证中...');
+        resultSpan.html('');
+        
+        $.ajax({
+            url: '{% url "grading:validate_git_connection" %}',
+            method: 'POST',
+            data: {
+                'git_url': gitUrl,
+                'git_branch': gitBranch,
+                'git_username': gitUsername,
+                'git_password': gitPassword,
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            },
+            success: function(response) {
+                if (response.status === 'success') {
+                    resultSpan.html('<span class="text-success"><i class="bi bi-check-circle-fill"></i> ' + response.message + '</span>');
+                } else {
+                    resultSpan.html('<span class="text-danger"><i class="bi bi-x-circle-fill"></i> ' + response.message + '</span>');
+                }
+            },
+            error: function(xhr) {
+                resultSpan.html('<span class="text-danger"><i class="bi bi-x-circle-fill"></i> 验证请求失败</span>');
+            },
+            complete: function() {
+                btn.prop('disabled', false).html('<i class="bi bi-check-circle"></i> 验证Git连接');
+            }
+        });
     });
 
     // 保存仓库
@@ -408,6 +500,41 @@ $(document).ready(function() {
             },
             complete: function() {
                 btn.prop('disabled', false).html('<i class="bi bi-arrow-repeat"></i> 同步');
+            }
+        });
+    });
+    
+    // 验证目录结构
+    $('.validate-structure-btn').click(function() {
+        const repoId = $(this).data('repo-id');
+        const repoName = $(this).data('repo-name');
+        const btn = $(this);
+
+        btn.prop('disabled', true).html('<i class="bi bi-hourglass-split"></i> 验证中...');
+
+        $.ajax({
+            url: '{% url "grading:validate_directory_structure" %}',
+            method: 'POST',
+            data: {
+                'repository_id': repoId,
+                'csrfmiddlewaretoken': $('[name=csrfmiddlewaretoken]').val()
+            },
+            success: function(response) {
+                if (response.status === 'success') {
+                    alert('✓ ' + response.message);
+                } else {
+                    let message = '✗ ' + response.message;
+                    if (response.suggestions && response.suggestions.length > 0) {
+                        message += '\n\n建议修复步骤：\n' + response.suggestions.join('\n');
+                    }
+                    alert(message);
+                }
+            },
+            error: function(xhr) {
+                alert('验证失败，请重试');
+            },
+            complete: function() {
+                btn.prop('disabled', false).html('<i class="bi bi-check-circle"></i> 验证结构');
             }
         });
     });

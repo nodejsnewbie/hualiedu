@@ -1,0 +1,190 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>班级列表</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn:hover {
+            background-color: #45a049;
+        }
+
+        .btn-secondary {
+            background-color: #666;
+        }
+
+        .btn-secondary:hover {
+            background-color: #555;
+        }
+
+        .course-info {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .class-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        .class-table th,
+        .class-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .class-table th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .class-table tr:hover {
+            background-color: #f9f9f9;
+        }
+
+        .class-name {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .course-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            background-color: #2196F3;
+            color: white;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-actions">
+            <h1>班级列表</h1>
+            <div>
+                {% if course %}
+                <a href="{% url 'grading:class_create' %}?course_id={{ course.id }}" class="btn">创建班级</a>
+                {% else %}
+                <a href="{% url 'grading:class_create' %}" class="btn">创建班级</a>
+                {% endif %}
+                <a href="{% url 'grading:course_list' %}" class="btn btn-secondary">返回课程列表</a>
+            </div>
+        </div>
+
+        {% if course %}
+        <div class="course-info">
+            <h3 style="margin-top: 0; color: #1976d2;">课程：{{ course.name }}</h3>
+            <p style="margin-bottom: 0;">
+                <strong>类型：</strong>{{ course.get_course_type_display }}
+                {% if course.description %}
+                <br><strong>描述：</strong>{{ course.description }}
+                {% endif %}
+            </p>
+        </div>
+        {% endif %}
+
+        {% if classes %}
+        <table class="class-table">
+            <thead>
+                <tr>
+                    <th>班级名称</th>
+                    <th>所属课程</th>
+                    <th>学生人数</th>
+                    <th>创建时间</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for class in classes %}
+                <tr>
+                    <td class="class-name">{{ class.name }}</td>
+                    <td>
+                        <span class="course-badge">{{ class.course.name }}</span>
+                    </td>
+                    <td>{{ class.student_count }} 人</td>
+                    <td>{{ class.created_at|date:"Y-m-d H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state">
+            <div class="empty-state-icon">👥</div>
+            <p>暂无班级</p>
+            {% if course %}
+            <a href="{% url 'grading:class_create' %}?course_id={{ course.id }}" class="btn">
+                为该课程创建第一个班级
+            </a>
+            {% else %}
+            <a href="{% url 'grading:class_create' %}" class="btn">创建第一个班级</a>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

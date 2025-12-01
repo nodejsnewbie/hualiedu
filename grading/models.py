@@ -174,6 +174,11 @@ class Assignment(models.Model):
 class Repository(models.Model):
     """仓库模型 - 用户级仓库管理"""
 
+    REPO_TYPE_CHOICES = [
+        ("git", "Git仓库"),
+        ("filesystem", "文件系统"),
+    ]
+
     owner = models.ForeignKey(
         "auth.User",
         on_delete=models.CASCADE,
@@ -185,20 +190,38 @@ class Repository(models.Model):
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="repositories", null=True, blank=True
     )
+    class_obj = models.ForeignKey(
+        "Class",
+        on_delete=models.CASCADE,
+        related_name="repositories",
+        null=True,
+        blank=True,
+        help_text="关联班级"
+    )
     name = models.CharField(max_length=255, help_text="仓库名称")
     path = models.CharField(max_length=500, help_text="仓库路径", default="")
-    url = models.URLField(blank=True, help_text="仓库URL（Git仓库）")
-    branch = models.CharField(max_length=100, default="main", help_text="默认分支")
-    description = models.TextField(blank=True, help_text="仓库描述")
     repo_type = models.CharField(
         max_length=20,
-        choices=[
-            ("local", "本地目录"),
-            ("git", "Git仓库"),
-        ],
-        default="local",
+        choices=REPO_TYPE_CHOICES,
+        default="filesystem",
         help_text="仓库类型",
     )
+    
+    # Git仓库方式字段
+    git_url = models.URLField(blank=True, null=True, help_text="Git仓库URL")
+    git_branch = models.CharField(max_length=100, blank=True, default="main", help_text="Git分支")
+    git_username = models.CharField(max_length=100, blank=True, help_text="Git用户名")
+    git_password = models.CharField(max_length=200, blank=True, help_text="Git密码（加密存储）")
+    
+    # 文件系统方式字段
+    filesystem_path = models.CharField(max_length=500, blank=True, help_text="文件系统路径")
+    allocated_space_mb = models.IntegerField(default=1024, help_text="分配空间（MB）")
+    
+    # 兼容旧字段
+    url = models.URLField(blank=True, help_text="仓库URL（兼容旧版本）")
+    branch = models.CharField(max_length=100, default="main", help_text="默认分支（兼容旧版本）")
+    
+    description = models.TextField(blank=True, help_text="仓库描述")
     is_active = models.BooleanField(default=True, help_text="是否激活")
     last_sync = models.DateTimeField(null=True, blank=True, help_text="最后同步时间")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -209,6 +232,12 @@ class Repository(models.Model):
         verbose_name = "仓库"
         verbose_name_plural = "仓库"
         unique_together = ["owner", "name"]
+        indexes = [
+            models.Index(fields=["owner", "is_active"]),
+            models.Index(fields=["tenant", "is_active"]),
+            models.Index(fields=["class_obj", "is_active"]),
+            models.Index(fields=["repo_type", "is_active"]),
+        ]
 
     def __str__(self):
         return f"{self.owner.username} - {self.name}"
@@ -271,18 +300,45 @@ class Repository(models.Model):
 
 
 class Submission(models.Model):
-    """提交模型 - 支持多租户"""
+    """学生作业提交模型"""
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="submissions", null=True, blank=True
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+        null=True,
+        blank=True,
+        help_text="所属租户"
+    )
+    homework = models.ForeignKey(
+        "Homework",
+        on_delete=models.CASCADE,
+        related_name="submissions",
+        null=True,
+        blank=True,
+        help_text="所属作业"
+    )
+    student = models.ForeignKey(
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="submissions",
+        null=True,
+        blank=True,
+        help_text="提交学生"
     )
     repository = models.ForeignKey(
-        Repository, on_delete=models.CASCADE, related_name="submissions", null=True, blank=True
+        Repository,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+        null=True,
+        blank=True,
+        help_text="所属仓库"
     )
     file_path = models.CharField(max_length=500, help_text="文件路径")
-    file_name = models.CharField(max_length=255, help_text="文件名")
-    file_size = models.BigIntegerField(default=0, help_text="文件大小")
+    file_name = models.CharField(max_length=200, help_text="文件名")
+    file_size = models.IntegerField(default=0, help_text="文件大小（字节）")
     submitted_at = models.DateTimeField(auto_now_add=True, help_text="提交时间")
+    version = models.IntegerField(default=1, help_text="版本号")
     graded_at = models.DateTimeField(null=True, blank=True, help_text="评分时间")
     grade = models.CharField(max_length=50, blank=True, default="", help_text="评分")
     comment = models.TextField(blank=True, default="", help_text="评语")
@@ -291,10 +347,18 @@ class Submission(models.Model):
         db_table = "grading_submission"
         verbose_name = "提交"
         verbose_name_plural = "提交"
-        unique_together = ["tenant", "repository", "file_path"]
+        ordering = ["-submitted_at"]
+        indexes = [
+            models.Index(fields=["homework", "student", "-submitted_at"]),
+            models.Index(fields=["repository", "-submitted_at"]),
+            models.Index(fields=["tenant", "-submitted_at"]),
+            models.Index(fields=["student", "-submitted_at"]),
+        ]
 
     def __str__(self):
-        return f"{self.tenant.name} - {self.file_name}"
+        if self.homework and self.student:
+            return f"{self.student.username} - {self.homework.title} - v{self.version}"
+        return f"{self.file_name} - v{self.version}"
 
     def save(self, *args, **kwargs):
         if self.grade and not self.graded_at:
@@ -308,15 +372,35 @@ class GradeTypeConfig(models.Model):
     GRADE_TYPE_CHOICES = [
         ("letter", "字母等级 (A/B/C/D/E)"),
         ("text", "文本等级 (优秀/良好/中等/及格/不及格)"),
-        ("numeric", "数字等级 (90-100/80-89/70-79/60-69/0-59)"),
+        ("percentage", "百分制 (0-100)"),
     ]
 
     tenant = models.ForeignKey(
-        Tenant, on_delete=models.CASCADE, related_name="grade_type_configs", null=True, blank=True
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="grade_type_configs",
+        null=True,
+        blank=True,
+        help_text="所属租户"
     )
-    class_identifier = models.CharField(max_length=255, help_text="班级标识，如班级名称或路径")
+    class_obj = models.ForeignKey(
+        "Class",
+        on_delete=models.CASCADE,
+        related_name="grade_type_configs",
+        null=True,
+        blank=True,
+        help_text="关联班级"
+    )
+    class_identifier = models.CharField(
+        max_length=255,
+        blank=True,
+        help_text="班级标识，如班级名称或路径（兼容旧版本）"
+    )
     grade_type = models.CharField(
-        max_length=20, choices=GRADE_TYPE_CHOICES, default="letter", help_text="评分类型"
+        max_length=20,
+        choices=GRADE_TYPE_CHOICES,
+        default="letter",
+        help_text="评分类型"
     )
     is_locked = models.BooleanField(default=False, help_text="是否已锁定评分类型")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -327,10 +411,14 @@ class GradeTypeConfig(models.Model):
         verbose_name = "评分类型配置"
         verbose_name_plural = "评分类型配置"
         unique_together = ["tenant", "class_identifier"]
+        indexes = [
+            models.Index(fields=["tenant", "class_obj"]),
+        ]
 
     def __str__(self):
         tenant_name = self.tenant.name if self.tenant else "无租户"
-        return f"{tenant_name} - {self.class_identifier} - {self.get_grade_type_display()}"
+        class_name = self.class_obj.name if self.class_obj else self.class_identifier
+        return f"{tenant_name} - {class_name} - {self.get_grade_type_display()}"
 
     def lock_grade_type(self):
         """锁定评分类型"""
@@ -588,9 +676,17 @@ class Course(models.Model):
         help_text="课程类型"
     )
     description = models.TextField(blank=True, help_text="课程描述")
-    location = models.CharField(max_length=100, help_text="上课地点")
+    location = models.CharField(max_length=100, blank=True, help_text="上课地点")
     class_name = models.CharField(
         max_length=100, blank=True, help_text="班级名称，如：计算机科学1班"
+    )
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="courses",
+        null=True,
+        blank=True,
+        help_text="所属租户"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -600,10 +696,49 @@ class Course(models.Model):
         verbose_name = "课程"
         verbose_name_plural = "课程"
         ordering = ["semester", "name"]
+        indexes = [
+            models.Index(fields=["teacher", "semester"]),
+            models.Index(fields=["tenant", "semester"]),
+        ]
 
     def __str__(self):
         class_info = f" - {self.class_name}" if self.class_name else ""
         return f"{self.semester.name} - {self.name}{class_info}"
+
+
+class Class(models.Model):
+    """班级模型"""
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="classes",
+        null=True,
+        blank=True,
+        help_text="所属租户"
+    )
+    course = models.ForeignKey(
+        Course,
+        on_delete=models.CASCADE,
+        related_name="classes",
+        help_text="所属课程"
+    )
+    name = models.CharField(max_length=200, help_text="班级名称")
+    student_count = models.IntegerField(default=0, help_text="学生人数")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_class"
+        verbose_name = "班级"
+        verbose_name_plural = "班级"
+        ordering = ["course", "name"]
+        indexes = [
+            models.Index(fields=["course", "tenant"]),
+        ]
+
+    def __str__(self):
+        return f"{self.course.name} - {self.name}"
 
 
 class CourseSchedule(models.Model):
@@ -738,11 +873,27 @@ class Homework(models.Model):
         ("lab_report", "实验报告"),
     ]
 
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="homeworks",
+        null=True,
+        blank=True,
+        help_text="所属租户"
+    )
     course = models.ForeignKey(
         Course,
         on_delete=models.CASCADE,
         related_name="homeworks",
         help_text="所属课程"
+    )
+    class_obj = models.ForeignKey(
+        "Class",
+        on_delete=models.CASCADE,
+        related_name="homeworks",
+        null=True,
+        blank=True,
+        help_text="所属班级"
     )
     title = models.CharField(max_length=200, help_text="作业标题")
     homework_type = models.CharField(
@@ -766,6 +917,10 @@ class Homework(models.Model):
         verbose_name_plural = "作业"
         ordering = ["course", "-created_at"]
         unique_together = ["course", "folder_name"]
+        indexes = [
+            models.Index(fields=["course", "folder_name"]),
+            models.Index(fields=["tenant", "homework_type"]),
+        ]
 
     def __str__(self):
         return f"{self.course.name} - {self.title} ({self.get_homework_type_display()})"
@@ -773,3 +928,51 @@ class Homework(models.Model):
     def is_lab_report(self):
         """判断是否为实验报告"""
         return self.homework_type == "lab_report"
+
+
+class CommentTemplate(models.Model):
+    """评价模板模型"""
+
+    TEMPLATE_TYPE_CHOICES = [
+        ("personal", "个人模板"),
+        ("system", "系统模板"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="comment_templates",
+        help_text="所属租户"
+    )
+    teacher = models.ForeignKey(
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="comment_templates",
+        blank=True,
+        null=True,
+        help_text="教师（个人模板有teacher）"
+    )
+    template_type = models.CharField(
+        max_length=20,
+        choices=TEMPLATE_TYPE_CHOICES,
+        help_text="模板类型"
+    )
+    comment_text = models.TextField(help_text="评价内容")
+    usage_count = models.IntegerField(default=0, help_text="使用次数")
+    last_used_at = models.DateTimeField(auto_now=True, help_text="最后使用时间")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "grading_comment_template"
+        verbose_name = "评价模板"
+        verbose_name_plural = "评价模板"
+        ordering = ["-usage_count", "-last_used_at"]
+        indexes = [
+            models.Index(fields=["teacher", "template_type", "-usage_count"]),
+            models.Index(fields=["tenant", "template_type", "-usage_count"]),
+        ]
+
+    def __str__(self):
+        if self.teacher:
+            return f"{self.teacher.username} - {self.comment_text[:50]}"
+        return f"系统模板 - {self.comment_text[:50]}"

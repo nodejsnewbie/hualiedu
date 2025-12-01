@@ -114,6 +114,9 @@
                             <button type="button" class="btn btn-outline-secondary grade-mode-btn" data-mode="text">
                                 文字等级
                             </button>
+                            <button type="button" class="btn btn-outline-secondary grade-mode-btn" data-mode="percentage">
+                                百分制
+                            </button>
                         </div>
 
 
@@ -134,6 +137,12 @@
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="中等">中等</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="及格">及格</button>
                             <button type="button" class="btn btn-outline-primary grade-button" data-grade="不及格">不及格</button>
+                        </div>
+
+                        <!-- 百分制输入框 -->
+                        <div class="input-group me-3" id="percentage-grade-input" style="display: none; width: 180px;">
+                            <input type="number" class="form-control" id="percentage-input" min="0" max="100" step="0.5" value="85" placeholder="0-100" aria-label="百分制评分">
+                            <span class="input-group-text">分</span>
                         </div>
 
                         <button type="button" class="btn btn-primary me-2" id="add-grade-to-file" disabled>
@@ -164,6 +173,15 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
+                <!-- 需求 5.2.3-5.2.9: 推荐评价模板 -->
+                <div class="mb-3" id="commentTemplatesContainer" style="display: none;">
+                    <label class="form-label">常用评价模板：</label>
+                    <div id="commentTemplatesList" class="d-flex flex-wrap gap-2">
+                        <!-- 模板按钮将通过JavaScript动态加载 -->
+                    </div>
+                    <small class="text-muted">点击模板可快速填充评价内容</small>
+                </div>
+                
                 <div class="mb-3">
                     <label for="teacherCommentText" class="form-label">评价内容：</label>
                     <textarea class="form-control" id="teacherCommentText" rows="8" placeholder="请输入或修改教师评价内容..."></textarea>
@@ -199,6 +217,9 @@
         }
     });
 </script>
+
+<!-- 评价缓存服务 - 需求 5.1.1-5.1.8 -->
+<script src="{% static 'grading/js/comment-cache-service.js' %}"></script>
 
 <!-- 自定义脚本 - 在jstree之前加载，确保评分功能优先 -->
 <script src="{% static 'grading/js/grading.js' %}?v=20251113-2"></script>

@@ -1,12 +1,16 @@
-.PHONY: help test runserver migrate makemigrations shell createsuperuser lint format clean
+.PHONY: help install sync test runserver migrate makemigrations shell createsuperuser lint format clean
 
 # 默认目标
 help:
 	@echo "华立教育管理系统 - 开发命令"
 	@echo ""
-	@echo "所有命令都在 conda py313 环境下执行"
+	@echo "所有命令都使用 uv 管理 Python 环境"
 	@echo ""
-	@echo "可用命令:"
+	@echo "环境管理:"
+	@echo "  make install           - 安装所有依赖（包括开发依赖）"
+	@echo "  make sync              - 同步依赖到最新版本"
+	@echo ""
+	@echo "开发命令:"
 	@echo "  make test              - 运行所有测试"
 	@echo "  make test-app APP=grading - 运行指定应用的测试"
 	@echo "  make runserver         - 启动开发服务器 (端口 8000)"
@@ -20,51 +24,60 @@ help:
 	@echo "  make clean             - 清理临时文件"
 	@echo ""
 
+# 环境管理
+install:
+	@echo "安装项目依赖（包括开发依赖）..."
+	@uv sync --all-extras
+
+sync:
+	@echo "同步依赖到最新版本..."
+	@uv sync --upgrade
+
 # 测试相关
 test:
 	@echo "运行所有测试..."
-	@conda run -n py313 python manage.py test --verbosity=2
+	@uv run python manage.py test --verbosity=2
 
 test-app:
 	@echo "运行 $(APP) 应用的测试..."
-	@conda run -n py313 python manage.py test $(APP) --verbosity=2
+	@uv run python manage.py test $(APP) --verbosity=2
 
 test-file:
 	@echo "运行指定测试文件: $(FILE)"
-	@conda run -n py313 python manage.py test $(FILE) --verbosity=2
+	@uv run python manage.py test $(FILE) --verbosity=2
 
 # 开发服务器
 runserver:
 	@echo "启动开发服务器..."
-	@conda run -n py313 python manage.py runserver $(if $(PORT),$(PORT),8000)
+	@uv run python manage.py runserver $(if $(PORT),$(PORT),8000)
 
 # 数据库相关
 migrate:
 	@echo "应用数据库迁移..."
-	@conda run -n py313 python manage.py migrate
+	@uv run python manage.py migrate
 
 makemigrations:
 	@echo "创建数据库迁移..."
-	@conda run -n py313 python manage.py makemigrations
+	@uv run python manage.py makemigrations
 
 # Django 工具
 shell:
 	@echo "启动 Django shell..."
-	@conda run -n py313 python manage.py shell
+	@uv run python manage.py shell
 
 createsuperuser:
 	@echo "创建超级用户..."
-	@conda run -n py313 python manage.py createsuperuser
+	@uv run python manage.py createsuperuser
 
 # 代码质量
 lint:
 	@echo "运行代码检查..."
-	@conda run -n py313 flake8 . --max-line-length=120 --exclude=migrations,venv,env
+	@uv run flake8 . --max-line-length=120 --exclude=migrations,venv,env,.venv
 
 format:
 	@echo "格式化代码..."
-	@conda run -n py313 black . --line-length=100
-	@conda run -n py313 isort . --profile=black --line-length=100
+	@uv run black . --line-length=100
+	@uv run isort . --profile=black --line-length=100
 
 # 清理
 clean:
@@ -79,12 +92,16 @@ clean:
 # 自定义管理命令
 scan-courses:
 	@echo "扫描课程目录..."
-	@conda run -n py313 python manage.py scan_courses
+	@uv run python manage.py scan_courses
 
 import-homeworks:
 	@echo "导入作业数据..."
-	@conda run -n py313 python manage.py import_homeworks
+	@uv run python manage.py import_homeworks
 
 semester-management:
 	@echo "学期管理..."
-	@conda run -n py313 python manage.py semester_management
+	@uv run python manage.py semester_management
+
+clear-cache:
+	@echo "清除缓存..."
+	@uv run python manage.py clear_cache

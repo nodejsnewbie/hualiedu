@@ -33,3 +33,6 @@ numpy==2.3.4
 
 # 开发工具
 gunicorn==23.0.0
+
+# 测试工具
+hypothesis==6.122.3

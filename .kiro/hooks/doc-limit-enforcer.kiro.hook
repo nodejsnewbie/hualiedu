@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "name": "Document Directory Limit Enforcer",
+  "description": "Monitors document creation to ensure all new documents (excluding kiro documents) are placed in the same directory. When the directory contains more than 3 documents, prompts to merge the new document into existing ones.",
+  "version": "1",
+  "when": {
+    "type": "fileCreated",
+    "patterns": [
+      "**/*.md",
+      "**/*.txt",
+      "**/*.doc",
+      "**/*.docx",
+      "**/*.pdf"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A new document has been created at {{filePath}}. Please check:\n1. Is this a kiro document? If yes, ignore this check.\n2. Is this document in the designated unified document directory (e.g., docs/)?\n3. Count the total number of documents in that directory.\n4. If there are more than 3 documents in the directory:\n   - Analyze the content of the new document and existing documents\n   - Suggest which existing document(s) the new content should be merged into\n   - Perform the merge operation to consolidate the content\n   - Delete the new standalone document after successful merge\n5. If the document is not in the unified directory, move it there (unless it's a kiro document).\n\nEnsure all non-kiro documents are organized in the same directory with a maximum of 3 documents by merging content when necessary."
+  }
+}

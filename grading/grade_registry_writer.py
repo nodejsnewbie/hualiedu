@@ -104,6 +104,10 @@ class GradeFileProcessor:
     # 支持的成绩等级
     VALID_GRADES = ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]
     
+    # 百分制成绩范围
+    PERCENTAGE_MIN = 0
+    PERCENTAGE_MAX = 100
+    
     # 文件数量限制
     MAX_FILES_WARNING_THRESHOLD = 500
 
@@ -411,8 +415,27 @@ class GradeFileProcessor:
                         name = str(name).strip()
                         grade = str(grade).strip()
 
-                        # 验证成绩格式
+                        # 验证成绩格式（支持字母、文字和百分制）
+                        is_valid = False
+                        
+                        # 检查是否是字母或文字等级
                         if grade in GradeFileProcessor.VALID_GRADES:
+                            is_valid = True
+                        else:
+                            # 检查是否是百分制成绩
+                            try:
+                                grade_value = float(grade)
+                                if GradeFileProcessor.PERCENTAGE_MIN <= grade_value <= GradeFileProcessor.PERCENTAGE_MAX:
+                                    # 格式化为整数或保留一位小数
+                                    if grade_value == int(grade_value):
+                                        grade = str(int(grade_value))
+                                    else:
+                                        grade = f"{grade_value:.1f}"
+                                    is_valid = True
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        if is_valid:
                             grades.append({"name": name, "grade": grade})
                             logger.debug("提取学生成绩: %s - %s", name, grade)
                         else:
@@ -431,7 +454,11 @@ class GradeFileProcessor:
 
     @staticmethod
     def _extract_grade_from_lab_report(doc: Document) -> Optional[str]:
-        """从实验报告提取成绩"""
+        """
+        从实验报告提取成绩
+        
+        需求: 4.5, 5.2, 7.1-7.7
+        """
         # 在表格中查找"教师（签字）："单元格
         for table in doc.tables:
             for row in table.rows:
@@ -451,6 +478,81 @@ class GradeFileProcessor:
                                 return grade
         
         return None
+    
+    @staticmethod
+    def _extract_comment_from_lab_report(doc: Document) -> Optional[str]:
+        """
+        从实验报告提取评价
+        
+        需求: 4.5, 5.2, 7.1-7.7
+        """
+        # 在表格中查找"教师（签字）："单元格
+        for table in doc.tables:
+            for row in table.rows:
+                for i, cell in enumerate(row.cells):
+                    cell_text = cell.text.strip()
+                    if "教师（签字）" in cell_text or "教师签字" in cell_text:
+                        # 提取评价内容（在评分之后，"教师（签字）"之前的内容）
+                        lines = cell_text.split('\n')
+                        comment_lines = []
+                        
+                        for line in lines:
+                            line = line.strip()
+                            # 跳过评分行
+                            if GradeFileProcessor._find_grade_in_text(line):
+                                continue
+                            # 跳过"教师（签字）"行
+                            if "教师（签字）" in line or "教师签字" in line:
+                                continue
+                            # 跳过空行
+                            if not line:
+                                continue
+                            # 跳过格式错误锁定标记
+                            if "【格式错误-已锁定】" in line or "格式错误-已锁定" in line:
+                                continue
+                            
+                            comment_lines.append(line)
+                        
+                        if comment_lines:
+                            return '\n'.join(comment_lines)
+        
+        return None
+    
+    @staticmethod
+    def validate_lab_report_comment(file_path: str) -> Tuple[bool, Optional[str]]:
+        """
+        验证实验报告是否有评价
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            (is_valid, error_message): 如果有评价返回(True, None)，否则返回(False, error_message)
+            
+        需求: 4.5, 5.2, 7.1-7.7
+        """
+        try:
+            # 检查是否是实验报告
+            if not GradeFileProcessor.is_lab_report(file_path):
+                # 不是实验报告，不需要验证评价
+                return True, None
+            
+            # 读取文档
+            doc = Document(file_path)
+            
+            # 提取评价
+            comment = GradeFileProcessor._extract_comment_from_lab_report(doc)
+            
+            if comment and comment.strip():
+                # 有评价，验证通过
+                return True, None
+            else:
+                # 没有评价，验证失败
+                return False, "实验报告必须添加评价"
+                
+        except Exception as e:
+            logger.error("验证实验报告评价时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
+            return False, f"验证评价时出错: {str(e)}"
 
     @staticmethod
     def _extract_grade_from_homework(doc: Document) -> Optional[str]:
@@ -468,10 +570,42 @@ class GradeFileProcessor:
 
     @staticmethod
     def _find_grade_in_text(text: str) -> Optional[str]:
-        """在文本中查找成绩等级"""
+        """
+        在文本中查找成绩等级
+        
+        支持：
+        - 字母等级：A/B/C/D/E
+        - 文字等级：优秀/良好/中等/及格/不及格
+        - 百分制：0-100的数字
+        
+        需求: 4.1, 4.3, 4.4, 7.1-7.7
+        """
+        import re
+        
+        # 首先尝试匹配百分制成绩（数字）
+        # 匹配模式：非负数字（可能带小数点），可能后面跟"分"
+        # 使用(?<![0-9-])确保前面不是数字或负号，避免匹配"-10"中的"10"
+        percentage_pattern = r'(?<![0-9-])(\d+(?:\.\d+)?)\s*分?'
+        percentage_matches = re.findall(percentage_pattern, text)
+        
+        for match in percentage_matches:
+            try:
+                grade_value = float(match)
+                # 验证百分制范围
+                if GradeFileProcessor.PERCENTAGE_MIN <= grade_value <= GradeFileProcessor.PERCENTAGE_MAX:
+                    # 格式化为整数或保留一位小数
+                    if grade_value == int(grade_value):
+                        return str(int(grade_value))
+                    else:
+                        return f"{grade_value:.1f}"
+            except (ValueError, TypeError):
+                continue
+        
+        # 如果没有找到百分制成绩，尝试匹配字母或文字等级
         for grade in GradeFileProcessor.VALID_GRADES:
             if grade in text:
                 return grade
+        
         return None
 
 

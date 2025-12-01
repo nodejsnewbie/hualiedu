@@ -71,6 +71,139 @@ class GradeFileProcessorExtractHomeworkNumberTest(BaseTestCase):
         self.assertEqual(GradeFileProcessor.extract_homework_number_from_filename(filename), 10)
 
 
+class GradeFileProcessorFindGradeInTextTest(BaseTestCase):
+    """
+    测试GradeFileProcessor._find_grade_in_text方法
+    
+    验证支持：
+    - 字母等级：A/B/C/D/E
+    - 文字等级：优秀/良好/中等/及格/不及格
+    - 百分制：0-100的数字
+    
+    需求: 4.1, 4.3, 4.4, 7.1-7.7
+    """
+
+    def test_find_letter_grade(self):
+        """测试识别字母等级"""
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("老师评分：A"), "A")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("评分：B"), "B")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("成绩：C"), "C")
+
+    def test_find_text_grade(self):
+        """测试识别文字等级"""
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("老师评分：优秀"), "优秀")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("评分：良好"), "良好")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("成绩：及格"), "及格")
+
+    def test_find_percentage_grade_integer(self):
+        """测试识别百分制成绩（整数）"""
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("老师评分：85"), "85")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("评分：90分"), "90")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("成绩：100"), "100")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("得分：0"), "0")
+
+    def test_find_percentage_grade_decimal(self):
+        """测试识别百分制成绩（小数）"""
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("老师评分：85.5"), "85.5")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("评分：90.5分"), "90.5")
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("成绩：78.8"), "78.8")
+
+    def test_find_percentage_grade_out_of_range(self):
+        """测试超出范围的百分制成绩应被忽略"""
+        # 超过100的分数应该被忽略，尝试匹配其他等级
+        result = GradeFileProcessor._find_grade_in_text("老师评分：150")
+        self.assertIsNone(result)
+        
+        # 负数应该被忽略
+        result = GradeFileProcessor._find_grade_in_text("老师评分：-10")
+        self.assertIsNone(result)
+
+    def test_find_grade_priority(self):
+        """测试百分制优先于字母等级"""
+        # 如果文本中同时包含数字和字母，应该优先识别数字
+        self.assertEqual(GradeFileProcessor._find_grade_in_text("老师评分：85 A"), "85")
+
+    def test_find_no_grade(self):
+        """测试没有成绩的情况"""
+        self.assertIsNone(GradeFileProcessor._find_grade_in_text("这是一段没有成绩的文本"))
+        self.assertIsNone(GradeFileProcessor._find_grade_in_text(""))
+
+
+class GradeFileProcessorValidateLabReportCommentTest(BaseTestCase):
+    """
+    测试GradeFileProcessor.validate_lab_report_comment方法
+    
+    验证实验报告评价验证功能
+    
+    需求: 4.5, 5.2, 7.1-7.7
+    """
+
+    def setUp(self):
+        """设置测试环境"""
+        super().setUp()
+        self.test_dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        """清理测试环境"""
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+        super().tearDown()
+
+    def test_validate_non_lab_report(self):
+        """测试非实验报告不需要验证评价"""
+        # 创建一个普通作业文件
+        doc_path = os.path.join(self.test_dir, "张三_作业1.docx")
+        doc = Document()
+        doc.add_paragraph("老师评分：A")
+        doc.save(doc_path)
+        
+        # 非实验报告应该验证通过
+        is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error_msg)
+
+    @patch('grading.grade_registry_writer.GradeFileProcessor.is_lab_report')
+    def test_validate_lab_report_with_comment(self, mock_is_lab):
+        """测试实验报告有评价时验证通过"""
+        mock_is_lab.return_value = True
+        
+        # 创建一个实验报告文件，包含评价
+        doc_path = os.path.join(self.test_dir, "张三_实验报告.docx")
+        doc = Document()
+        
+        # 添加表格，模拟实验报告格式
+        table = doc.add_table(rows=2, cols=2)
+        cell = table.rows[0].cells[0]
+        cell.text = "85\n这是一个很好的实验报告\n教师（签字）："
+        
+        doc.save(doc_path)
+        
+        # 有评价应该验证通过
+        is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
+        self.assertTrue(is_valid)
+        self.assertIsNone(error_msg)
+
+    @patch('grading.grade_registry_writer.GradeFileProcessor.is_lab_report')
+    def test_validate_lab_report_without_comment(self, mock_is_lab):
+        """测试实验报告没有评价时验证失败"""
+        mock_is_lab.return_value = True
+        
+        # 创建一个实验报告文件，只有评分没有评价
+        doc_path = os.path.join(self.test_dir, "张三_实验报告.docx")
+        doc = Document()
+        
+        # 添加表格，模拟实验报告格式（只有评分）
+        table = doc.add_table(rows=2, cols=2)
+        cell = table.rows[0].cells[0]
+        cell.text = "85\n教师（签字）："
+        
+        doc.save(doc_path)
+        
+        # 没有评价应该验证失败
+        is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
+        self.assertFalse(is_valid)
+        self.assertIn("实验报告必须添加评价", error_msg)
+
+
 class RegistryManagerConcurrencyTest(BaseTestCase):
     """测试RegistryManager的并发控制功能"""
 

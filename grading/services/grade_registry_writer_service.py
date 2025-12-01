@@ -950,7 +950,15 @@ class GradeRegistryWriterService:
 
             file_result["student_name"] = student_name
 
-            # 2. 提取成绩
+            # 2. 验证实验报告评价（需求: 4.5, 5.2, 7.1-7.7）
+            is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(word_file)
+            if not is_valid:
+                file_result["error_message"] = error_msg
+                self.logger.warning("实验报告评价验证失败: %s - %s", file_basename, error_msg)
+                self.audit_logger.log_file_processing(word_file, "failed", error_msg)
+                return file_result
+
+            # 3. 提取成绩
             grade = GradeFileProcessor.extract_grade_from_word(word_file)
             grade = self._sanitize_grade_value(grade)
             if not grade:
@@ -960,7 +968,7 @@ class GradeRegistryWriterService:
 
             file_result["grade"] = grade
 
-            # 3. 匹配学生姓名
+            # 4. 匹配学生姓名
             student_names = list(registry_manager.student_names.keys())
             matched_name, match_type = NameMatcher.match(student_name, student_names)
 
@@ -986,7 +994,7 @@ class GradeRegistryWriterService:
                     )
                     return file_result
 
-            # 4. 查找学生行
+            # 5. 查找学生行
             student_row = registry_manager.find_student_row(matched_name)
             if not student_row:
                 file_result["error_message"] = f"未找到学生行: {matched_name}"
@@ -995,7 +1003,7 @@ class GradeRegistryWriterService:
                 )
                 return file_result
 
-            # 5. 写入成绩
+            # 6. 写入成绩
             written, old_grade = registry_manager.write_grade(
                 student_row, homework_col, grade
             )

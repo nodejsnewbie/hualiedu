@@ -19,7 +19,16 @@ class Command(BaseCommand):
         parser.add_argument(
             "--type",
             type=str,
-            choices=["all", "file_count", "dir_tree", "file_content", "file_metadata"],
+            choices=[
+                "all",
+                "file_count",
+                "dir_tree",
+                "file_content",
+                "file_metadata",
+                "comment_template",
+                "course_list",
+                "class_list",
+            ],
             default="all",
             help="缓存类型",
         )
@@ -71,6 +80,18 @@ class Command(BaseCommand):
             self.stdout.write("清除文件元数据缓存...")
             cache_manager.clear_file_metadata()
             self.stdout.write(self.style.SUCCESS("✓ 已清除文件元数据缓存"))
+        elif cache_type == "comment_template":
+            self.stdout.write("清除评价模板缓存...")
+            cache_manager.clear_comment_templates()
+            self.stdout.write(self.style.SUCCESS("✓ 已清除评价模板缓存"))
+        elif cache_type == "course_list":
+            self.stdout.write("清除课程列表缓存...")
+            cache_manager.clear_course_list()
+            self.stdout.write(self.style.SUCCESS("✓ 已清除课程列表缓存"))
+        elif cache_type == "class_list":
+            self.stdout.write("清除班级列表缓存...")
+            cache_manager.clear_class_list()
+            self.stdout.write(self.style.SUCCESS("✓ 已清除班级列表缓存"))
 
         # 显示缓存统计信息
         stats = cache_manager.get_cache_stats()
