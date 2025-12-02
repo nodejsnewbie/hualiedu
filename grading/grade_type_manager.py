@@ -54,8 +54,7 @@ def get_or_create_grade_type_config(class_identifier: str, tenant=None) -> Grade
             # 查找是否有该班级的默认配置
             try:
                 config = GradeTypeConfig.objects.get(
-                    tenant__isnull=True,
-                    class_identifier=class_identifier
+                    tenant__isnull=True, class_identifier=class_identifier
                 )
                 logger.info(f"找到班级 {class_identifier} 的默认评分类型配置: {config.grade_type}")
                 return config
@@ -65,7 +64,7 @@ def get_or_create_grade_type_config(class_identifier: str, tenant=None) -> Grade
                     tenant=None,
                     class_identifier=class_identifier,
                     grade_type="letter",
-                    is_locked=False
+                    is_locked=False,
                 )
                 logger.info(f"为班级 {class_identifier} 创建默认评分类型配置: {config.grade_type}")
                 return config

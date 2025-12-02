@@ -5,30 +5,38 @@
 ## 🚀 快速开始
 
 ### 环境要求
-- Python 3.13 (conda py313环境)
+- Python 3.13（使用 uv 管理）
 - Django 4.2.20
 - SQLite (开发) / PostgreSQL (生产)
 
 ### 安装和运行
 
-**重要**: 所有命令必须在 conda py313 环境下执行
-
 ```bash
-# 推荐: 使用 Makefile（最简单）
-make runserver          # 启动开发服务器
-make test              # 运行测试
-make migrate           # 数据库迁移
+# 1. 安装 uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 或使用辅助脚本
-./scripts/runserver.sh  # 启动开发服务器
-./scripts/test.sh       # 运行测试
+# 2. 安装依赖
+make install
 
-# 或手动激活环境
-conda activate py313
-python manage.py runserver
+# 3. 初始化数据库
+make migrate
+
+# 4. 启动开发服务器
+make runserver
 ```
 
-📖 **完整开发指南**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+**常用命令**：
+
+```bash
+make test              # 运行测试
+make format            # 格式化代码
+make lint              # 代码检查
+make clean-all         # 完整清理
+make help              # 查看所有命令
+```
+
+📖 **完整开发指南**: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)  
+📖 **快速入门**: [QUICKSTART_UV.md](QUICKSTART_UV.md)
 
 ## 📚 项目结构
 
@@ -102,18 +110,19 @@ huali-edu/
 ## 🛠️ 开发指南
 
 ### 代码规范
-项目使用 pre-commit 确保代码质量：
-```bash
-# 安装 pre-commit 钩子
-conda run -n py313 pre-commit install
 
-# 手动运行检查
-conda run -n py313 black . --line-length=100
-conda run -n py313 isort . --profile=black --line-length=100
-conda run -n py313 flake8 . --max-line-length=120
+项目使用 pre-commit 确保代码质量：
+
+```bash
+# 格式化代码
+make format
+
+# 代码检查
+make lint
 ```
 
 ### 测试
+
 ```bash
 # 运行所有测试
 make test
@@ -122,10 +131,11 @@ make test
 make test-app APP=grading
 
 # 运行特定测试文件
-conda run -n py313 python manage.py test grading.tests.test_models --verbosity=2
+uv run python manage.py test grading.tests.test_models --verbosity=2
 ```
 
 ### 数据库管理
+
 ```bash
 # 创建迁移
 make makemigrations
@@ -134,49 +144,41 @@ make makemigrations
 make migrate
 
 # 创建超级用户
-conda run -n py313 python manage.py createsuperuser
+uv run python manage.py createsuperuser
 ```
 
 ### 自定义管理命令
+
 ```bash
 # 扫描课程目录
-conda run -n py313 python manage.py scan_courses
+uv run python manage.py scan_courses
 
 # 导入作业数据
-conda run -n py313 python manage.py import_homeworks <仓库路径> <课程名称>
+uv run python manage.py import_homeworks <仓库路径> <课程名称>
 
 # 学期管理
-conda run -n py313 python manage.py semester_management
+uv run python manage.py semester_management
 
 # 创建学期模板
-conda run -n py313 python manage.py create_templates
+uv run python manage.py create_templates
 
 # 更新课程类型
-conda run -n py313 python manage.py update_course_types
+uv run python manage.py update_course_types
 ```
 
 ## 📖 文档
 
-### 核心文档
-- **[需求文档](.kiro/specs/homework-grading-system/requirements.md)** - 完整的系统需求（EARS格式）
-- **[设计文档](.kiro/specs/homework-grading-system/design.md)** - 系统架构和设计决策
-- **[实现计划](.kiro/specs/homework-grading-system/tasks.md)** - 开发任务清单
+### 主要文档
+- **[文档导航](docs/README.md)** - 完整文档索引
+- **[开发指南](docs/DEVELOPMENT.md)** - 环境配置、开发流程、测试指南
+- **[用户手册](docs/USER_MANUAL.md)** - 系统功能使用说明
+- **[快速入门](QUICKSTART_UV.md)** - uv 环境快速配置
 
-### 开发文档
-- **[开发指南](docs/DEVELOPMENT.md)** - 环境配置、开发流程、常用命令
-- **[项目结构](docs/PROJECT_STRUCTURE.md)** - 目录结构和代码组织
-- **[团队协作](docs/TEAM_COLLABORATION.md)** - Git工作流、代码审查、协作规范
-
-### 功能文档
-- **[功能文档索引](docs/README.md)** - 完整功能文档和设计文档
-- **[快速参考](docs/SUMMARY.md)** - 核心概念速查
-- **[批量登分指南](docs/BATCH_GRADE.md)** - 批量评分功能详解
-- **[已知问题](docs/KNOWN_ISSUES.md)** - 问题追踪和修复记录
-
-### 技术文档
-- **[缓存优化](docs/CACHE_OPTIMIZATION_IMPLEMENTATION.md)** - 缓存策略和实现
-- **[数据库优化](docs/DATABASE_OPTIMIZATION.md)** - 数据库性能优化
-- **[评价缓存](docs/COMMENT_CACHE_IMPLEMENTATION.md)** - 评价缓存功能实现
+### 技术规范
+- **[技术栈](.kiro/steering/tech.md)** - 核心技术和命令
+- **[项目结构](.kiro/steering/structure.md)** - 目录组织和架构
+- **[Django 模式](.kiro/steering/django-patterns.md)** - Django 最佳实践
+- **[Python 规范](.kiro/steering/python-conventions.md)** - 代码规范
 
 ## 🤝 贡献
 

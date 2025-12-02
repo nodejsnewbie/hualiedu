@@ -8,18 +8,19 @@
 """
 
 import os
-import tempfile
 import shutil
-from unittest.mock import Mock, patch, MagicMock
+import tempfile
+from unittest.mock import MagicMock, Mock, patch
 
 from docx import Document
 from openpyxl import Workbook
 
 from grading.grade_registry_writer import (
     GradeFileProcessor,
-    RegistryManager,
     NameMatcher,
+    RegistryManager,
 )
+
 from .base import BaseTestCase
 
 
@@ -45,7 +46,7 @@ class GradeFileProcessorExtractStudentNameTest(BaseTestCase):
         """测试使用长破折号分隔"""
         result = GradeFileProcessor.extract_student_name("张三—作业1.docx")
         self.assertEqual(result, "张三")
-    
+
     def test_extract_name_no_separator(self):
         """文件名无分隔符时应直接返回文件名"""
         result = GradeFileProcessor.extract_student_name("李四.docx")
@@ -74,12 +75,12 @@ class GradeFileProcessorExtractHomeworkNumberTest(BaseTestCase):
 class GradeFileProcessorFindGradeInTextTest(BaseTestCase):
     """
     测试GradeFileProcessor._find_grade_in_text方法
-    
+
     验证支持：
     - 字母等级：A/B/C/D/E
     - 文字等级：优秀/良好/中等/及格/不及格
     - 百分制：0-100的数字
-    
+
     需求: 4.1, 4.3, 4.4, 7.1-7.7
     """
 
@@ -113,7 +114,7 @@ class GradeFileProcessorFindGradeInTextTest(BaseTestCase):
         # 超过100的分数应该被忽略，尝试匹配其他等级
         result = GradeFileProcessor._find_grade_in_text("老师评分：150")
         self.assertIsNone(result)
-        
+
         # 负数应该被忽略
         result = GradeFileProcessor._find_grade_in_text("老师评分：-10")
         self.assertIsNone(result)
@@ -132,9 +133,9 @@ class GradeFileProcessorFindGradeInTextTest(BaseTestCase):
 class GradeFileProcessorValidateLabReportCommentTest(BaseTestCase):
     """
     测试GradeFileProcessor.validate_lab_report_comment方法
-    
+
     验证实验报告评价验证功能
-    
+
     需求: 4.5, 5.2, 7.1-7.7
     """
 
@@ -155,49 +156,49 @@ class GradeFileProcessorValidateLabReportCommentTest(BaseTestCase):
         doc = Document()
         doc.add_paragraph("老师评分：A")
         doc.save(doc_path)
-        
+
         # 非实验报告应该验证通过
         is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
         self.assertTrue(is_valid)
         self.assertIsNone(error_msg)
 
-    @patch('grading.grade_registry_writer.GradeFileProcessor.is_lab_report')
+    @patch("grading.grade_registry_writer.GradeFileProcessor.is_lab_report")
     def test_validate_lab_report_with_comment(self, mock_is_lab):
         """测试实验报告有评价时验证通过"""
         mock_is_lab.return_value = True
-        
+
         # 创建一个实验报告文件，包含评价
         doc_path = os.path.join(self.test_dir, "张三_实验报告.docx")
         doc = Document()
-        
+
         # 添加表格，模拟实验报告格式
         table = doc.add_table(rows=2, cols=2)
         cell = table.rows[0].cells[0]
         cell.text = "85\n这是一个很好的实验报告\n教师（签字）："
-        
+
         doc.save(doc_path)
-        
+
         # 有评价应该验证通过
         is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
         self.assertTrue(is_valid)
         self.assertIsNone(error_msg)
 
-    @patch('grading.grade_registry_writer.GradeFileProcessor.is_lab_report')
+    @patch("grading.grade_registry_writer.GradeFileProcessor.is_lab_report")
     def test_validate_lab_report_without_comment(self, mock_is_lab):
         """测试实验报告没有评价时验证失败"""
         mock_is_lab.return_value = True
-        
+
         # 创建一个实验报告文件，只有评分没有评价
         doc_path = os.path.join(self.test_dir, "张三_实验报告.docx")
         doc = Document()
-        
+
         # 添加表格，模拟实验报告格式（只有评分）
         table = doc.add_table(rows=2, cols=2)
         cell = table.rows[0].cells[0]
         cell.text = "85\n教师（签字）："
-        
+
         doc.save(doc_path)
-        
+
         # 没有评价应该验证失败
         is_valid, error_msg = GradeFileProcessor.validate_lab_report_comment(doc_path)
         self.assertFalse(is_valid)

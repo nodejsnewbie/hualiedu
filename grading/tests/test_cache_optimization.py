@@ -9,15 +9,16 @@
 """
 
 import logging
-from django.test import TestCase
+
 from django.contrib.auth.models import User
 from django.core.cache import cache
+from django.test import TestCase
 
-from grading.models import Tenant, Course, Class, Semester, CommentTemplate, UserProfile
 from grading.cache_manager import CacheManager
+from grading.models import Class, CommentTemplate, Course, Semester, Tenant, UserProfile
+from grading.services.class_service import ClassService
 from grading.services.comment_template_service import CommentTemplateService
 from grading.services.course_service import CourseService
-from grading.services.class_service import ClassService
 
 # 禁用日志输出
 logging.disable(logging.CRITICAL)
@@ -42,14 +43,10 @@ class CacheManagerTest(TestCase):
         self.tenant = Tenant.objects.create(name="测试租户")
 
         # 创建用户
-        self.teacher = User.objects.create_user(
-            username="teacher1", password="password"
-        )
+        self.teacher = User.objects.create_user(username="teacher1", password="password")
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -60,23 +57,17 @@ class CacheManagerTest(TestCase):
         """测试评价模板缓存"""
         # 设置缓存
         templates = [{"id": 1, "text": "测试评价"}]
-        self.cache_manager.set_comment_templates(
-            "personal", str(self.teacher.id), templates
-        )
+        self.cache_manager.set_comment_templates("personal", str(self.teacher.id), templates)
 
         # 获取缓存
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNotNone(cached)
         self.assertEqual(len(cached), 1)
         self.assertEqual(cached[0]["text"], "测试评价")
 
         # 清除缓存
         self.cache_manager.clear_comment_templates("personal", str(self.teacher.id))
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNone(cached)
 
     def test_course_list_cache(self):
@@ -116,12 +107,8 @@ class CacheManagerTest(TestCase):
     def test_clear_all_cache(self):
         """测试清除所有缓存"""
         # 设置多种缓存
-        self.cache_manager.set_comment_templates(
-            "personal", str(self.teacher.id), [{"id": 1}]
-        )
-        self.cache_manager.set_course_list(
-            teacher_id=self.teacher.id, courses=[{"id": 1}]
-        )
+        self.cache_manager.set_comment_templates("personal", str(self.teacher.id), [{"id": 1}])
+        self.cache_manager.set_course_list(teacher_id=self.teacher.id, courses=[{"id": 1}])
         self.cache_manager.set_class_list([{"id": 1}], course_id=1)
 
         # 清除所有缓存（使用cache.clear()因为LocMemCache不支持模式删除）
@@ -131,9 +118,7 @@ class CacheManagerTest(TestCase):
         self.assertIsNone(
             self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         )
-        self.assertIsNone(
-            self.cache_manager.get_course_list(teacher_id=self.teacher.id)
-        )
+        self.assertIsNone(self.cache_manager.get_course_list(teacher_id=self.teacher.id))
         self.assertIsNone(self.cache_manager.get_class_list(course_id=1))
 
 
@@ -151,9 +136,7 @@ class CommentTemplateServiceCacheTest(TestCase):
         self.teacher = create_user_with_profile("teacher1", self.tenant)
 
         # 创建缓存管理器和服务
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
         self.service = CommentTemplateService(cache_manager=self.cache_manager)
 
         # 创建测试数据
@@ -188,9 +171,7 @@ class CommentTemplateServiceCacheTest(TestCase):
         self.assertEqual(len(templates2), 2)
 
         # 验证缓存命中
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNotNone(cached)
 
     def test_record_comment_usage_invalidates_cache(self):
@@ -199,18 +180,14 @@ class CommentTemplateServiceCacheTest(TestCase):
         self.service.get_personal_templates(self.teacher)
 
         # 验证缓存存在
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNotNone(cached)
 
         # 记录评价使用
         self.service.record_comment_usage(self.teacher, "新评价", self.tenant)
 
         # 验证缓存已清除
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNone(cached)
 
 
@@ -229,16 +206,13 @@ class CourseServiceCacheTest(TestCase):
 
         # 创建学期
         self.semester = Semester.objects.create(
-            
             name="2024春季",
             start_date="2024-02-01",
             end_date="2024-06-30",
         )
 
         # 创建缓存管理器和服务
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
         self.service = CourseService(cache_manager=self.cache_manager)
 
         # 创建测试课程
@@ -291,7 +265,6 @@ class CourseServiceCacheTest(TestCase):
             name="新课程",
             course_type="theory",
             semester=self.semester,
-            
         )
 
         # 验证缓存已清除
@@ -314,7 +287,6 @@ class ClassServiceCacheTest(TestCase):
 
         # 创建学期
         self.semester = Semester.objects.create(
-            
             name="2024春季",
             start_date="2024-02-01",
             end_date="2024-06-30",
@@ -330,18 +302,12 @@ class ClassServiceCacheTest(TestCase):
         )
 
         # 创建缓存管理器和服务
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
         self.service = ClassService(cache_manager=self.cache_manager)
 
         # 创建测试班级
-        Class.objects.create(
-            tenant=self.tenant, course=self.course, name="班级1", student_count=30
-        )
-        Class.objects.create(
-            tenant=self.tenant, course=self.course, name="班级2", student_count=25
-        )
+        Class.objects.create(tenant=self.tenant, course=self.course, name="班级1", student_count=30)
+        Class.objects.create(tenant=self.tenant, course=self.course, name="班级2", student_count=25)
 
     def tearDown(self):
         """清理测试数据"""
@@ -402,9 +368,7 @@ class CachePerformanceTest(TestCase):
         )
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -460,9 +424,7 @@ class FileCountCachePropertyTest(TestCase):
         self.teacher = create_user_with_profile("teacher1", self.tenant)
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -493,9 +455,7 @@ class FileCountCachePropertyTest(TestCase):
 
             # First call should return None (no cache)
             count1 = self.cache_manager.get_file_count(dir_path)
-            self.assertIsNone(
-                count1, f"First call should return None for {dir_path}"
-            )
+            self.assertIsNone(count1, f"First call should return None for {dir_path}")
 
             # Set a file count
             expected_count = 42
@@ -503,9 +463,7 @@ class FileCountCachePropertyTest(TestCase):
 
             # Second call should return cached value
             count2 = self.cache_manager.get_file_count(dir_path)
-            self.assertIsNotNone(
-                count2, f"Second call should return cached value for {dir_path}"
-            )
+            self.assertIsNotNone(count2, f"Second call should return cached value for {dir_path}")
             self.assertEqual(
                 count2,
                 expected_count,
@@ -529,9 +487,7 @@ class FileCountCachePropertyTest(TestCase):
         """
         # Create another user
         teacher2 = create_user_with_profile("teacher2", self.tenant)
-        cache_manager2 = CacheManager(
-            user_id=teacher2.id, tenant_id=self.tenant.id
-        )
+        cache_manager2 = CacheManager(user_id=teacher2.id, tenant_id=self.tenant.id)
 
         dir_path = "/shared/path"
 
@@ -558,9 +514,7 @@ class FileCountCachePropertyTest(TestCase):
         # Create another tenant and user
         tenant2 = Tenant.objects.create(name="测试租户2")
         teacher2 = create_user_with_profile("teacher3", tenant2)
-        cache_manager2 = CacheManager(
-            user_id=teacher2.id, tenant_id=tenant2.id
-        )
+        cache_manager2 = CacheManager(user_id=teacher2.id, tenant_id=tenant2.id)
 
         dir_path = "/shared/path"
 
@@ -626,9 +580,7 @@ class DirTreeCachePropertyTest(TestCase):
         self.teacher = create_user_with_profile("teacher1", self.tenant)
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -688,9 +640,7 @@ class CommentTemplateCachePropertyTest(TestCase):
         self.teacher = create_user_with_profile("teacher1", self.tenant)
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -712,28 +662,20 @@ class CommentTemplateCachePropertyTest(TestCase):
         ]
 
         # First call should return None
-        cached1 = self.cache_manager.get_comment_templates(
-            template_type, identifier
-        )
+        cached1 = self.cache_manager.get_comment_templates(template_type, identifier)
         self.assertIsNone(cached1)
 
         # Set templates
-        self.cache_manager.set_comment_templates(
-            template_type, identifier, templates
-        )
+        self.cache_manager.set_comment_templates(template_type, identifier, templates)
 
         # Second call should return cached templates
-        cached2 = self.cache_manager.get_comment_templates(
-            template_type, identifier
-        )
+        cached2 = self.cache_manager.get_comment_templates(template_type, identifier)
         self.assertIsNotNone(cached2)
         self.assertEqual(len(cached2), 2)
         self.assertEqual(cached2[0]["text"], "优秀")
 
         # Third call should still return cached templates
-        cached3 = self.cache_manager.get_comment_templates(
-            template_type, identifier
-        )
+        cached3 = self.cache_manager.get_comment_templates(template_type, identifier)
         self.assertEqual(cached3, cached2)
 
 
@@ -763,9 +705,7 @@ class CacheInvalidationPropertyTest(TestCase):
         )
 
         # 创建缓存管理器
-        self.cache_manager = CacheManager(
-            user_id=self.teacher.id, tenant_id=self.tenant.id
-        )
+        self.cache_manager = CacheManager(user_id=self.teacher.id, tenant_id=self.tenant.id)
 
     def tearDown(self):
         """清理测试数据"""
@@ -807,9 +747,7 @@ class CacheInvalidationPropertyTest(TestCase):
         )
 
         # Verify cache is cleared
-        cached_after = self.cache_manager.get_course_list(
-            teacher_id=self.teacher.id
-        )
+        cached_after = self.cache_manager.get_course_list(teacher_id=self.teacher.id)
         self.assertIsNone(cached_after)
 
         # Query again - should rebuild cache with new data
@@ -835,9 +773,7 @@ class CacheInvalidationPropertyTest(TestCase):
         service = ClassService(cache_manager=self.cache_manager)
 
         # Create initial class
-        Class.objects.create(
-            tenant=self.tenant, course=course, name="初始班级", student_count=30
-        )
+        Class.objects.create(tenant=self.tenant, course=course, name="初始班级", student_count=30)
 
         # First query - builds cache
         classes1 = service.list_classes(course=course)
@@ -848,9 +784,7 @@ class CacheInvalidationPropertyTest(TestCase):
         self.assertIsNotNone(cached)
 
         # Create new class - should invalidate cache
-        service.create_class(
-            course=course, name="新班级", student_count=25, tenant=self.tenant
-        )
+        service.create_class(course=course, name="新班级", student_count=25, tenant=self.tenant)
 
         # Verify cache is cleared
         cached_after = self.cache_manager.get_class_list(course_id=course.id)
@@ -883,18 +817,14 @@ class CacheInvalidationPropertyTest(TestCase):
         self.assertEqual(len(templates1), 1)
 
         # Verify cache exists
-        cached = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNotNone(cached)
 
         # Record new comment usage - should invalidate cache
         service.record_comment_usage(self.teacher, "新评价", self.tenant)
 
         # Verify cache is cleared
-        cached_after = self.cache_manager.get_comment_templates(
-            "personal", str(self.teacher.id)
-        )
+        cached_after = self.cache_manager.get_comment_templates("personal", str(self.teacher.id))
         self.assertIsNone(cached_after)
 
         # Query again - should rebuild cache with new data

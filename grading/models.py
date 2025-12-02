@@ -19,7 +19,9 @@ class Tenant(models.Model):
     name = models.CharField(max_length=100, unique=True, help_text="租户名称")
     description = models.TextField(blank=True, help_text="租户描述")
     is_active = models.BooleanField(default=True, help_text="是否激活")
-    tenant_repo_dir = models.CharField(max_length=255, default="", help_text="租户仓库目录（相对于全局基础目录）")
+    tenant_repo_dir = models.CharField(
+        max_length=255, default="", help_text="租户仓库目录（相对于全局基础目录）"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -186,7 +188,7 @@ class Repository(models.Model):
         related_name="repositories",
         null=True,
         blank=True,
-        help_text="关联班级"
+        help_text="关联班级",
     )
     name = models.CharField(max_length=255, help_text="仓库名称")
     path = models.CharField(max_length=500, help_text="仓库路径", default="")
@@ -196,21 +198,21 @@ class Repository(models.Model):
         default="filesystem",
         help_text="仓库类型",
     )
-    
+
     # Git仓库方式字段
     git_url = models.URLField(blank=True, null=True, help_text="Git仓库URL")
     git_branch = models.CharField(max_length=100, blank=True, default="main", help_text="Git分支")
     git_username = models.CharField(max_length=100, blank=True, help_text="Git用户名")
     git_password = models.CharField(max_length=200, blank=True, help_text="Git密码（加密存储）")
-    
+
     # 文件系统方式字段
     filesystem_path = models.CharField(max_length=500, blank=True, help_text="文件系统路径")
     allocated_space_mb = models.IntegerField(default=1024, help_text="分配空间（MB）")
-    
+
     # 兼容旧字段
     url = models.URLField(blank=True, help_text="仓库URL（兼容旧版本）")
     branch = models.CharField(max_length=100, default="main", help_text="默认分支（兼容旧版本）")
-    
+
     description = models.TextField(blank=True, help_text="仓库描述")
     is_active = models.BooleanField(default=True, help_text="是否激活")
     last_sync = models.DateTimeField(null=True, blank=True, help_text="最后同步时间")
@@ -255,15 +257,15 @@ class Repository(models.Model):
 
                 parsed = urlparse(self.url)
                 # 取路径最后一段
-                tail = parsed.path.rstrip('/').split('/')[-1]
-                if tail.endswith('.git'):
+                tail = parsed.path.rstrip("/").split("/")[-1]
+                if tail.endswith(".git"):
                     tail = tail[:-4]
                 if tail:
                     return tail
             except Exception:
                 pass
         if self.path:
-            return self.path.strip('/')
+            return self.path.strip("/")
         return self.name
 
     def get_full_path(self):
@@ -298,7 +300,7 @@ class Submission(models.Model):
         related_name="submissions",
         null=True,
         blank=True,
-        help_text="所属租户"
+        help_text="所属租户",
     )
     homework = models.ForeignKey(
         "Homework",
@@ -306,7 +308,7 @@ class Submission(models.Model):
         related_name="submissions",
         null=True,
         blank=True,
-        help_text="所属作业"
+        help_text="所属作业",
     )
     student = models.ForeignKey(
         "auth.User",
@@ -314,7 +316,7 @@ class Submission(models.Model):
         related_name="submissions",
         null=True,
         blank=True,
-        help_text="提交学生"
+        help_text="提交学生",
     )
     repository = models.ForeignKey(
         Repository,
@@ -322,7 +324,7 @@ class Submission(models.Model):
         related_name="submissions",
         null=True,
         blank=True,
-        help_text="所属仓库"
+        help_text="所属仓库",
     )
     file_path = models.CharField(max_length=500, help_text="文件路径")
     file_name = models.CharField(max_length=200, help_text="文件名")
@@ -371,7 +373,7 @@ class GradeTypeConfig(models.Model):
         related_name="grade_type_configs",
         null=True,
         blank=True,
-        help_text="所属租户"
+        help_text="所属租户",
     )
     class_obj = models.ForeignKey(
         "Class",
@@ -379,18 +381,13 @@ class GradeTypeConfig(models.Model):
         related_name="grade_type_configs",
         null=True,
         blank=True,
-        help_text="关联班级"
+        help_text="关联班级",
     )
     class_identifier = models.CharField(
-        max_length=255,
-        blank=True,
-        help_text="班级标识，如班级名称或路径（兼容旧版本）"
+        max_length=255, blank=True, help_text="班级标识，如班级名称或路径（兼容旧版本）"
     )
     grade_type = models.CharField(
-        max_length=20,
-        choices=GRADE_TYPE_CHOICES,
-        default="letter",
-        help_text="评分类型"
+        max_length=20, choices=GRADE_TYPE_CHOICES, default="letter", help_text="评分类型"
     )
     is_locked = models.BooleanField(default=False, help_text="是否已锁定评分类型")
     created_at = models.DateTimeField(auto_now_add=True)
@@ -660,10 +657,7 @@ class Course(models.Model):
     )
     name = models.CharField(max_length=200, help_text="课程名称")
     course_type = models.CharField(
-        max_length=20,
-        choices=COURSE_TYPE_CHOICES,
-        default="theory",
-        help_text="课程类型"
+        max_length=20, choices=COURSE_TYPE_CHOICES, default="theory", help_text="课程类型"
     )
     description = models.TextField(blank=True, help_text="课程描述")
     location = models.CharField(max_length=100, blank=True, help_text="上课地点")
@@ -676,7 +670,7 @@ class Course(models.Model):
         related_name="courses",
         null=True,
         blank=True,
-        help_text="所属租户"
+        help_text="所属租户",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -705,13 +699,10 @@ class Class(models.Model):
         related_name="classes",
         null=True,
         blank=True,
-        help_text="所属租户"
+        help_text="所属租户",
     )
     course = models.ForeignKey(
-        Course,
-        on_delete=models.CASCADE,
-        related_name="classes",
-        help_text="所属课程"
+        Course, on_delete=models.CASCADE, related_name="classes", help_text="所属课程"
     )
     name = models.CharField(max_length=200, help_text="班级名称")
     student_count = models.IntegerField(default=0, help_text="学生人数")
@@ -856,7 +847,49 @@ class CourseWeekSchedule(models.Model):
 
 
 class Assignment(models.Model):
-    """作业配置模型 - 重构自 Repository，用于管理作业提交方式"""
+    """作业配置模型 - 管理学生作业提交方式
+
+    作业配置定义了学生如何提交作业，支持两种提交方式：
+    1. Git仓库方式：学生通过Git仓库提交，系统直接从远程仓库读取
+    2. 文件上传方式：学生通过系统上传文件，存储在本地文件系统
+
+    重要特性：
+    - 每个作业配置关联一个课程和班级
+    - 同一课程的不同班级有独立的作业配置和目录
+    - Git方式采用远程直接访问，无需本地克隆
+    - 文件上传方式自动创建目录结构：<课程名>/<班级名>/<作业次数>/
+    - 支持教师隔离：每个教师只能看到自己创建的作业配置
+
+    术语说明：
+    - 本模型原名为 Repository，已重构为 Assignment
+    - storage_type 原名为 repo_type
+    - 界面上显示为"作业管理"而非"仓库管理"
+
+    设计决策：
+    - 采用远程优先架构：Git方式直接访问远程仓库，避免本地存储占用和同步延迟
+    - 使用存储抽象层：通过StorageAdapter统一Git和文件系统访问接口
+    - 密码加密存储：Git密码使用CredentialEncryption加密后存储在git_password_encrypted字段
+    - 路径安全验证：所有文件路径操作都经过PathValidator验证，防止路径遍历攻击
+
+    数据隔离：
+    - 教师隔离：通过owner字段确保教师只能访问自己创建的作业配置
+    - 租户隔离：通过tenant字段实现多租户数据隔离
+    - 班级隔离：通过class_obj字段确保不同班级的作业目录独立
+
+    目录结构示例：
+    文件系统方式：
+        数据结构/
+          ├── 计算机1班/
+          │   ├── 第一次作业/
+          │   │   ├── 张三-作业1.docx
+          │   │   └── 李四-作业1.pdf
+          │   └── 第二次作业/
+          └── 计算机2班/
+              └── 第一次作业/
+
+    Git方式：
+        直接从远程仓库读取，无本地目录
+    """
 
     STORAGE_TYPE_CHOICES = [
         ("git", "Git仓库"),
@@ -868,56 +901,36 @@ class Assignment(models.Model):
         "auth.User",
         on_delete=models.CASCADE,
         related_name="assignments",
-        help_text="作业创建者（教师）"
+        help_text="作业创建者（教师）",
     )
     tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="assignments",
-        help_text="所属租户"
+        Tenant, on_delete=models.CASCADE, related_name="assignments", help_text="所属租户"
     )
     course = models.ForeignKey(
-        Course,
-        on_delete=models.CASCADE,
-        related_name="assignments",
-        help_text="关联课程"
+        Course, on_delete=models.CASCADE, related_name="assignments", help_text="关联课程"
     )
     class_obj = models.ForeignKey(
-        Class,
-        on_delete=models.CASCADE,
-        related_name="assignments",
-        help_text="关联班级"
+        Class, on_delete=models.CASCADE, related_name="assignments", help_text="关联班级"
     )
     name = models.CharField(max_length=255, help_text="作业名称")
     description = models.TextField(blank=True, help_text="作业描述")
     storage_type = models.CharField(
-        max_length=20,
-        choices=STORAGE_TYPE_CHOICES,
-        default="filesystem",
-        help_text="存储类型"
+        max_length=20, choices=STORAGE_TYPE_CHOICES, default="filesystem", help_text="存储类型"
     )
 
     # Git 存储配置
-    git_url = models.URLField(blank=True, null=True, help_text="Git仓库URL")
-    git_branch = models.CharField(
-        max_length=100,
-        default="main",
-        blank=True,
-        help_text="Git分支"
-    )
-    git_username = models.CharField(max_length=100, blank=True, help_text="Git用户名")
-    git_password_encrypted = models.CharField(
+    git_url = models.CharField(
         max_length=500,
         blank=True,
-        help_text="加密的Git密码"
+        null=True,
+        help_text="Git仓库URL（支持 http://, https://, git://, ssh://, git@ 格式）",
     )
+    git_branch = models.CharField(max_length=100, default="main", blank=True, help_text="Git分支")
+    git_username = models.CharField(max_length=100, blank=True, help_text="Git用户名")
+    git_password_encrypted = models.CharField(max_length=500, blank=True, help_text="加密的Git密码")
 
     # 文件系统存储配置
-    base_path = models.CharField(
-        max_length=500,
-        blank=True,
-        help_text="文件系统基础路径"
-    )
+    base_path = models.CharField(max_length=500, blank=True, help_text="文件系统基础路径")
 
     # 元数据
     is_active = models.BooleanField(default=True, help_text="是否激活")
@@ -941,21 +954,65 @@ class Assignment(models.Model):
         return f"{self.course.name} - {self.class_obj.name} - {self.name}"
 
     def is_git_storage(self):
-        """检查是否为Git存储方式"""
+        """检查是否为Git存储方式
+
+        Returns:
+            bool: 如果storage_type为"git"且配置了git_url则返回True
+
+        Note:
+            Git方式要求必须配置git_url，否则无法访问远程仓库
+        """
         return self.storage_type == "git" and bool(self.git_url)
 
     def is_filesystem_storage(self):
-        """检查是否为文件系统存储方式"""
+        """检查是否为文件系统存储方式
+
+        Returns:
+            bool: 如果storage_type为"filesystem"则返回True
+
+        Note:
+            文件系统方式将文件存储在本地文件系统，通过base_path指定存储位置
+        """
         return self.storage_type == "filesystem"
 
     def get_display_path(self):
-        """获取显示路径"""
+        """获取用于界面显示的路径
+
+        Returns:
+            str: Git方式返回仓库URL，文件系统方式返回base_path或自动生成的路径
+
+        Examples:
+            Git方式: "https://github.com/user/repo.git"
+            文件系统方式: "数据结构/计算机1班/"
+        """
         if self.is_git_storage():
             return self.git_url
         return self.base_path or f"{self.course.name}/{self.class_obj.name}/"
 
     def get_storage_config(self):
-        """获取存储配置字典"""
+        """获取存储配置字典
+
+        用于传递给StorageAdapter创建实例。
+
+        Returns:
+            dict: 包含存储类型和相关配置的字典
+
+        Examples:
+            Git方式:
+            {
+                "type": "git",
+                "url": "https://github.com/user/repo.git",
+                "branch": "main",
+                "username": "user",
+                "password_encrypted": "encrypted_password"
+            }
+
+            文件系统方式:
+            {
+                "type": "filesystem",
+                "base_path": "数据结构/计算机1班/"
+            }
+        """
         if self.is_git_storage():
             return {
                 "type": "git",
@@ -971,7 +1028,18 @@ class Assignment(models.Model):
             }
 
     def validate_git_config(self):
-        """验证Git配置完整性"""
+        """验证Git配置完整性
+
+        检查Git存储方式的必填字段是否完整。
+
+        Raises:
+            ValueError: 如果git_url未配置
+
+        Note:
+            - git_url是必填项，用于指定远程仓库地址
+            - git_branch如果未配置，自动设置为"main"
+            - git_username和git_password_encrypted是可选的，用于私有仓库认证
+        """
         if self.storage_type == "git":
             if not self.git_url:
                 raise ValueError("Git存储方式必须提供仓库URL")
@@ -979,7 +1047,18 @@ class Assignment(models.Model):
                 self.git_branch = "main"
 
     def validate_filesystem_config(self):
-        """验证文件系统配置完整性"""
+        """验证文件系统配置完整性
+
+        检查文件系统存储方式的必填字段是否完整。
+        如果base_path未配置，自动根据课程和班级名称生成。
+
+        Note:
+            自动生成的路径格式: <课程名称>/<班级名称>/
+            例如: "数据结构/计算机1班/"
+
+            这确保了不同班级的作业文件存储在独立的目录中，
+            实现了班级目录隔离（Requirements 7.3）
+        """
         if self.storage_type == "filesystem":
             if not self.base_path:
                 # 自动生成基础路径
@@ -989,7 +1068,18 @@ class Assignment(models.Model):
                 self.base_path = f"{course_name}/{class_name}/"
 
     def clean(self):
-        """模型验证"""
+        """Django模型验证方法
+
+        在保存前自动调用，用于验证模型数据的完整性和一致性。
+
+        Raises:
+            ValidationError: 如果验证失败
+
+        Note:
+            这个方法会根据storage_type调用相应的验证方法：
+            - Git方式: validate_git_config()
+            - 文件系统方式: validate_filesystem_config()
+        """
         from django.core.exceptions import ValidationError
 
         # 验证存储配置
@@ -1002,7 +1092,14 @@ class Assignment(models.Model):
             raise ValidationError(str(e))
 
     def save(self, *args, **kwargs):
-        """保存前验证"""
+        """保存模型实例
+
+        重写save方法以在保存前执行完整的模型验证。
+
+        Note:
+            调用full_clean()确保所有验证规则都被执行，
+            包括字段验证、clean()方法和unique约束检查。
+        """
         self.full_clean()
         super().save(*args, **kwargs)
 
@@ -1021,13 +1118,10 @@ class Homework(models.Model):
         related_name="homeworks",
         null=True,
         blank=True,
-        help_text="所属租户"
+        help_text="所属租户",
     )
     course = models.ForeignKey(
-        Course,
-        on_delete=models.CASCADE,
-        related_name="homeworks",
-        help_text="所属课程"
+        Course, on_delete=models.CASCADE, related_name="homeworks", help_text="所属课程"
     )
     class_obj = models.ForeignKey(
         "Class",
@@ -1035,20 +1129,16 @@ class Homework(models.Model):
         related_name="homeworks",
         null=True,
         blank=True,
-        help_text="所属班级"
+        help_text="所属班级",
     )
     title = models.CharField(max_length=200, help_text="作业标题")
     homework_type = models.CharField(
-        max_length=20,
-        choices=HOMEWORK_TYPE_CHOICES,
-        default="normal",
-        help_text="作业类型"
+        max_length=20, choices=HOMEWORK_TYPE_CHOICES, default="normal", help_text="作业类型"
     )
     description = models.TextField(blank=True, help_text="作业描述")
     due_date = models.DateTimeField(null=True, blank=True, help_text="截止日期")
     folder_name = models.CharField(
-        max_length=200,
-        help_text="作业文件夹名称（用于匹配文件系统中的目录）"
+        max_length=200, help_text="作业文件夹名称（用于匹配文件系统中的目录）"
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -1081,10 +1171,7 @@ class CommentTemplate(models.Model):
     ]
 
     tenant = models.ForeignKey(
-        Tenant,
-        on_delete=models.CASCADE,
-        related_name="comment_templates",
-        help_text="所属租户"
+        Tenant, on_delete=models.CASCADE, related_name="comment_templates", help_text="所属租户"
     )
     teacher = models.ForeignKey(
         "auth.User",
@@ -1092,12 +1179,10 @@ class CommentTemplate(models.Model):
         related_name="comment_templates",
         blank=True,
         null=True,
-        help_text="教师（个人模板有teacher）"
+        help_text="教师（个人模板有teacher）",
     )
     template_type = models.CharField(
-        max_length=20,
-        choices=TEMPLATE_TYPE_CHOICES,
-        help_text="模板类型"
+        max_length=20, choices=TEMPLATE_TYPE_CHOICES, help_text="模板类型"
     )
     comment_text = models.TextField(help_text="评价内容")
     usage_count = models.IntegerField(default=0, help_text="使用次数")

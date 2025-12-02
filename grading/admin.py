@@ -45,13 +45,293 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ["class_name"]
 
 
-# Old AssignmentAdmin - commented out during refactor
-# Will be replaced with new Assignment model admin
-# class AssignmentAdmin(admin.ModelAdmin):
-#     list_display = ["name", "description", "due_date", "created_at"]
-#     search_fields = ["name", "description"]
-#     list_filter = ["due_date", "created_at"]
-#     date_hierarchy = "due_date"
+class AssignmentForm(forms.ModelForm):
+    """作业配置表单
+
+    实现动态字段显示和密码加密处理。
+
+    Requirements:
+        - 2.2: 根据提交方式动态显示相关配置字段
+        - 10.7: 安全地加密存储Git认证凭据
+    """
+
+    # 添加一个非模型字段用于密码输入
+    git_password = forms.CharField(
+        label="Git密码",
+        required=False,
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "vTextField",
+                "style": "width: 50%;",
+                "placeholder": "Git密码（可选，将加密存储）",
+                "autocomplete": "new-password",
+            }
+        ),
+        help_text="留空表示不修改已保存的密码",
+    )
+
+    class Meta:
+        model = Assignment
+        fields = [
+            "name",
+            "course",
+            "class_obj",
+            "storage_type",
+            "git_url",
+            "git_branch",
+            "git_username",
+            "base_path",
+            "description",
+            "is_active",
+        ]
+        widgets = {
+            "name": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "输入作业名称",
+                }
+            ),
+            "description": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "class": "vLargeTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "作业描述",
+                }
+            ),
+            "git_url": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "Git仓库URL（如：https://github.com/user/repo.git）",
+                }
+            ),
+            "git_branch": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 50%;",
+                    "placeholder": "分支名称（默认：main）",
+                }
+            ),
+            "git_username": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 50%;",
+                    "placeholder": "Git用户名（可选）",
+                }
+            ),
+            "base_path": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "文件系统基础路径（自动生成）",
+                    "readonly": "readonly",
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # 动态设置字段的required属性（Requirement 2.2）
+        storage_type = None
+        if self.instance and self.instance.pk:
+            storage_type = self.instance.storage_type
+        elif self.data:
+            storage_type = self.data.get("storage_type")
+
+        if storage_type == "git":
+            self.fields["git_url"].required = True
+            self.fields["base_path"].required = False
+        elif storage_type == "filesystem":
+            self.fields["git_url"].required = False
+            self.fields["base_path"].required = False
+        else:
+            # 默认情况
+            self.fields["git_url"].required = False
+            self.fields["base_path"].required = False
+
+        # 如果是编辑现有记录且有加密密码，显示提示
+        if self.instance and self.instance.pk and self.instance.git_password_encrypted:
+            self.fields["git_password"].help_text = (
+                "已保存加密密码。留空表示不修改，输入新密码将覆盖原密码"
+            )
+
+    def clean(self):
+        """验证表单数据"""
+        cleaned_data = super().clean()
+        storage_type = cleaned_data.get("storage_type")
+        git_url = cleaned_data.get("git_url")
+        course = cleaned_data.get("course")
+        class_obj = cleaned_data.get("class_obj")
+        name = cleaned_data.get("name")
+
+        # 验证Git方式必须提供URL（Requirement 2.4）
+        if storage_type == "git" and not git_url:
+            raise ValidationError("Git仓库方式必须提供仓库URL")
+
+        # 验证班级属于课程
+        if course and class_obj and class_obj.course != course:
+            raise ValidationError(f"班级 {class_obj.name} 不属于课程 {course.name}")
+
+        # 验证唯一性（在同一教师、课程、班级下名称唯一）
+        if (
+            name
+            and course
+            and class_obj
+            and hasattr(self.instance, "owner")
+            and self.instance.owner
+        ):
+            existing = Assignment.objects.filter(
+                owner=self.instance.owner,
+                course=course,
+                class_obj=class_obj,
+                name=name,
+                is_active=True,
+            )
+            if self.instance.pk:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise ValidationError(f"该课程和班级下已存在名为 '{name}' 的作业配置")
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        """保存时处理密码加密和路径生成
+
+        Requirements:
+            - 4.1: 自动生成文件系统基础路径
+            - 10.7: 加密存储Git密码
+        """
+        instance = super().save(commit=False)
+
+        # 如果是文件系统方式，自动生成base_path（Requirement 4.1）
+        if instance.storage_type == "filesystem":
+            from grading.assignment_utils import PathValidator
+
+            course_name = PathValidator.sanitize_name(instance.course.name)
+            class_name = PathValidator.sanitize_name(instance.class_obj.name)
+            instance.base_path = f"{course_name}/{class_name}/"
+
+        # 处理密码加密（Requirement 10.7）
+        git_password = self.cleaned_data.get("git_password")
+        if git_password:
+            # 用户输入了新密码，进行加密
+            from grading.assignment_utils import CredentialEncryption
+
+            try:
+                instance.git_password_encrypted = CredentialEncryption.encrypt(git_password)
+                logger.info(f"成功加密Git密码 for assignment: {instance.name}")
+            except Exception as e:
+                logger.error(f"加密Git密码失败: {str(e)}")
+                raise ValidationError(f"密码加密失败: {str(e)}")
+        # 如果没有输入新密码，保持原有的加密密码不变
+
+        if commit:
+            instance.save()
+        return instance
+
+    class Media:
+        js = ("admin/js/assignment_form.js",)
+
+
+@admin.register(Assignment)
+class AssignmentAdmin(admin.ModelAdmin):
+    """作业配置管理界面"""
+
+    form = AssignmentForm
+    list_display = (
+        "name",
+        "course",
+        "class_obj",
+        "storage_type",
+        "owner",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("storage_type", "is_active", "course", "class_obj", "created_at")
+    search_fields = ("name", "description", "course__name", "class_obj__name", "owner__username")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at", "owner", "tenant")
+
+    fieldsets = (
+        (
+            "基本信息",
+            {
+                "fields": ("name", "course", "class_obj", "storage_type", "description"),
+                "description": "配置作业的基本信息和提交方式。",
+            },
+        ),
+        (
+            "Git仓库配置",
+            {
+                "fields": ("git_url", "git_branch", "git_username", "git_password"),
+                "classes": ("collapse", "git-storage-fields"),
+                "description": "当选择Git仓库方式时需要配置。密码将加密存储。",
+            },
+        ),
+        (
+            "文件系统配置",
+            {
+                "fields": ("base_path",),
+                "classes": ("collapse", "filesystem-storage-fields"),
+                "description": "文件系统方式的基础路径（自动生成）。",
+            },
+        ),
+        (
+            "状态和权限",
+            {
+                "fields": ("is_active", "owner", "tenant"),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "系统信息",
+            {
+                "fields": ("created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def get_queryset(self, request):
+        """只显示当前教师的作业配置"""
+        qs = super().get_queryset(request).select_related("course", "class_obj", "owner", "tenant")
+        if not request.user.is_superuser:
+            # 教师只能看到自己创建的作业配置
+            return qs.filter(owner=request.user, is_active=True)
+        return qs
+
+    def save_model(self, request, obj, form, change):
+        """保存时自动设置owner和tenant"""
+        if not change:  # 新建时
+            obj.owner = request.user
+            if hasattr(request.user, "profile"):
+                obj.tenant = request.user.profile.tenant
+        super().save_model(request, obj, form, change)
+
+    def has_add_permission(self, request):
+        """允许添加作业配置"""
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        """允许修改作业配置"""
+        if obj is None:
+            return True
+        # 只能修改自己创建的作业配置
+        return request.user.is_superuser or obj.owner == request.user
+
+    def has_delete_permission(self, request, obj=None):
+        """允许删除作业配置"""
+        if obj is None:
+            return True
+        # 只能删除自己创建的作业配置
+        return request.user.is_superuser or obj.owner == request.user
+
+    def has_view_permission(self, request, obj=None):
+        """允许查看作业配置"""
+        return True
 
 
 class SubmissionAdmin(admin.ModelAdmin):
@@ -1099,7 +1379,6 @@ class RepositoryAdmin(admin.ModelAdmin):
 
 # 注册其他模型
 admin_site.register(Student, StudentAdmin)
-# admin_site.register(Assignment, AssignmentAdmin)  # Commented out during refactor
 admin_site.register(Submission, SubmissionAdmin)
 admin_site.register(Repository, RepositoryAdmin)
 admin_site.register(GlobalConfig, GlobalConfigAdmin)
@@ -1200,7 +1479,15 @@ class CourseScheduleInline(admin.TabularInline):
 class CourseAdmin(admin.ModelAdmin):
     """课程管理界面"""
 
-    list_display = ("name", "semester", "teacher", "class_name", "location", "course_type", "created_at")
+    list_display = (
+        "name",
+        "semester",
+        "teacher",
+        "class_name",
+        "location",
+        "course_type",
+        "created_at",
+    )
     list_filter = ("semester", "teacher", "course_type", "created_at")
     search_fields = ("name", "description", "location", "class_name")
     ordering = ("semester", "name")

@@ -91,6 +91,8 @@ make test
 | `make format` | 格式化代码 |
 | `make lint` | 代码检查 |
 | `make clean` | 清理临时文件 |
+| `make clean-test-dirs` | 清理测试生成的目录 |
+| `make clean-all` | 完整清理（包括测试目录） |
 
 ## 🔄 开发工作流
 
@@ -287,6 +289,75 @@ uv run python manage.py test --verbosity=2
 # 生成覆盖率报告
 uv run pytest --cov=grading --cov-report=html
 ```
+
+### 测试目录清理
+
+测试运行时可能在项目根目录产生临时目录，包括：
+- 单字符目录（如 `0/`, `A/`）- Hypothesis 生成的随机目录
+- 包含控制字符的目录（如 `0ñ\x04`）- 测试代码 bug 产生
+- 测试课程目录（如 `其他课程/`, `数据结构/`）
+
+**清理方法**：
+
+```bash
+# 方式 1: 使用 Makefile（推荐）
+make clean-test-dirs
+
+# 方式 2: 使用 Python 脚本
+uv run python scripts/cleanup_test_directories.py
+
+# 方式 3: 预览模式（不实际删除）
+uv run python scripts/cleanup_test_directories.py --dry-run
+```
+
+**预防措施**：
+- Hypothesis 已配置使用系统临时目录（`grading/tests/hypothesis_config.py`）
+- 测试代码应使用 `tempfile.TemporaryDirectory()` 或 `tempfile.mkdtemp()`
+- 确保 `tearDown()` 方法正确清理临时文件
+- 这些目录已在 `.gitignore` 中忽略
+
+### 属性测试（Property-Based Testing）
+
+本项目使用 **Hypothesis** 进行属性测试，自动生成大量测试数据验证代码的通用属性。
+
+**详细文档：** 参见 [Hypothesis Testing Guide](HYPOTHESIS_TESTING.md)
+
+**快速开始：**
+
+```python
+from hypothesis import given, settings
+from hypothesis import strategies as st
+from hypothesis.extra.django import TestCase
+
+# 导入共享配置（必须）
+from . import hypothesis_config  # noqa: F401
+
+class MyPropertyTest(TestCase):
+    @given(name=st.text(min_size=1, max_size=100))
+    def test_property(self, name):
+        # Hypothesis 会生成各种 name 值进行测试
+        result = process_name(name)
+        self.assertIsNotNone(result)
+```
+
+**运行属性测试：**
+
+```bash
+# 使用默认配置（100 examples）
+uv run python manage.py test grading.tests.test_assignment_management_service_properties
+
+# 使用开发配置（10 examples，更快）
+HYPOTHESIS_PROFILE=dev uv run python manage.py test grading.tests.test_*_properties
+
+# 使用调试配置（5 examples，详细输出）
+HYPOTHESIS_PROFILE=debug uv run python manage.py test grading.tests.test_*_properties
+```
+
+**注意事项：**
+- 属性测试文件命名：`test_*_properties.py`
+- 所有属性测试必须导入 `hypothesis_config`
+- Hypothesis 数据库存储在系统临时目录，不会污染项目
+- 测试生成的随机目录已在 `.gitignore` 中忽略
 
 ## ⚡ 性能优化
 

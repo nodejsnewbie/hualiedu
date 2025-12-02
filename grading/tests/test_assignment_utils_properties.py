@@ -11,7 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import hypothesis
 from django.core.cache import cache
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from hypothesis.extra.django import TestCase
 
 from grading.assignment_utils import (
@@ -35,14 +36,14 @@ class TestPathValidatorProperties(TestCase):
             # 正常路径应该通过
             self.assertTrue(PathValidator.validate_path("subdir/file.txt", base_dir))
             self.assertTrue(PathValidator.validate_path("file.txt", base_dir))
-            
+
             # 路径遍历攻击应该被阻止
             with self.assertRaises(ValidationError):
                 PathValidator.validate_path("../etc/passwd", base_dir)
-            
+
             with self.assertRaises(ValidationError):
                 PathValidator.validate_path("../../etc/passwd", base_dir)
-            
+
             with self.assertRaises(ValidationError):
                 PathValidator.validate_path("subdir/../../etc/passwd", base_dir)
 
@@ -52,12 +53,12 @@ class TestPathValidatorProperties(TestCase):
         self.assertEqual(PathValidator._number_to_chinese(1), "一")
         self.assertEqual(PathValidator._number_to_chinese(5), "五")
         self.assertEqual(PathValidator._number_to_chinese(10), "十")
-        
+
         # 测试 11-19
         self.assertEqual(PathValidator._number_to_chinese(11), "十一")
         self.assertEqual(PathValidator._number_to_chinese(15), "十五")
         self.assertEqual(PathValidator._number_to_chinese(19), "十九")
-        
+
         # 测试 20+
         self.assertEqual(PathValidator._number_to_chinese(20), "20")
         self.assertEqual(PathValidator._number_to_chinese(25), "25")
@@ -68,26 +69,26 @@ class TestPathValidatorProperties(TestCase):
         # 空字符串应该抛出异常
         with self.assertRaises(ValidationError):
             PathValidator.sanitize_name("")
-        
+
         # 只有空格应该抛出异常
         with self.assertRaises(ValidationError):
             PathValidator.sanitize_name("   ")
-        
+
         # 只有非法字符应该抛出异常
         with self.assertRaises(ValidationError):
             PathValidator.sanitize_name("///")
-        
+
         # 正常名称应该保持不变
         self.assertEqual(PathValidator.sanitize_name("数据结构"), "数据结构")
         self.assertEqual(PathValidator.sanitize_name("Class1"), "Class1")
-        
+
         # 包含非法字符的名称应该被清理
         self.assertEqual(PathValidator.sanitize_name("数据/结构"), "数据-结构")
         self.assertEqual(PathValidator.sanitize_name("Class:1"), "Class-1")
-        
+
         # 多个连续的连字符应该被合并
         self.assertEqual(PathValidator.sanitize_name("a///b"), "a-b")
-        
+
         # 首尾的连字符应该被移除
         self.assertEqual(PathValidator.sanitize_name("/abc/"), "abc")
 
@@ -111,39 +112,40 @@ class TestPathValidatorProperties(TestCase):
         # 尝试清理名称
         try:
             result = PathValidator.sanitize_name(name)
-            
+
             # 如果成功清理，验证结果不包含非法字符
             for illegal_char in PathValidator.ILLEGAL_CHARS:
                 self.assertNotIn(illegal_char, result)
-            
+
             # 验证结果不为空
             self.assertTrue(result)
-            
+
             # 验证结果不以连字符开头或结尾
-            self.assertFalse(result.startswith('-'))
-            self.assertFalse(result.endswith('-'))
-            
+            self.assertFalse(result.startswith("-"))
+            self.assertFalse(result.endswith("-"))
+
             # 验证结果不包含连续的连字符
-            self.assertNotIn('--', result)
-            
+            self.assertNotIn("--", result)
+
         except ValidationError:
             # 如果抛出异常，验证是合理的情况：
             # 1. 名称为空或只有空格
             # 2. 名称只包含非法字符
             # 3. 清理后名称为空（如只有连字符或特殊字符）
             stripped = name.strip()
-            
+
             # 这些情况应该抛出异常
             is_valid_exception = (
-                not stripped or  # 空字符串
-                all(c in PathValidator.ILLEGAL_CHARS for c in stripped) or  # 只有非法字符
-                all(c in PathValidator.ILLEGAL_CHARS or c == '-' or c.isspace() for c in stripped)  # 只有非法字符、连字符或空格
+                not stripped  # 空字符串
+                or all(c in PathValidator.ILLEGAL_CHARS for c in stripped)  # 只有非法字符
+                or all(
+                    c in PathValidator.ILLEGAL_CHARS or c == "-" or c.isspace() for c in stripped
+                )  # 只有非法字符、连字符或空格
             )
-            
+
             # 验证异常是合理的
             self.assertTrue(
-                is_valid_exception,
-                f"Unexpected ValidationError for input: {repr(name)}"
+                is_valid_exception, f"Unexpected ValidationError for input: {repr(name)}"
             )
 
     @given(
@@ -276,44 +278,32 @@ class TestPathValidatorProperties(TestCase):
             # 有效格式：中文数字
             st.builds(
                 lambda n: f"第{n}次作业",
-                n=st.sampled_from(["一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"])
+                n=st.sampled_from(
+                    ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二"]
+                ),
             ),
             # 有效格式：阿拉伯数字
-            st.builds(
-                lambda n: f"第{n}次作业",
-                n=st.integers(min_value=1, max_value=100).map(str)
-            ),
+            st.builds(lambda n: f"第{n}次作业", n=st.integers(min_value=1, max_value=100).map(str)),
             # 有效格式：实验
             st.builds(
                 lambda n: f"第{n}次实验",
-                n=st.sampled_from(["一", "二", "三", "1", "2", "3", "10", "20"])
+                n=st.sampled_from(["一", "二", "三", "1", "2", "3", "10", "20"]),
             ),
             # 有效格式：练习
             st.builds(
                 lambda n: f"第{n}次练习",
-                n=st.sampled_from(["一", "二", "三", "1", "2", "3", "10", "20"])
+                n=st.sampled_from(["一", "二", "三", "1", "2", "3", "10", "20"]),
             ),
             # 无效格式：缺少"第"
-            st.builds(
-                lambda n: f"{n}次作业",
-                n=st.sampled_from(["一", "1", "10"])
-            ),
+            st.builds(lambda n: f"{n}次作业", n=st.sampled_from(["一", "1", "10"])),
             # 无效格式：缺少"次"
-            st.builds(
-                lambda n: f"第{n}作业",
-                n=st.sampled_from(["一", "1", "10"])
-            ),
+            st.builds(lambda n: f"第{n}作业", n=st.sampled_from(["一", "1", "10"])),
             # 无效格式：错误的类型
-            st.builds(
-                lambda n: f"第{n}次测试",
-                n=st.sampled_from(["一", "1", "10"])
-            ),
+            st.builds(lambda n: f"第{n}次测试", n=st.sampled_from(["一", "1", "10"])),
             # 无效格式：随机文本
             st.text(
-                alphabet=st.characters(whitelist_categories=("L", "N")),
-                min_size=1,
-                max_size=20
-            ).filter(lambda x: not x.startswith("第"))
+                alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=20
+            ).filter(lambda x: not x.startswith("第")),
         )
     )
     @settings(max_examples=100)
@@ -327,9 +317,9 @@ class TestPathValidatorProperties(TestCase):
 
         # 检查名称是否符合有效格式
         valid_patterns = [
-            r'^第[一二三四五六七八九十\d]+次作业$',
-            r'^第[一二三四五六七八九十\d]+次实验$',
-            r'^第[一二三四五六七八九十\d]+次练习$',
+            r"^第[一二三四五六七八九十\d]+次作业$",
+            r"^第[一二三四五六七八九十\d]+次实验$",
+            r"^第[一二三四五六七八九十\d]+次练习$",
         ]
 
         expected_valid = any(re.match(pattern, assignment_name) for pattern in valid_patterns)
@@ -338,7 +328,7 @@ class TestPathValidatorProperties(TestCase):
         self.assertEqual(
             result,
             expected_valid,
-            f"Validation mismatch for '{assignment_name}': got {result}, expected {expected_valid}"
+            f"Validation mismatch for '{assignment_name}': got {result}, expected {expected_valid}",
         )
 
 
@@ -394,13 +384,17 @@ class TestCacheManagerProperties(TestCase):
 
     @given(
         assignment_id=st.integers(min_value=1, max_value=10000),
-        path=st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50),
+        path=st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50
+        ),
         data=st.lists(
-            st.fixed_dictionaries({
-                "name": st.text(max_size=20),
-                "type": st.sampled_from(["file", "dir"]),
-                "size": st.integers(min_value=0, max_value=10000),
-            }),
+            st.fixed_dictionaries(
+                {
+                    "name": st.text(max_size=20),
+                    "type": st.sampled_from(["file", "dir"]),
+                    "size": st.integers(min_value=0, max_value=10000),
+                }
+            ),
             max_size=5,
         ),
     )
@@ -428,7 +422,9 @@ class TestCacheManagerProperties(TestCase):
 
     @given(
         assignment_id=st.integers(min_value=1, max_value=10000),
-        path=st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50),
+        path=st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50
+        ),
         content=st.binary(min_size=1, max_size=1000),
     )
     @settings(max_examples=100, suppress_health_check=[hypothesis.HealthCheck.too_slow])
@@ -458,13 +454,17 @@ class TestCacheManagerProperties(TestCase):
 
     @given(
         assignment_id=st.integers(min_value=1, max_value=10000),
-        path=st.text(alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50),
+        path=st.text(
+            alphabet=st.characters(whitelist_categories=("L", "N")), min_size=1, max_size=50
+        ),
         data=st.lists(
-            st.fixed_dictionaries({
-                "name": st.text(max_size=20),
-                "type": st.sampled_from(["file", "dir"]),
-                "size": st.integers(min_value=0, max_value=10000),
-            }),
+            st.fixed_dictionaries(
+                {
+                    "name": st.text(max_size=20),
+                    "type": st.sampled_from(["file", "dir"]),
+                    "size": st.integers(min_value=0, max_value=10000),
+                }
+            ),
             max_size=5,
         ),
     )

@@ -5,11 +5,12 @@
 """
 
 import logging
+
 from django.contrib.auth.models import User
-from django.test import TestCase, Client
+from django.test import Client, TestCase
 from django.urls import reverse
 
-from grading.models import Course, Class, Semester, Tenant
+from grading.models import Class, Course, Semester, Tenant
 from grading.tests.base import BaseTestCase
 
 # 配置日志

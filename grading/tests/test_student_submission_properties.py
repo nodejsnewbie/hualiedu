@@ -5,18 +5,27 @@
 """
 
 import os
-import hypothesis
+
 from django.contrib.auth.models import User
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from hypothesis.extra.django import TestCase
 
 from grading.assignment_utils import FilenameValidator
-from grading.models import Assignment, Class, Course, Homework, Semester, Submission, Tenant, UserProfile
+from grading.models import (
+    Assignment,
+    Class,
+    Course,
+    Homework,
+    Semester,
+    Submission,
+    Tenant,
+    UserProfile,
+)
 from grading.services.assignment_management_service import AssignmentManagementService
 
-# 配置最小迭代次数
-hypothesis.settings.register_profile("ci", max_examples=100)
-hypothesis.settings.load_profile("ci")
+# 导入共享的 Hypothesis 配置
+from . import hypothesis_config  # noqa: F401
 
 
 class TestStudentSubmissionProperties(TestCase):
@@ -401,7 +410,9 @@ class TestStudentSubmissionProperties(TestCase):
     @given(
         student_name=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
         filename_base=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=50,
         ).filter(lambda x: x.strip()),
@@ -495,7 +506,9 @@ class TestStudentSubmissionProperties(TestCase):
         student1_name=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
         student2_name=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
         base_filename=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=50,
         ).filter(lambda x: x.strip()),
@@ -551,11 +564,15 @@ class TestStudentSubmissionProperties(TestCase):
             and student2_name not in base_filename
         ):
             self.assertFalse(
-                FilenameValidator.validate_student_name_in_filename(student1_filename, student2_name),
+                FilenameValidator.validate_student_name_in_filename(
+                    student1_filename, student2_name
+                ),
                 f"Student1's filename '{student1_filename}' should not be valid for student2 '{student2_name}'",
             )
             self.assertFalse(
-                FilenameValidator.validate_student_name_in_filename(student2_filename, student1_name),
+                FilenameValidator.validate_student_name_in_filename(
+                    student2_filename, student1_name
+                ),
                 f"Student2's filename '{student2_filename}' should not be valid for student1 '{student1_name}'",
             )
 
@@ -645,7 +662,9 @@ class TestStudentSubmissionProperties(TestCase):
 
     @given(
         filename=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=100,
         ).filter(lambda x: x.strip()),
@@ -781,7 +800,9 @@ class TestStudentSubmissionProperties(TestCase):
 
         # 边界情况测试：只有扩展名的文件
         ext_only_filename = file_extension
-        processed_ext_only = FilenameValidator.process_student_filename(ext_only_filename, student_name)
+        processed_ext_only = FilenameValidator.process_student_filename(
+            ext_only_filename, student_name
+        )
         self.assertIn(
             student_name,
             processed_ext_only,
@@ -821,17 +842,44 @@ class TestStudentSubmissionProperties(TestCase):
 
     @given(
         filename_base=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=50,
         ).filter(lambda x: x.strip()),
-        file_extension=st.sampled_from([
-            ".docx", ".pdf", ".zip", ".txt", ".jpg", ".png",  # 允许的格式
-            ".exe", ".bat", ".sh", ".py", ".js", ".html",  # 不允许的格式
-            ".DOCX", ".PDF", ".ZIP", ".TXT", ".JPG", ".PNG",  # 大写的允许格式
-            ".doc", ".xls", ".ppt", ".rar", ".7z", ".tar",  # 其他不允许的格式
-            "", "..", ".", "...",  # 边界情况
-        ]),
+        file_extension=st.sampled_from(
+            [
+                ".docx",
+                ".pdf",
+                ".zip",
+                ".txt",
+                ".jpg",
+                ".png",  # 允许的格式
+                ".exe",
+                ".bat",
+                ".sh",
+                ".py",
+                ".js",
+                ".html",  # 不允许的格式
+                ".DOCX",
+                ".PDF",
+                ".ZIP",
+                ".TXT",
+                ".JPG",
+                ".PNG",  # 大写的允许格式
+                ".doc",
+                ".xls",
+                ".ppt",
+                ".rar",
+                ".7z",
+                ".tar",  # 其他不允许的格式
+                "",
+                "..",
+                ".",
+                "...",  # 边界情况
+            ]
+        ),
     )
     @settings(
         max_examples=100,
@@ -993,7 +1041,11 @@ class TestStudentSubmissionProperties(TestCase):
 
         # 验证：路径分隔符不应该影响扩展名检测
         # （虽然文件名不应该包含路径，但我们测试健壮性）
-        if ext_lower in allowed_extensions and "/" not in filename_base and "\\" not in filename_base:
+        if (
+            ext_lower in allowed_extensions
+            and "/" not in filename_base
+            and "\\" not in filename_base
+        ):
             # 只在文件名不包含路径分隔符时测试
             self.assertTrue(
                 is_valid,
@@ -1004,7 +1056,9 @@ class TestStudentSubmissionProperties(TestCase):
         student_name=st.text(min_size=1, max_size=20).filter(lambda x: x.strip()),
         assignment_number=st.integers(min_value=1, max_value=10),
         filename_base=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=50,
         ).filter(lambda x: x.strip()),
@@ -1112,7 +1166,9 @@ class TestStudentSubmissionProperties(TestCase):
         )
 
         # 验证：文件大小应该递增（模拟文件内容变化）
-        file_sizes = list(student_submissions.order_by("version").values_list("file_size", flat=True))
+        file_sizes = list(
+            student_submissions.order_by("version").values_list("file_size", flat=True)
+        )
         for i in range(len(file_sizes) - 1):
             self.assertLess(
                 file_sizes[i],
@@ -1263,12 +1319,16 @@ class TestStudentSubmissionProperties(TestCase):
 
     @given(
         course_name=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=30,
         ).filter(lambda x: x.strip()),
         class_name=st.text(
-            alphabet=st.characters(whitelist_categories=("L", "N", "P"), blacklist_characters="/\\:*?\"<>|"),
+            alphabet=st.characters(
+                whitelist_categories=("L", "N", "P"), blacklist_characters='/\\:*?"<>|'
+            ),
             min_size=1,
             max_size=30,
         ).filter(lambda x: x.strip()),
@@ -1287,9 +1347,10 @@ class TestStudentSubmissionProperties(TestCase):
         For any 不存在的作业次数目录，学生提交时系统应该自动创建该目录
         **Validates: Requirements 4.4, 4.6**
         """
-        from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
-        import tempfile
         import shutil
+        import tempfile
+
+        from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
 
         # 创建临时目录作为基础路径
         temp_dir = tempfile.mkdtemp()
@@ -1324,7 +1385,7 @@ class TestStudentSubmissionProperties(TestCase):
                 existing_numbers.append(assignment_num)
                 # 使用正确的方式生成目录名：传入所有已存在的编号
                 dir_name = PathValidator.generate_assignment_number_name(existing_numbers[:i])
-                
+
                 # 创建目录
                 success = adapter.create_directory(dir_name)
                 self.assertTrue(
@@ -1523,9 +1584,7 @@ class TestStudentSubmissionProperties(TestCase):
             # 验证：目录创建日志记录（通过检查目录存在性）
             # 这是一个间接验证，确保目录创建操作被正确执行
             created_dirs = [
-                entry["name"]
-                for entry in adapter.list_directory("")
-                if entry["type"] == "dir"
+                entry["name"] for entry in adapter.list_directory("") if entry["type"] == "dir"
             ]
             self.assertIn(
                 new_dir_name,
@@ -1543,7 +1602,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),  # Letters and numbers only
                 min_codepoint=32,  # Exclude control characters
-                blacklist_characters="/\\:*?\"<>|-"  # Exclude filesystem illegal chars and hyphen
+                blacklist_characters='/\\:*?"<>|-',  # Exclude filesystem illegal chars and hyphen
             ),
             min_size=1,
             max_size=30,
@@ -1552,7 +1611,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),  # Letters and numbers only
                 min_codepoint=32,  # Exclude control characters
-                blacklist_characters="/\\:*?\"<>|-"  # Exclude filesystem illegal chars and hyphen
+                blacklist_characters='/\\:*?"<>|-',  # Exclude filesystem illegal chars and hyphen
             ),
             min_size=1,
             max_size=30,
@@ -1562,7 +1621,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),  # Letters and numbers only
                 min_codepoint=32,  # Exclude control characters and null
-                blacklist_characters="/\\:*?\"<>|-"  # Exclude filesystem illegal chars and hyphen
+                blacklist_characters='/\\:*?"<>|-',  # Exclude filesystem illegal chars and hyphen
             ),
             min_size=1,
             max_size=20,
@@ -1571,7 +1630,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),  # Letters and numbers only
                 min_codepoint=32,  # Exclude control characters
-                blacklist_characters="/\\:*?\"<>|-"  # Exclude filesystem illegal chars and hyphen
+                blacklist_characters='/\\:*?"<>|-',  # Exclude filesystem illegal chars and hyphen
             ),
             min_size=1,
             max_size=50,
@@ -1584,16 +1643,23 @@ class TestStudentSubmissionProperties(TestCase):
         deadline=None,
     )
     def test_property_7_file_storage_path_rule(
-        self, course_name, class_name, assignment_number, student_name, filename_base, file_extension
+        self,
+        course_name,
+        class_name,
+        assignment_number,
+        student_name,
+        filename_base,
+        file_extension,
     ):
         """**Feature: assignment-management-refactor, Property 7: 文件存储路径规则**
 
         For any 学生作业提交，文件应该存储在 `<课程名称>/<班级名称>/<作业次数>/` 格式的路径中
         **Validates: Requirements 4.2**
         """
-        from grading.assignment_utils import PathValidator
-        import tempfile
         import shutil
+        import tempfile
+
+        from grading.assignment_utils import PathValidator
 
         # 创建临时目录作为基础路径
         temp_dir = tempfile.mkdtemp()
@@ -1619,7 +1685,7 @@ class TestStudentSubmissionProperties(TestCase):
 
             # 验证路径结构的各个组成部分
             path_parts = expected_path_structure.split(os.sep)
-            
+
             # 验证路径有三个层级：课程、班级、作业次数
             self.assertEqual(
                 len(path_parts),
@@ -1720,7 +1786,9 @@ class TestStudentSubmissionProperties(TestCase):
 
             # 验证：不同课程的文件应该在不同的目录
             different_course = PathValidator.sanitize_name(f"{course_name}_2")
-            different_course_path = os.path.join(different_course, clean_class, assignment_dir, filename)
+            different_course_path = os.path.join(
+                different_course, clean_class, assignment_dir, filename
+            )
 
             self.assertNotEqual(
                 full_file_path,
@@ -1730,7 +1798,9 @@ class TestStudentSubmissionProperties(TestCase):
 
             # 验证：不同班级的文件应该在不同的目录
             different_class = PathValidator.sanitize_name(f"{class_name}_2")
-            different_class_path = os.path.join(clean_course, different_class, assignment_dir, filename)
+            different_class_path = os.path.join(
+                clean_course, different_class, assignment_dir, filename
+            )
 
             self.assertNotEqual(
                 full_file_path,
@@ -1739,7 +1809,9 @@ class TestStudentSubmissionProperties(TestCase):
             )
 
             # 验证：不同作业次数的文件应该在不同的目录
-            different_assignment_dir = PathValidator.generate_assignment_number_name([assignment_number + 1])
+            different_assignment_dir = PathValidator.generate_assignment_number_name(
+                [assignment_number + 1]
+            )
             different_assignment_path = os.path.join(
                 clean_course, clean_class, different_assignment_dir, filename
             )
@@ -1839,7 +1911,7 @@ class TestStudentSubmissionProperties(TestCase):
 
             # 验证：路径不应该包含特殊字符（已被清理）
             # 注意：路径分隔符（/ 或 \）是合法的，因为它们用于分隔目录
-            illegal_chars_in_names = [':', '*', '?', '"', '<', '>', '|']
+            illegal_chars_in_names = [":", "*", "?", '"', "<", ">", "|"]
             for illegal_char in illegal_chars_in_names:
                 self.assertNotIn(
                     illegal_char,
@@ -1940,13 +2012,12 @@ class TestStudentSubmissionProperties(TestCase):
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
 
-
     @given(
         course_name=st.text(
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),
                 min_codepoint=32,
-                blacklist_characters="/\\:*?\"<>|-"
+                blacklist_characters='/\\:*?"<>|-',
             ),
             min_size=1,
             max_size=30,
@@ -1955,7 +2026,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),
                 min_codepoint=32,
-                blacklist_characters="/\\:*?\"<>|-"
+                blacklist_characters='/\\:*?"<>|-',
             ),
             min_size=1,
             max_size=30,
@@ -1964,7 +2035,7 @@ class TestStudentSubmissionProperties(TestCase):
             alphabet=st.characters(
                 whitelist_categories=("L", "N"),
                 min_codepoint=32,
-                blacklist_characters="/\\:*?\"<>|-"
+                blacklist_characters='/\\:*?"<>|-',
             ),
             min_size=1,
             max_size=30,
@@ -1990,10 +2061,11 @@ class TestStudentSubmissionProperties(TestCase):
         For any 同一课程的不同班级，系统应该为每个班级维护独立的作业目录
         **Validates: Requirements 7.3**
         """
+        import shutil
+        import tempfile
+
         from grading.assignment_utils import PathValidator
         from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
-        import tempfile
-        import shutil
 
         # Skip if class names are the same (not testing this scenario)
         if class1_name == class2_name:
@@ -2238,7 +2310,7 @@ class TestStudentSubmissionProperties(TestCase):
                 # Delete a directory in class1
                 dir_to_delete = class1_assignments[0]
                 full_path_to_delete = os.path.join(base_path_class1, dir_to_delete)
-                
+
                 # Delete the directory
                 if os.path.exists(full_path_to_delete):
                     shutil.rmtree(full_path_to_delete)

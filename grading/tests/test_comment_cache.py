@@ -10,10 +10,12 @@
 """
 
 import os
-from django.test import TestCase, Client
+
 from django.contrib.auth.models import User
+from django.test import Client, TestCase
 from django.urls import reverse
-from grading.models import Tenant, UserProfile, Repository, Course, Class
+
+from grading.models import Class, Course, Repository, Tenant, UserProfile
 
 
 class CommentCacheServiceTests(TestCase):
@@ -32,9 +34,7 @@ class CommentCacheServiceTests(TestCase):
         js_file_path = os.path.join(
             "grading", "static", "grading", "js", "comment-cache-service.js"
         )
-        self.assertTrue(
-            os.path.exists(js_file_path), f"评价缓存服务文件不存在: {js_file_path}"
-        )
+        self.assertTrue(os.path.exists(js_file_path), f"评价缓存服务文件不存在: {js_file_path}")
 
         # 验证文件不为空
         with open(js_file_path, "r", encoding="utf-8") as f:
@@ -218,15 +218,11 @@ class CommentCacheServiceTests(TestCase):
         测试11: 验证文档存在
         """
         # 验证 README 文档
-        readme_path = os.path.join(
-            "grading", "static", "grading", "js", "README-comment-cache.md"
-        )
+        readme_path = os.path.join("grading", "static", "grading", "js", "README-comment-cache.md")
         self.assertTrue(os.path.exists(readme_path), f"README 文档不存在: {readme_path}")
 
         # 验证测试文档
-        test_doc_path = os.path.join(
-            "grading", "tests", "test_comment_cache_frontend.md"
-        )
+        test_doc_path = os.path.join("grading", "tests", "test_comment_cache_frontend.md")
         self.assertTrue(os.path.exists(test_doc_path), f"测试文档不存在: {test_doc_path}")
 
     def test_comment_cache_integration_with_grading_js(self):
@@ -259,12 +255,12 @@ class CommentCacheIntegrationTests(TestCase):
         """
         测试13: 验证评分页面模板包含缓存服务引用
         需求: 5.1.1-5.1.8
-        
+
         注意：这个测试检查模板文件内容，而不是实际的HTTP响应
         """
         # 读取评分页面模板
         template_path = os.path.join("grading", "templates", "grading.html")
-        
+
         if os.path.exists(template_path):
             with open(template_path, "r", encoding="utf-8") as f:
                 content = f.read()
@@ -280,7 +276,7 @@ class CommentCacheIntegrationTests(TestCase):
     def test_static_files_exist_in_filesystem(self):
         """
         测试14: 验证静态文件在文件系统中存在
-        
+
         注意：这个测试检查文件系统中的文件，而不是通过HTTP访问
         """
         # 测试评价缓存服务 JS 文件存在

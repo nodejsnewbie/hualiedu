@@ -20,6 +20,7 @@ sys.path.insert(0, str(project_root))
 
 # Django setup
 import os
+
 import django
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hualiEdu.settings")
@@ -30,9 +31,7 @@ from django.db import connection
 
 def verify_table_exists(cursor, table_name):
     """Verify that a table exists in the database."""
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
     result = cursor.fetchone()
     return result is not None
 
@@ -47,9 +46,7 @@ def verify_column_exists(cursor, table_name, column_name):
 
 def verify_index_exists(cursor, index_name):
     """Verify that an index exists in the database."""
-    cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name=?", (index_name,)
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='index' AND name=?", (index_name,))
     result = cursor.fetchone()
     return result is not None
 

@@ -116,69 +116,65 @@ class GitHandler:
 
             # 检查是否有未提交的更改
             status_result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=repo_path,
-                capture_output=True,
-                text=True
+                ["git", "status", "--porcelain"], cwd=repo_path, capture_output=True, text=True
             )
-            
+
             # 如果有未提交的更改，先提交并推送
             has_local_changes = False
             if status_result.returncode == 0 and status_result.stdout.strip():
                 logger.info(f"检测到未提交的更改，自动提交: {repo_path}")
                 has_local_changes = True
-                
+
                 # 添加所有更改
                 add_result = subprocess.run(
-                    ["git", "add", "-A"],
-                    cwd=repo_path,
-                    capture_output=True,
-                    text=True
+                    ["git", "add", "-A"], cwd=repo_path, capture_output=True, text=True
                 )
-                
+
                 if add_result.returncode != 0:
                     logger.error(f"git add 失败: {add_result.stderr}")
                     return False
-                
+
                 # 提交更改
                 commit_result = subprocess.run(
                     ["git", "commit", "-m", "自动提交：同步前保存本地更改"],
                     cwd=repo_path,
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
-                
+
                 if commit_result.returncode != 0:
                     logger.error(f"git commit 失败: {commit_result.stderr}")
                     return False
-                
+
                 logger.info("本地更改已自动提交")
-                
+
                 # 推送到远程仓库
                 push_cmd = ["git", "push"]
                 if branch:
                     push_cmd.extend(["origin", branch])
-                push_result = subprocess.run(push_cmd, cwd=repo_path, capture_output=True, text=True)
-                
+                push_result = subprocess.run(
+                    push_cmd, cwd=repo_path, capture_output=True, text=True
+                )
+
                 if push_result.returncode != 0:
                     logger.error(f"git push 失败: {push_result.stderr}")
                     return False
-                
+
                 logger.info("本地更改已推送到远程仓库")
-            
+
             # 拉取更新
             pull_cmd = ["git", "pull"]
             if branch:
                 pull_cmd.extend(["origin", branch])
             result = subprocess.run(pull_cmd, cwd=repo_path, capture_output=True, text=True)
-            
+
             if result.returncode != 0:
                 logger.error(f"git pull 失败: {result.stderr}")
                 return False
-            
+
             logger.info(f"仓库同步成功: {repo_path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"拉取仓库失败: {str(e)}")
             return False

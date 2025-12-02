@@ -5,26 +5,28 @@ This module tests that database queries are properly optimized using
 select_related, prefetch_related, and indexes.
 """
 
-from django.test import TestCase
+from datetime import date, timedelta
+
 from django.contrib.auth.models import User
 from django.db import connection
+from django.test import TestCase
+
 from grading.models import (
-    Tenant,
-    Repository,
-    Course,
-    Semester,
     Class,
+    Course,
     Homework,
+    Repository,
+    Semester,
     Submission,
+    Tenant,
 )
 from grading.query_optimization import (
-    optimize_repository_queryset,
-    optimize_course_queryset,
-    optimize_submission_queryset,
-    get_user_repositories_optimized,
     get_user_courses_optimized,
+    get_user_repositories_optimized,
+    optimize_course_queryset,
+    optimize_repository_queryset,
+    optimize_submission_queryset,
 )
-from datetime import date, timedelta
 
 
 class QueryOptimizationTestCase(TestCase):
@@ -36,12 +38,8 @@ class QueryOptimizationTestCase(TestCase):
         self.tenant = Tenant.objects.create(name="Test Tenant")
 
         # Create users
-        self.teacher = User.objects.create_user(
-            username="teacher1", password="password123"
-        )
-        self.student = User.objects.create_user(
-            username="student1", password="password123"
-        )
+        self.teacher = User.objects.create_user(username="teacher1", password="password123")
+        self.student = User.objects.create_user(username="student1", password="password123")
 
         # Create semester
         self.semester = Semester.objects.create(
@@ -279,9 +277,7 @@ class IndexPerformanceTestCase(TestCase):
     def setUp(self):
         """Set up test data"""
         self.tenant = Tenant.objects.create(name="Test Tenant")
-        self.teacher = User.objects.create_user(
-            username="teacher1", password="password123"
-        )
+        self.teacher = User.objects.create_user(username="teacher1", password="password123")
         self.semester = Semester.objects.create(
             name="2024年春季学期",
             start_date=date.today(),

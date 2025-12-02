@@ -122,13 +122,11 @@ def assignment_grade_import_view(request):
                             if not filename.lower().endswith(".xlsx"):
                                 continue
                             file_path = os.path.join(class_dir, filename)
-                            homework_number = GradeFileProcessor.extract_homework_number_from_filename(
-                                file_path
+                            homework_number = (
+                                GradeFileProcessor.extract_homework_number_from_filename(file_path)
                             )
                             if homework_number is not None:
-                                assignment_files.append(
-                                    (homework_number, file_path, filename)
-                                )
+                                assignment_files.append((homework_number, file_path, filename))
 
                         if not assignment_files:
                             messages.warning(
@@ -155,12 +153,8 @@ def assignment_grade_import_view(request):
                                                 "assignment_column_letter"
                                             ],
                                             "updated_students": stats["updated_students"],
-                                            "missing_in_gradebook": stats[
-                                                "missing_in_gradebook"
-                                            ],
-                                            "missing_in_assignment": stats[
-                                                "missing_in_assignment"
-                                            ],
+                                            "missing_in_gradebook": stats["missing_in_gradebook"],
+                                            "missing_in_assignment": stats["missing_in_assignment"],
                                         }
                                     )
                                 except AssignmentImportError as exc:
@@ -172,7 +166,9 @@ def assignment_grade_import_view(request):
                                         }
                                     )
                                 except Exception as exc:  # pragma: no cover
-                                    logger.exception("导入作业成绩失败: %s", display_name, exc_info=exc)
+                                    logger.exception(
+                                        "导入作业成绩失败: %s", display_name, exc_info=exc
+                                    )
                                     errors.append(
                                         {
                                             "file_name": display_name,
@@ -341,55 +337,40 @@ def task_status_api(request, task_id):
 def browse_directory_api(request):
     """浏览目录的API"""
     try:
-        path = request.GET.get('path', '/')
-        
+        path = request.GET.get("path", "/")
+
         # 安全检查：确保路径在允许的范围内
         if not os.path.exists(path) or not os.path.isdir(path):
-            return JsonResponse({
-                "status": "error", 
-                "message": "目录不存在或不是有效目录"
-            })
-        
+            return JsonResponse({"status": "error", "message": "目录不存在或不是有效目录"})
+
         # 获取目录内容
         items = []
         try:
             for item in os.listdir(path):
                 item_path = os.path.join(path, item)
                 if os.path.isdir(item_path):
-                    items.append({
-                        "name": item,
-                        "type": "directory",
-                        "path": item_path
-                    })
-                elif item.lower().endswith(('.ppt', '.pptx')):
-                    items.append({
-                        "name": item,
-                        "type": "file",
-                        "path": item_path
-                    })
+                    items.append({"name": item, "type": "directory", "path": item_path})
+                elif item.lower().endswith((".ppt", ".pptx")):
+                    items.append({"name": item, "type": "file", "path": item_path})
         except PermissionError:
-            return JsonResponse({
-                "status": "error",
-                "message": "没有权限访问该目录"
-            })
-        
+            return JsonResponse({"status": "error", "message": "没有权限访问该目录"})
+
         # 按类型和名称排序
         items.sort(key=lambda x: (x["type"] != "directory", x["name"].lower()))
-        
-        return JsonResponse({
-            "status": "success",
-            "data": {
-                "current_path": path,
-                "parent_path": os.path.dirname(path) if path != '/' else None,
-                "items": items
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "data": {
+                    "current_path": path,
+                    "parent_path": os.path.dirname(path) if path != "/" else None,
+                    "items": items,
+                },
             }
-        })
-        
+        )
+
     except Exception as e:
-        return JsonResponse({
-            "status": "error",
-            "message": f"浏览目录失败: {str(e)}"
-        })
+        return JsonResponse({"status": "error", "message": f"浏览目录失败: {str(e)}"})
 
 
 @login_required
@@ -572,6 +553,7 @@ def convert_ppt_to_pdf_libreoffice(ppt_file, pdf_file):
 
 # ==================== 批量登分功能 ====================
 
+
 @login_required
 @require_http_methods(["GET"])
 def batch_grade_page(request):
@@ -584,6 +566,7 @@ def batch_grade_page(request):
 
         # 获取全局配置
         from grading.models import GlobalConfig
+
         repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
         base_dir = os.path.expanduser(repo_base_dir)
 
@@ -627,7 +610,7 @@ def _get_batch_grade_repository_list(request):
     """获取包含成绩登记表的仓库列表"""
     try:
         from grading.models import GlobalConfig
-        
+
         # 从全局配置获取仓库基础目录
         repo_base_dir = GlobalConfig.get_value("default_repo_base_dir")
         if not repo_base_dir:
@@ -670,8 +653,9 @@ def _execute_batch_grade(request):
     """执行批量登分"""
     try:
         from pathlib import Path
+
         from grading.models import GlobalConfig
-        
+
         repository_name = request.POST.get("repository")
         if not repository_name:
             return JsonResponse({"status": "error", "message": "未选择仓库"})
@@ -695,25 +679,21 @@ def _execute_batch_grade(request):
         # 导入并执行批量登分逻辑
         try:
             from grading.grade_registry_writer import GradeRegistryWriter
-            
+
             writer = GradeRegistryWriter()
             result = writer.batch_write_grades_from_repository(repository_path)
-            
+
             logger.info(f"批量登分完成，仓库: {repository_path}")
-            return JsonResponse({
-                "status": "success",
-                "message": f"批量登分完成",
-                "data": result
-            })
+            return JsonResponse({"status": "success", "message": f"批量登分完成", "data": result})
         except ImportError:
             logger.error("GradeRegistryWriter 模块未找到")
-            return JsonResponse({
-                "status": "error",
-                "message": "批量登分功能模块未找到，请检查系统配置"
-            })
+            return JsonResponse(
+                {"status": "error", "message": "批量登分功能模块未找到，请检查系统配置"}
+            )
 
     except Exception as e:
         logger.error(f"执行批量登分失败: {str(e)}")
         import traceback
+
         logger.error(traceback.format_exc())
         return JsonResponse({"status": "error", "message": f"执行批量登分失败: {str(e)}"})

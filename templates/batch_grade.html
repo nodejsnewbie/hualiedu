@@ -103,12 +103,15 @@
                         </button>
                     </div>
 
-                    <!-- 加载状态 -->
+                    <!-- 增强的加载状态 -->
                     <div id="loading" class="loading text-center mt-4">
                         <div class="spinner-border text-primary" role="status">
                             <span class="sr-only">处理中...</span>
                         </div>
-                        <p class="mt-2">正在执行批量登分，请稍候...</p>
+                        <p class="mt-2" id="loading-message">正在执行批量登分，请稍候...</p>
+                        <div class="progress mt-3" style="max-width: 500px; margin: 0 auto; display: none;" id="batch-progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">0%</div>
+                        </div>
                     </div>
 
                     <!-- 结果显示 -->
@@ -208,6 +211,9 @@ $(document).ready(function() {
         }
 
         $('#loading').show();
+        $('#loading-message').text('正在执行批量登分，请稍候...');
+        $('#batch-progress').show();
+        updateBatchProgress(10, '正在初始化...');
         $('#result').hide();
         $('#batch-grade-btn').prop('disabled', true);
 
@@ -219,7 +225,12 @@ $(document).ready(function() {
                 csrfmiddlewaretoken: '{{ csrf_token }}'
             },
             success: function(response) {
-                $('#loading').hide();
+                updateBatchProgress(100, '完成');
+                setTimeout(() => {
+                    $('#loading').hide();
+                    $('#batch-progress').hide();
+                }, 500);
+                
                 if (response.status === 'success') {
                     showSuccess(response.message);
                 } else {
@@ -228,12 +239,23 @@ $(document).ready(function() {
             },
             error: function(xhr, status, error) {
                 $('#loading').hide();
+                $('#batch-progress').hide();
                 showError('执行批量登分失败: ' + error);
             },
             complete: function() {
                 $('#batch-grade-btn').prop('disabled', false);
             }
         });
+    }
+    
+    // 更新批量处理进度
+    function updateBatchProgress(percent, message) {
+        const progressBar = $('#batch-progress .progress-bar');
+        progressBar.css('width', percent + '%');
+        progressBar.text(percent + '%');
+        if (message) {
+            $('#loading-message').text(message);
+        }
     }
 
     // 显示成功消息
@@ -258,6 +280,9 @@ $(document).ready(function() {
         }
 
         $('#loading').show();
+        $('#loading-message').text('正在登分到成绩册，请稍候...');
+        $('#batch-progress').show();
+        updateBatchProgress(10, '正在读取成绩数据...');
         $('#result').hide();
         $('#batch-grade-to-registry-btn').prop('disabled', true);
 
@@ -269,7 +294,12 @@ $(document).ready(function() {
                 csrfmiddlewaretoken: '{{ csrf_token }}'
             },
             success: function(response) {
-                $('#loading').hide();
+                updateBatchProgress(100, '登分完成');
+                setTimeout(() => {
+                    $('#loading').hide();
+                    $('#batch-progress').hide();
+                }, 500);
+                
                 if (response.success) {
                     let resultHtml = `
                         <div class="alert alert-success">
@@ -287,6 +317,7 @@ $(document).ready(function() {
             },
             error: function(xhr, status, error) {
                 $('#loading').hide();
+                $('#batch-progress').hide();
                 showError('执行登分失败: ' + error);
             },
             complete: function() {

@@ -48,9 +48,7 @@ def import_assignment_scores_to_gradebook(
         assignment_header_row, assignment_header_map = _locate_header_row(
             assignment_ws, {"学生姓名", "分数"}
         )
-        gradebook_header_row, gradebook_header_map = _locate_header_row(
-            gradebook_ws, {"姓名"}
-        )
+        gradebook_header_row, gradebook_header_map = _locate_header_row(gradebook_ws, {"姓名"})
 
         assignment_scores = _collect_assignment_scores(
             assignment_ws, assignment_header_row, assignment_header_map
@@ -71,12 +69,8 @@ def import_assignment_scores_to_gradebook(
             gradebook_ws, gradebook_rows, assignment_scores, target_column_index
         )
 
-        missing_in_gradebook = sorted(
-            set(assignment_scores.keys()) - set(gradebook_rows.keys())
-        )
-        missing_in_assignment = sorted(
-            set(gradebook_rows.keys()) - set(assignment_scores.keys())
-        )
+        missing_in_gradebook = sorted(set(assignment_scores.keys()) - set(gradebook_rows.keys()))
+        missing_in_assignment = sorted(set(gradebook_rows.keys()) - set(assignment_scores.keys()))
 
         gradebook_wb.save(gradebook_path)
 

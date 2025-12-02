@@ -47,14 +47,49 @@ function showError(message) {
   $('#file-content').html(alertHtml);
 }
 
-// 显示加载指示器
-function showLoading() {
+// 显示加载指示器（增强版）
+function showLoading(message = '请稍候', showProgress = false) {
   $('#loading').show();
+  $('#loading-message').text(message);
+  
+  if (showProgress) {
+    $('#loading-progress').show();
+    updateLoadingProgress(0);
+  } else {
+    $('#loading-progress').hide();
+  }
+}
+
+// 更新加载进度
+function updateLoadingProgress(percent) {
+  const progressBar = $('#loading-progress .progress-bar');
+  progressBar.css('width', percent + '%');
+  progressBar.attr('aria-valuenow', percent);
 }
 
 // 隐藏加载指示器
 function hideLoading() {
   $('#loading').hide();
+  $('#loading-progress').hide();
+}
+
+// 显示文件预览提示
+function showPreviewHint(message, type = 'info') {
+  const hint = $('#preview-hint');
+  hint.removeClass('alert-secondary alert-info alert-warning alert-success');
+  hint.addClass('alert-' + type);
+  $('#preview-hint-text').text(message);
+  hint.show();
+  
+  // 5秒后自动隐藏
+  setTimeout(() => {
+    hint.fadeOut();
+  }, 5000);
+}
+
+// 隐藏文件预览提示
+function hidePreviewHint() {
+  $('#preview-hint').hide();
 }
 
 // 设置评分按钮状态
@@ -490,23 +525,28 @@ window.handleFileContent = function(response) {
                 // 对HTML内容进行转义以防止XSS攻击
                 const escapedContent = $('<div>').text(response.content).html();
                 fileContent.html(`<pre class="border p-3 bg-light" style="white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto;">${escapedContent}</pre>`);
+                showPreviewHint('文本文件已加载，可以直接预览', 'success');
                 break;
             case 'image':
                 // 图片文件
                 fileContent.html(`<img src="${response.content}" class="img-fluid" alt="图片">`);
+                showPreviewHint('图片已加载，点击可放大查看', 'success');
                 break;
             case 'pdf':
                 // PDF 文件
                 fileContent.html(`<iframe src="${response.content}" class="w-100" style="height: 800px;"></iframe>`);
+                showPreviewHint('PDF文档已加载，可以直接预览', 'success');
                 break;
             case 'excel':
                 // Excel 文件
                 try {
                     // 直接显示后端返回的 HTML 表格
                     fileContent.html(response.content);
+                    showPreviewHint('Excel表格已转换为HTML格式显示', 'info');
                 } catch (error) {
                     console.error('Error displaying Excel content:', error);
                     fileContent.html('<div class="alert alert-danger">无法显示 Excel 内容</div>');
+                    showPreviewHint('Excel文件预览失败', 'warning');
                 }
                 break;
             case 'docx':
@@ -514,9 +554,11 @@ window.handleFileContent = function(response) {
                 try {
                     console.log('Displaying Word document content:', response.content);
                     fileContent.html(response.content);
+                    showPreviewHint('Word文档已转换为HTML格式显示', 'info');
                 } catch (error) {
                     console.error('Error displaying Word content:', error);
                     fileContent.html('<div class="alert alert-danger">无法显示 Word 文档内容</div>');
+                    showPreviewHint('Word文档预览失败', 'warning');
                 }
                 break;
             case 'binary':
@@ -527,9 +569,11 @@ window.handleFileContent = function(response) {
                         <a href="${response.content}" class="alert-link" download>点击下载文件</a>
                     </div>
                 `);
+                showPreviewHint('此文件类型不支持在线预览，请下载后查看', 'info');
                 break;
             default:
                 fileContent.html('<div class="alert alert-warning">不支持的文件类型</div>');
+                showPreviewHint('不支持的文件类型', 'warning');
         }
 
         // 处理评分信息
@@ -573,7 +617,10 @@ window.handleFileContent = function(response) {
 // 加载文件内容
 window.loadFile = function(path) {
     console.log('Loading file:', path);
-    showLoading();
+    
+    // 显示增强的加载指示器
+    showLoading('正在加载文件内容...', false);
+    hidePreviewHint();
     
     // 重置锁定状态（将在handleGradeInfo中根据实际情况更新）
     isFileLocked = false;

@@ -228,24 +228,18 @@
   - 应用迁移
   - _Requirements: 所有_
 
-- [ ] 3.3 编写 Assignment 模型单元测试
-
-
-
-
-
-
+- [x] 3.3 编写 Assignment 模型单元测试
   - 测试字段验证
   - 测试模型方法
   - 测试约束
   - _Requirements: 2.1, 7.1, 7.2_
 
 
-- [ ] 4. 实现 AssignmentManagementService 业务逻辑
+- [x] 4. 实现 AssignmentManagementService 业务逻辑
 
 
 
-- [ ] 4.1 实现 create_assignment 方法
+- [x] 4.1 实现 create_assignment 方法
 
 
   - 实现输入验证
@@ -254,7 +248,7 @@
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 4.1_
 
 
-- [ ] 4.2 编写 create_assignment 属性测试
+- [x] 4.2 编写 create_assignment 属性测试
 
 
 
@@ -262,13 +256,13 @@
   - **Validates: Requirements 2.5**
 -
 
-- [ ] 4.3 编写 create_assignment 属性测试
+- [x] 4.3 编写 create_assignment 属性测试
 
 
   - **Property 6: 目录路径生成规则**
   - **Validates: Requirements 4.1**
 
-- [ ] 4.4 编写 create_assignment 属性测试
+- [x] 4.4 编写 create_assignment 属性测试
 
 
 
@@ -276,7 +270,7 @@
   - **Property 18: Git URL 验证**
   - **Validates: Requirements 8.4**
 
-- [ ] 4.5 编写 create_assignment 属性测试
+- [x] 4.5 编写 create_assignment 属性测试
 
 
 
@@ -285,7 +279,7 @@
   - **Validates: Requirements 8.5**
 
 
-- [ ] 4.6 实现 get_assignment_structure 方法
+- [x] 4.6 实现 get_assignment_structure 方法
 
 
   - 实现目录结构获取
@@ -440,7 +434,7 @@
   - **Property 25: 文件覆盖规则**
   - **Validates: Requirements 9.7**
 
-- [ ] 5.8 实现作业次数目录创建
+- [x] 5.8 实现作业次数目录创建
 
 
 
@@ -464,7 +458,7 @@
   - **Validates: Requirements 4.4, 4.6**
 
 
-- [ ] 5.10 实现文件存储路径处理
+- [x] 5.10 实现文件存储路径处理
 
 
 
@@ -488,7 +482,7 @@
   - **Validates: Requirements 4.2**
 -
 
-- [ ] 5.12 编写班级隔离属性测试
+- [x] 5.12 编写班级隔离属性测试
 
 
 
@@ -500,14 +494,14 @@
   - **Validates: Requirements 7.3**
 
 
-- [ ] 6. 更新视图和 URL 路由
+- [x] 6. 更新视图和 URL 路由
 
 
 
 
 
 
-- [ ] 6.1 创建作业管理视图
+- [x] 6.1 创建作业管理视图
 
 
 
@@ -519,7 +513,7 @@
 
 
 
-- [ ] 6.2 编写视图单元测试
+- [x] 6.2 编写视图单元测试
 
 
 
@@ -531,7 +525,7 @@
 
 
 
-- [ ] 6.3 创建作业结构 API 视图
+- [x] 6.3 创建作业结构 API 视图
 
 
 
@@ -542,7 +536,7 @@
 
 
 
-- [ ] 6.4 编写 API 视图单元测试
+- [x] 6.4 编写 API 视图单元测试
 
 
 
@@ -552,7 +546,7 @@
 
   - _Requirements: 3.2, 3.3, 3.4, 3.5_
 
-- [ ] 6.5 创建学生作业提交视图
+- [x] 6.5 创建学生作业提交视图
 
 
 
@@ -564,7 +558,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.5, 9.6, 9.7, 9.8_
 
 
-- [ ] 6.6 编写学生提交视图单元测试
+- [x] 6.6 编写学生提交视图单元测试
 
 
 
@@ -576,7 +570,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.5, 9.6, 9.7, 9.8_
 
 
-- [ ] 6.7 更新 URL 路由
+- [x] 6.7 更新 URL 路由
 
 
 
@@ -588,13 +582,13 @@
 
 
 
-- [ ] 7. 更新模板和前端代码
+- [-] 7. 更新模板和前端代码
 
 
 
 
 
-- [ ] 7.1 更新作业管理模板
+- [x] 7.1 更新作业管理模板
 
 
 
@@ -609,7 +603,7 @@
 
 
 
-- [ ] 7.2 创建作业配置表单模板
+- [x] 7.2 创建作业配置表单模板
 
 
 
@@ -619,7 +613,7 @@
   - 实现表单验证提示
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 7.1, 7.2, 8.6_
 
-- [ ] 7.3 更新评分界面模板
+- [x] 7.3 更新评分界面模板
 
 
 
@@ -630,7 +624,7 @@
 
 
 
-- [ ] 7.4 创建学生作业提交模板
+- [x] 7.4 创建学生作业提交模板
 
 
 
@@ -641,7 +635,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.5, 9.6, 9.8_
 
 
-- [ ] 7.5 更新 JavaScript 代码
+- [x] 7.5 更新 JavaScript 代码
 
 
 
@@ -657,7 +651,7 @@
 
 
 
-- [ ] 7.6 编写前端集成测试
+- [x] 7.6 编写前端集成测试
 
 
 
@@ -672,14 +666,14 @@
   - _Requirements: 2.2, 9.5, 9.6_
 
 
-- [ ] 8. 更新 Django Admin 配置
+- [x] 8. 更新 Django Admin 配置
 
 
 
 
 
 
-- [ ] 8.1 更新 Assignment Admin
+- [x] 8.1 更新 Assignment Admin
 
 
   - 重命名 Admin 类（RepositoryAdmin → AssignmentAdmin）
@@ -689,7 +683,7 @@
   - 添加课程和班级筛选器
   - _Requirements: 1.1, 1.3, 5.1, 5.2, 7.4_
 
-- [ ] 8.2 更新 Admin 表单
+- [x] 8.2 更新 Admin 表单
 
 
   - 实现动态字段显示
@@ -697,7 +691,7 @@
   - _Requirements: 2.2, 10.7_
 
 
-- [ ] 8.3 编写 Admin 单元测试
+- [x] 8.3 编写 Admin 单元测试
 
 
 
@@ -710,11 +704,11 @@
 
   - _Requirements: 5.1, 5.2, 7.4_
 
-- [ ] 9. 更新文档和帮助信息
+- [x] 9. 更新文档和帮助信息
 
 
 
-- [ ] 9.1 更新用户文档
+- [x] 9.1 更新用户文档
 
 
   - 更新术语说明
@@ -723,14 +717,14 @@
   - _Requirements: 1.4_
 
 
-- [ ] 9.2 更新 API 文档
+- [x] 9.2 更新 API 文档
 
 
   - 更新 API 端点说明
   - 添加请求/响应示例
   - _Requirements: 所有_
 
-- [ ] 9.3 更新代码注释
+- [x] 9.3 更新代码注释
 
 
   - 更新模型注释
@@ -738,7 +732,7 @@
   - 更新视图注释
   - _Requirements: 所有_
 
-- [ ] 10. Checkpoint - 确保所有测试通过
+- [x] 10. Checkpoint - 确保所有测试通过
 
 
   - 运行所有单元测试

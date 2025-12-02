@@ -22,6 +22,8 @@ help:
 	@echo "  make lint              - 运行代码检查"
 	@echo "  make format            - 格式化代码"
 	@echo "  make clean             - 清理临时文件"
+	@echo "  make clean-test-dirs   - 清理测试生成的随机目录"
+	@echo "  make clean-all         - 完整清理（临时文件 + 测试目录）"
 	@echo ""
 
 # 环境管理
@@ -88,6 +90,13 @@ clean:
 	@find . -type f -name ".DS_Store" -delete
 	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
 	@echo "清理完成"
+
+clean-test-dirs:
+	@echo "清理测试生成的随机目录..."
+	@./scripts/cleanup_test_directories.sh
+
+clean-all: clean clean-test-dirs
+	@echo "完整清理完成"
 
 # 自定义管理命令
 scan-courses:

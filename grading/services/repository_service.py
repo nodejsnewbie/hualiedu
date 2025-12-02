@@ -438,9 +438,7 @@ class RepositoryService:
 
         return repositories
 
-    def get_repository_by_id(
-        self, repo_id: int, teacher: Optional[User] = None
-    ) -> Repository:
+    def get_repository_by_id(self, repo_id: int, teacher: Optional[User] = None) -> Repository:
         """根据ID获取仓库
 
         Args:

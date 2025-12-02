@@ -13,8 +13,8 @@ from typing import List, Optional
 from django.contrib.auth.models import User
 from django.db import transaction
 
-from grading.models import Course, Tenant
 from grading.cache_manager import CacheManager
+from grading.models import Course, Tenant
 
 # 配置日志
 logger = logging.getLogger(__name__)
@@ -103,9 +103,7 @@ class CourseService:
         if self.cache_manager:
             self.cache_manager.clear_course_list(teacher_id=teacher.id)
             if semester:
-                self.cache_manager.clear_course_list(
-                    teacher_id=teacher.id, semester_id=semester.id
-                )
+                self.cache_manager.clear_course_list(teacher_id=teacher.id, semester_id=semester.id)
             logger.debug(f"清除教师 {teacher.username} 的课程列表缓存")
 
         return course

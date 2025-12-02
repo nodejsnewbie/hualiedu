@@ -12,8 +12,9 @@ import logging
 import os
 import time
 from typing import Any, Dict, Optional, Tuple
-from django.core.cache import cache
+
 from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger(__name__)
 
@@ -186,9 +187,7 @@ class CacheManager:
             self.logger.debug(f"缓存命中 - 文件内容: {file_path}")
         return content
 
-    def set_file_content(
-        self, file_path: str, content: str, content_type: str
-    ) -> None:
+    def set_file_content(self, file_path: str, content: str, content_type: str) -> None:
         """
         设置文件内容缓存
 
@@ -219,9 +218,7 @@ class CacheManager:
 
     # ==================== 评价模板缓存 ====================
 
-    def get_comment_templates(
-        self, template_type: str, identifier: str
-    ) -> Optional[list]:
+    def get_comment_templates(self, template_type: str, identifier: str) -> Optional[list]:
         """
         获取缓存的评价模板列表
 
@@ -232,19 +229,13 @@ class CacheManager:
         Returns:
             评价模板列表，如果缓存不存在则返回None
         """
-        key = self._make_key(
-            self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
-        )
+        key = self._make_key(self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}")
         templates = cache.get(key)
         if templates is not None:
-            self.logger.debug(
-                f"缓存命中 - 评价模板: {template_type}_{identifier}"
-            )
+            self.logger.debug(f"缓存命中 - 评价模板: {template_type}_{identifier}")
         return templates
 
-    def set_comment_templates(
-        self, template_type: str, identifier: str, templates: list
-    ) -> None:
+    def set_comment_templates(self, template_type: str, identifier: str, templates: list) -> None:
         """
         设置评价模板缓存
 
@@ -253,13 +244,10 @@ class CacheManager:
             identifier: 标识符（如teacher_id或tenant_id）
             templates: 评价模板列表
         """
-        key = self._make_key(
-            self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
-        )
+        key = self._make_key(self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}")
         cache.set(key, templates, self.TIMEOUT_COMMENT_TEMPLATE)
         self.logger.debug(
-            f"缓存设置 - 评价模板: {template_type}_{identifier}, "
-            f"数量={len(templates)}"
+            f"缓存设置 - 评价模板: {template_type}_{identifier}, " f"数量={len(templates)}"
         )
 
     def clear_comment_templates(
@@ -273,13 +261,9 @@ class CacheManager:
             identifier: 标识符（可选）
         """
         if template_type and identifier:
-            key = self._make_key(
-                self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}"
-            )
+            key = self._make_key(self.PREFIX_COMMENT_TEMPLATE, f"{template_type}_{identifier}")
             cache.delete(key)
-            self.logger.debug(
-                f"缓存清除 - 评价模板: {template_type}_{identifier}"
-            )
+            self.logger.debug(f"缓存清除 - 评价模板: {template_type}_{identifier}")
         else:
             pattern = self._make_key(self.PREFIX_COMMENT_TEMPLATE, "*")
             self._clear_by_pattern(pattern)
@@ -323,9 +307,7 @@ class CacheManager:
             identifier += f"_semester_{semester_id}"
         key = self._make_key(self.PREFIX_COURSE_LIST, identifier)
         cache.set(key, courses, self.TIMEOUT_COURSE_LIST)
-        self.logger.debug(
-            f"缓存设置 - 课程列表: {identifier}, 数量={len(courses)}"
-        )
+        self.logger.debug(f"缓存设置 - 课程列表: {identifier}, 数量={len(courses)}")
 
     def clear_course_list(
         self, teacher_id: Optional[int] = None, semester_id: Optional[int] = None
@@ -398,9 +380,7 @@ class CacheManager:
             identifier = "all"
         key = self._make_key(self.PREFIX_CLASS_LIST, identifier)
         cache.set(key, classes, self.TIMEOUT_CLASS_LIST)
-        self.logger.debug(
-            f"缓存设置 - 班级列表: {identifier}, 数量={len(classes)}"
-        )
+        self.logger.debug(f"缓存设置 - 班级列表: {identifier}, 数量={len(classes)}")
 
     def clear_class_list(
         self, course_id: Optional[int] = None, teacher_id: Optional[int] = None
@@ -592,8 +572,7 @@ class CacheManager:
                 elif file_size > self.MAX_FILE_SIZE * 0.8:
                     result["warning"] = True
                     result["message"] = (
-                        f"文件较大（{file_size / 1024 / 1024:.2f}MB），"
-                        "处理可能较慢"
+                        f"文件较大（{file_size / 1024 / 1024:.2f}MB），" "处理可能较慢"
                     )
         except Exception as e:
             self.logger.error(f"检查文件大小失败: {file_path} - {str(e)}")
@@ -649,8 +628,7 @@ class CacheManager:
                 cache.delete_pattern(pattern)
             else:
                 self.logger.warning(
-                    f"缓存后端不支持模式删除: {pattern}，"
-                    "建议使用Redis或Memcached"
+                    f"缓存后端不支持模式删除: {pattern}，" "建议使用Redis或Memcached"
                 )
         except Exception as e:
             self.logger.error(f"清除缓存失败: {pattern} - {str(e)}")

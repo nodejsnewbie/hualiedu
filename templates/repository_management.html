@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% load static %}
 
-{% block title %}仓库管理{% endblock %}
+{% block title %}仓库管理（已废弃）{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="{% static 'grading/vendor/bootstrap/bootstrap.min.css' %}">
@@ -55,9 +55,28 @@
 <div class="container-fluid mt-4">
     <div class="row">
         <div class="col-12">
+            <!-- 废弃通知 -->
+            <div class="alert alert-warning alert-dismissible fade show" role="alert">
+                <h4 class="alert-heading"><i class="bi bi-exclamation-triangle"></i> 功能已迁移</h4>
+                <p><strong>"仓库管理"功能已更名为"作业管理"</strong>，并进行了重大改进：</p>
+                <ul>
+                    <li>更清晰的术语：使用"作业配置"代替"仓库"</li>
+                    <li>简化的操作：移除了复杂的Git同步操作</li>
+                    <li>远程优先：直接从远程仓库读取，无需本地同步</li>
+                    <li>统一界面：Git和文件上传使用统一的管理界面</li>
+                </ul>
+                <hr>
+                <p class="mb-0">
+                    <a href="{% url 'grading:assignment_list' %}" class="btn btn-primary">
+                        <i class="bi bi-arrow-right-circle"></i> 前往新的作业管理页面
+                    </a>
+                </p>
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            
             <!-- 页面标题 -->
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <h2><i class="bi bi-folder2-open"></i> 仓库管理</h2>
+                <h2><i class="bi bi-folder2-open"></i> 仓库管理 <span class="badge bg-secondary">已废弃</span></h2>
                 <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addRepositoryModal">
                     <i class="bi bi-plus-circle"></i> 添加仓库
                 </button>

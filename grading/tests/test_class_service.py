@@ -35,12 +35,8 @@ class ClassServiceTest(TestCase):
         # 创建用户配置文件
         from grading.models import UserProfile
 
-        self.teacher1_profile = UserProfile.objects.create(
-            user=self.teacher1, tenant=self.tenant1
-        )
-        self.teacher2_profile = UserProfile.objects.create(
-            user=self.teacher2, tenant=self.tenant2
-        )
+        self.teacher1_profile = UserProfile.objects.create(user=self.teacher1, tenant=self.tenant1)
+        self.teacher2_profile = UserProfile.objects.create(user=self.teacher2, tenant=self.tenant2)
 
         # 创建学期
         today = date.today()

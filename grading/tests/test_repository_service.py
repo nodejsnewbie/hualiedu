@@ -10,7 +10,8 @@ from datetime import date, timedelta
 
 from django.contrib.auth.models import User
 from django.test import TestCase
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from hypothesis.extra.django import TestCase as HypothesisTestCase
 
 from grading.models import Class, Course, Repository, Semester, Tenant, UserProfile
@@ -37,12 +38,8 @@ class RepositoryServiceTest(TestCase):
         )
 
         # 创建用户配置文件
-        self.teacher1_profile = UserProfile.objects.create(
-            user=self.teacher1, tenant=self.tenant1
-        )
-        self.teacher2_profile = UserProfile.objects.create(
-            user=self.teacher2, tenant=self.tenant2
-        )
+        self.teacher1_profile = UserProfile.objects.create(user=self.teacher1, tenant=self.tenant1)
+        self.teacher2_profile = UserProfile.objects.create(user=self.teacher2, tenant=self.tenant2)
 
         # 创建学期
         today = date.today()
@@ -610,14 +607,12 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
     def setUp(self):
         """设置测试数据"""
         import uuid
-        
+
         self.service = RepositoryService()
 
         # 创建租户（使用UUID确保唯一性）
         unique_id = str(uuid.uuid4())[:8]
-        self.tenant1 = Tenant.objects.create(
-            name=f"测试学校_{unique_id}", is_active=True
-        )
+        self.tenant1 = Tenant.objects.create(name=f"测试学校_{unique_id}", is_active=True)
 
         # 创建教师用户（使用UUID确保唯一性）
         self.teacher1 = User.objects.create_user(
@@ -628,9 +623,7 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
         )
 
         # 创建用户配置文件
-        self.teacher1_profile = UserProfile.objects.create(
-            user=self.teacher1, tenant=self.tenant1
-        )
+        self.teacher1_profile = UserProfile.objects.create(user=self.teacher1, tenant=self.tenant1)
 
         # 创建学期（使用不同的日期避免UNIQUE约束冲突）
         today = date.today()
@@ -667,20 +660,20 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
     @settings(max_examples=100, deadline=None)
     def test_property_directory_name_uniqueness(self, base_name):
         """Property 3: 目录名唯一性
-        
+
         **Feature: homework-grading-system, Property 3: 目录名唯一性**
         **Validates: Requirements 1.1.5**
-        
+
         For any username and base_name, calling the directory name generation function
         multiple times should always return unique directory names (using numeric suffixes
         when needed) after creating a repository with the first generated name.
         """
         # 使用固定的teacher1用户名
         username = self.teacher1.username
-        
+
         # 生成第一个目录名
         dir_name1 = self.service.generate_directory_name(username, base_name)
-        
+
         # 手动创建一个仓库，使用生成的目录名
         try:
             repo = Repository.objects.create(
@@ -694,28 +687,28 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
                 allocated_space_mb=1024,
                 is_active=True,
             )
-            
+
             # 创建物理目录
             full_path = repo.get_full_path()
             os.makedirs(full_path, exist_ok=True)
-            
+
             # 生成第二个目录名（应该与第一个不同）
             dir_name2 = self.service.generate_directory_name(username, base_name)
-            
+
             # 验证两个目录名不同
             self.assertNotEqual(
                 dir_name1,
                 dir_name2,
                 f"目录名应该唯一，但生成了相同的名称: {dir_name1}",
             )
-            
+
             # 清理测试目录
             if os.path.exists(full_path):
                 try:
                     os.rmdir(full_path)
                 except OSError:
                     pass
-                    
+
         except Exception as e:
             # 如果创建失败（例如无效字符），跳过这个测试用例
             if "仓库名称不能为空" in str(e) or "无法确定租户信息" in str(e):
@@ -728,14 +721,12 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
         homework_name=st.text(min_size=1, max_size=20),
     )
     @settings(max_examples=100, deadline=None)
-    def test_property_directory_structure_validation(
-        self, course_name, class_name, homework_name
-    ):
+    def test_property_directory_structure_validation(self, course_name, class_name, homework_name):
         """Property 4: 目录结构验证
-        
+
         **Feature: homework-grading-system, Property 4: 目录结构验证**
         **Validates: Requirements 1.2.1**
-        
+
         For any directory path, the validation function should correctly identify
         whether it follows the "课程/班级/作业批次/学生作业" structure.
         """
@@ -746,7 +737,7 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
                 safe_course = "".join(c for c in course_name if c.isalnum() or c in "_ -")
                 safe_class = "".join(c for c in class_name if c.isalnum() or c in "_ -")
                 safe_homework = "".join(c for c in homework_name if c.isalnum() or c in "_ -")
-                
+
                 # 如果清理后为空，使用默认值
                 if not safe_course:
                     safe_course = "课程"
@@ -754,28 +745,24 @@ class RepositoryServicePropertyTest(HypothesisTestCase):
                     safe_class = "班级"
                 if not safe_homework:
                     safe_homework = "作业"
-                
+
                 course_dir = os.path.join(temp_dir, safe_course)
                 class_dir = os.path.join(course_dir, safe_class)
                 homework_dir = os.path.join(class_dir, safe_homework)
-                
+
                 os.makedirs(homework_dir)
-                
+
                 # 验证目录结构
-                is_valid, error, suggestions = self.service.validate_directory_structure(
-                    temp_dir
-                )
-                
+                is_valid, error, suggestions = self.service.validate_directory_structure(temp_dir)
+
                 # 符合规范的目录结构应该验证通过
                 self.assertTrue(
                     is_valid,
                     f"符合规范的目录结构应该验证通过，但失败了: {error}",
                 )
                 self.assertEqual(error, "", f"不应该有错误信息，但得到: {error}")
-                self.assertEqual(
-                    len(suggestions), 0, f"不应该有修复建议，但得到: {suggestions}"
-                )
-                
+                self.assertEqual(len(suggestions), 0, f"不应该有修复建议，但得到: {suggestions}")
+
             except OSError:
                 # 如果目录创建失败（例如无效字符），跳过这个测试用例
                 return

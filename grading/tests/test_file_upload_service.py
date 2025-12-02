@@ -11,7 +11,8 @@ from datetime import date, timedelta
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
-from hypothesis import given, strategies as st, settings, Phase
+from hypothesis import Phase, given, settings
+from hypothesis import strategies as st
 from hypothesis.extra.django import TestCase as HypothesisTestCase
 
 from grading.models import (
@@ -55,15 +56,9 @@ class FileUploadServiceTest(TestCase):
         )
 
         # 创建用户配置文件
-        self.teacher1_profile = UserProfile.objects.create(
-            user=self.teacher1, tenant=self.tenant1
-        )
-        self.student1_profile = UserProfile.objects.create(
-            user=self.student1, tenant=self.tenant1
-        )
-        self.student2_profile = UserProfile.objects.create(
-            user=self.student2, tenant=self.tenant1
-        )
+        self.teacher1_profile = UserProfile.objects.create(user=self.teacher1, tenant=self.tenant1)
+        self.student1_profile = UserProfile.objects.create(user=self.student1, tenant=self.tenant1)
+        self.student2_profile = UserProfile.objects.create(user=self.student2, tenant=self.tenant1)
 
         # 创建学期
         today = date.today()
@@ -124,7 +119,11 @@ class FileUploadServiceTest(TestCase):
         """测试文件验证成功"""
         # 创建有效的文件
         file_content = b"Test file content"
-        file = SimpleUploadedFile("test.docx", file_content, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        file = SimpleUploadedFile(
+            "test.docx",
+            file_content,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         # 验证文件
         is_valid, error = self.service.validate_file(file)
@@ -136,7 +135,11 @@ class FileUploadServiceTest(TestCase):
     def test_validate_file_empty_file(self):
         """测试验证空文件"""
         # 创建空文件
-        file = SimpleUploadedFile("test.docx", b"", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        file = SimpleUploadedFile(
+            "test.docx",
+            b"",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         # 验证文件
         is_valid, error = self.service.validate_file(file)
@@ -149,7 +152,11 @@ class FileUploadServiceTest(TestCase):
         """测试验证文件过大"""
         # 创建超大文件（51MB）
         large_content = b"x" * (51 * 1024 * 1024)
-        file = SimpleUploadedFile("large.docx", large_content, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        file = SimpleUploadedFile(
+            "large.docx",
+            large_content,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         # 验证文件
         is_valid, error = self.service.validate_file(file)
@@ -161,7 +168,9 @@ class FileUploadServiceTest(TestCase):
     def test_validate_file_unsupported_format(self):
         """测试验证不支持的文件格式"""
         # 创建不支持的文件格式
-        file = SimpleUploadedFile("test.exe", b"test content", content_type="application/x-msdownload")
+        file = SimpleUploadedFile(
+            "test.exe", b"test content", content_type="application/x-msdownload"
+        )
 
         # 验证文件
         is_valid, error = self.service.validate_file(file)
@@ -458,7 +467,9 @@ class FileUploadServiceTest(TestCase):
         for input_name, expected_output in test_cases:
             result = self.service._sanitize_filename(input_name)
             self.assertEqual(
-                result, expected_output, f"清理 '{input_name}' 应该得到 '{expected_output}'，但得到 '{result}'"
+                result,
+                expected_output,
+                f"清理 '{input_name}' 应该得到 '{expected_output}'，但得到 '{result}'",
             )
 
     def test_generate_file_path(self):
@@ -530,16 +541,11 @@ class FileUploadServicePropertyTest(HypothesisTestCase):
         # 应该通过验证
         self.assertTrue(
             is_valid,
-            f"文件应该通过验证 (大小: {file_size} bytes, 格式: {file_ext}), "
-            f"但失败了: {error}",
+            f"文件应该通过验证 (大小: {file_size} bytes, 格式: {file_ext}), " f"但失败了: {error}",
         )
         self.assertEqual(error, "")
 
-    @given(
-        file_size=st.integers(
-            min_value=DEFAULT_MAX_FILE_SIZE + 1, max_value=100 * 1024 * 1024
-        )
-    )
+    @given(file_size=st.integers(min_value=DEFAULT_MAX_FILE_SIZE + 1, max_value=100 * 1024 * 1024))
     @settings(max_examples=100, deadline=None)
     def test_property_file_validation_rejects_oversized_files(self, file_size):
         """
@@ -557,9 +563,7 @@ class FileUploadServicePropertyTest(HypothesisTestCase):
         is_valid, error = self.service.validate_file(file)
 
         # 应该被拒绝
-        self.assertFalse(
-            is_valid, f"超大文件应该被拒绝 (大小: {file_size} bytes), 但通过了验证"
-        )
+        self.assertFalse(is_valid, f"超大文件应该被拒绝 (大小: {file_size} bytes), 但通过了验证")
         self.assertIn("文件大小超过限制", error)
 
     @given(
@@ -584,9 +588,7 @@ class FileUploadServicePropertyTest(HypothesisTestCase):
         is_valid, error = self.service.validate_file(file)
 
         # 应该被拒绝
-        self.assertFalse(
-            is_valid, f"不支持的格式 .{file_ext} 应该被拒绝，但通过了验证"
-        )
+        self.assertFalse(is_valid, f"不支持的格式 .{file_ext} 应该被拒绝，但通过了验证")
         self.assertIn("不支持的文件格式", error)
 
     @given(
@@ -634,4 +636,3 @@ class FileUploadServicePropertyTest(HypothesisTestCase):
                 safe_filename,
                 "清理后的文件名不应该包含'..\\' 路径遍历模式",
             )
-

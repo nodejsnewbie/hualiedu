@@ -110,3 +110,21 @@ cython_debug/
 testteacher*/
 *_仓库/
 test_repo*/
+
+# Hypothesis property-based testing generates random directory names
+# Ignore single-character and special character directory names at root level
+[0-9]/
+[0-9][0-9]*/
+[A-Za-z]/
+[!-~]/
+*[^A-Za-z0-9_.-]*/
+
+# Directories with control characters or special encodings (like 0ñ\x04)
+# These are typically created by buggy test code
+*[\x00-\x1F\x7F-\x9F]*/
+
+# Specific test course directories
+其他课程/
+数据结构/
+算法设计/
+"Data Structures"/

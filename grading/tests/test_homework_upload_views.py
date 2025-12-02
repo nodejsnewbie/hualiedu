@@ -116,7 +116,11 @@ class HomeworkUploadViewsTest(TestCase):
 
         # 创建测试文件
         file_content = b"This is a test homework file"
-        test_file = SimpleUploadedFile("homework1.docx", file_content, content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        test_file = SimpleUploadedFile(
+            "homework1.docx",
+            file_content,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         response = self.client.post(
             reverse("grading:upload_homework"),
@@ -129,9 +133,7 @@ class HomeworkUploadViewsTest(TestCase):
         self.assertIn("submission", data)
 
         # 验证提交记录已创建
-        submission = Submission.objects.filter(
-            homework=self.homework, student=self.student
-        ).first()
+        submission = Submission.objects.filter(homework=self.homework, student=self.student).first()
         self.assertIsNotNone(submission)
         self.assertEqual(submission.version, 1)
         self.assertEqual(submission.file_name, "homework1.docx")
@@ -141,7 +143,11 @@ class HomeworkUploadViewsTest(TestCase):
         self.client.login(username="student1", password="password123")
 
         # 第一次上传
-        file1 = SimpleUploadedFile("homework1_v1.docx", b"Version 1", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        file1 = SimpleUploadedFile(
+            "homework1_v1.docx",
+            b"Version 1",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         response1 = self.client.post(
             reverse("grading:upload_homework"),
             {"homework_id": self.homework.id, "file": file1},
@@ -149,7 +155,11 @@ class HomeworkUploadViewsTest(TestCase):
         self.assertEqual(response1.status_code, 200)
 
         # 第二次上传
-        file2 = SimpleUploadedFile("homework1_v2.docx", b"Version 2", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        file2 = SimpleUploadedFile(
+            "homework1_v2.docx",
+            b"Version 2",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         response2 = self.client.post(
             reverse("grading:upload_homework"),
             {"homework_id": self.homework.id, "file": file2},
@@ -182,7 +192,9 @@ class HomeworkUploadViewsTest(TestCase):
         self.client.login(username="student1", password="password123")
 
         # 创建不支持的文件格式
-        test_file = SimpleUploadedFile("homework.exe", b"Invalid file", content_type="application/x-msdownload")
+        test_file = SimpleUploadedFile(
+            "homework.exe", b"Invalid file", content_type="application/x-msdownload"
+        )
 
         response = self.client.post(
             reverse("grading:upload_homework"),
@@ -209,7 +221,11 @@ class HomeworkUploadViewsTest(TestCase):
 
         self.client.login(username="student1", password="password123")
 
-        test_file = SimpleUploadedFile("homework.docx", b"Test content", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        test_file = SimpleUploadedFile(
+            "homework.docx",
+            b"Test content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         response = self.client.post(
             reverse("grading:upload_homework"),
@@ -280,7 +296,11 @@ class HomeworkUploadViewsTest(TestCase):
 
         self.client.login(username="student1", password="password123")
 
-        test_file = SimpleUploadedFile("homework.docx", b"Test content", content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        test_file = SimpleUploadedFile(
+            "homework.docx",
+            b"Test content",
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
         response = self.client.post(
             reverse("grading:upload_homework"),

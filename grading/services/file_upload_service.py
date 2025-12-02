@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 # 支持的文件格式
 SUPPORTED_FILE_FORMATS = [
     ".docx",  # Word文档
-    ".doc",   # 旧版Word文档
-    ".txt",   # 文本文件
-    ".pdf",   # PDF文件
+    ".doc",  # 旧版Word文档
+    ".txt",  # 文本文件
+    ".pdf",  # PDF文件
     ".xlsx",  # Excel文件
-    ".xls",   # 旧版Excel文件
-    ".zip",   # 压缩文件
-    ".rar",   # 压缩文件
+    ".xls",  # 旧版Excel文件
+    ".zip",  # 压缩文件
+    ".rar",  # 压缩文件
 ]
 
 # 默认最大文件大小（50MB）
@@ -112,18 +112,18 @@ class FileUploadService:
             raise ValueError(error_msg)
 
         # 检查是否已有提交记录（用于版本管理）
-        existing_submission = Submission.objects.filter(
-            homework=homework, student=student
-        ).order_by("-version").first()
+        existing_submission = (
+            Submission.objects.filter(homework=homework, student=student)
+            .order_by("-version")
+            .first()
+        )
 
         version = 1
         if existing_submission:
             version = existing_submission.version + 1
 
         # 生成文件保存路径
-        file_path = self._generate_file_path(
-            repository, homework, student, file.name
-        )
+        file_path = self._generate_file_path(repository, homework, student, file.name)
 
         # 保存文件
         self.save_file(file, file_path)
@@ -184,9 +184,7 @@ class FileUploadService:
                 f"不支持的文件格式: {file_ext} (支持的格式: {supported_formats})",
             )
 
-        logger.debug(
-            f"文件验证通过: {file.name} (大小: {file.size} bytes, 格式: {file_ext})"
-        )
+        logger.debug(f"文件验证通过: {file.name} (大小: {file.size} bytes, 格式: {file_ext})")
         return True, ""
 
     def save_file(self, file: UploadedFile, file_path: str) -> str:
@@ -310,9 +308,7 @@ class FileUploadService:
 
         # 生成学生目录名：学号_姓名
         student_id = getattr(student, "username", "unknown")
-        student_name = getattr(student, "first_name", "") or getattr(
-            student, "last_name", ""
-        )
+        student_name = getattr(student, "first_name", "") or getattr(student, "last_name", "")
         if student_name:
             student_folder = f"{student_id}_{student_name}"
         else:
@@ -344,14 +340,14 @@ class FileUploadService:
         """
         # 移除路径分隔符和其他不安全字符
         # 使用临时占位符来处理".."，避免与"/"替换后的"_"冲突
-        safe_name = filename.replace('..', '<<<DOTDOT>>>')
-        
-        unsafe_chars = ['/', '\\', '\0', '\n', '\r', '\t']
+        safe_name = filename.replace("..", "<<<DOTDOT>>>")
+
+        unsafe_chars = ["/", "\\", "\0", "\n", "\r", "\t"]
         for char in unsafe_chars:
-            safe_name = safe_name.replace(char, '_')
-        
+            safe_name = safe_name.replace(char, "_")
+
         # 将占位符替换为".._"
-        safe_name = safe_name.replace('<<<DOTDOT>>>', '.._')
+        safe_name = safe_name.replace("<<<DOTDOT>>>", ".._")
 
         # 移除首尾空格
         safe_name = safe_name.strip()
@@ -362,9 +358,7 @@ class FileUploadService:
 
         return safe_name
 
-    def get_submission_history(
-        self, homework: Homework, student: User
-    ) -> list[Submission]:
+    def get_submission_history(self, homework: Homework, student: User) -> list[Submission]:
         """获取学生的作业提交历史
 
         Args:
@@ -374,15 +368,13 @@ class FileUploadService:
         Returns:
             提交记录列表，按版本号降序排列
         """
-        submissions = Submission.objects.filter(
-            homework=homework, student=student
-        ).order_by("-version")
+        submissions = Submission.objects.filter(homework=homework, student=student).order_by(
+            "-version"
+        )
 
         return list(submissions)
 
-    def get_latest_submission(
-        self, homework: Homework, student: User
-    ) -> Optional[Submission]:
+    def get_latest_submission(self, homework: Homework, student: User) -> Optional[Submission]:
         """获取学生的最新提交
 
         Args:
@@ -430,9 +422,7 @@ class FileUploadService:
         total_space_mb = repository.allocated_space_mb
 
         # 计算使用百分比
-        usage_percentage = (
-            (used_space_mb / total_space_mb * 100) if total_space_mb > 0 else 0.0
-        )
+        usage_percentage = (used_space_mb / total_space_mb * 100) if total_space_mb > 0 else 0.0
 
         logger.debug(
             f"仓库 {repository.name} 空间使用情况: "

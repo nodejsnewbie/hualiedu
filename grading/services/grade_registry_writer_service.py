@@ -6,18 +6,19 @@
 2. 工具箱模块场景：从班级目录的Excel文件批量写入成绩
 """
 
-import os
 import logging
 import math
+import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from django.core.cache import cache
 from django.utils import timezone
+
 from grading.grade_registry_writer import (
     GradeFileProcessor,
-    RegistryManager,
     NameMatcher,
+    RegistryManager,
 )
 
 logger = logging.getLogger(__name__)
@@ -279,10 +280,10 @@ class GradeRegistryWriterService:
     # 场景常量
     SCENARIO_GRADING_SYSTEM = "grading_system"
     SCENARIO_TOOLBOX = "toolbox"
-    
+
     # 性能优化：文件数量限制
     MAX_FILES_WARNING_THRESHOLD = 500
-    
+
     # 安全加固：文件大小限制（100MB）
     MAX_FILE_SIZE = 100 * 1024 * 1024
 
@@ -330,15 +331,13 @@ class GradeRegistryWriterService:
 
             if not abs_file_path.startswith(abs_base_dir):
                 self.logger.error(
-                    "安全检查失败：路径遍历攻击检测 - 文件: %s, 基础目录: %s",
-                    file_path,
-                    base_dir
+                    "安全检查失败：路径遍历攻击检测 - 文件: %s, 基础目录: %s", file_path, base_dir
                 )
                 self.audit_logger.logger.warning(
                     "安全事件：路径遍历攻击尝试 - 用户: %s, 租户: %s, 文件: %s",
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
-                    file_path
+                    file_path,
                 )
                 return False, "无权访问该路径"
 
@@ -347,16 +346,14 @@ class GradeRegistryWriterService:
             for pattern in dangerous_patterns:
                 if pattern in file_path:
                     self.logger.error(
-                        "安全检查失败：路径包含危险字符 - 文件: %s, 模式: %s",
-                        file_path,
-                        pattern
+                        "安全检查失败：路径包含危险字符 - 文件: %s, 模式: %s", file_path, pattern
                     )
                     self.audit_logger.logger.warning(
                         "安全事件：危险路径字符检测 - 用户: %s, 租户: %s, 文件: %s, 模式: %s",
                         self.user.username if self.user else "Unknown",
                         self.tenant.name if self.tenant else "Unknown",
                         file_path,
-                        pattern
+                        pattern,
                     )
                     return False, "路径包含非法字符"
 
@@ -371,7 +368,7 @@ class GradeRegistryWriterService:
                     "安全事件：符号链接检测 - 用户: %s, 租户: %s, 文件: %s",
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
-                    file_path
+                    file_path,
                 )
                 return False, "不允许访问符号链接"
 
@@ -382,7 +379,7 @@ class GradeRegistryWriterService:
                     "安全事件：无权限访问文件 - 用户: %s, 租户: %s, 文件: %s",
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
-                    file_path
+                    file_path,
                 )
                 return False, "无权限读取文件"
 
@@ -393,7 +390,7 @@ class GradeRegistryWriterService:
                     "安全事件：非法文件类型 - 用户: %s, 租户: %s, 文件: %s",
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
-                    file_path
+                    file_path,
                 )
                 return False, "非法文件类型"
 
@@ -406,7 +403,7 @@ class GradeRegistryWriterService:
                 self.user.username if self.user else "Unknown",
                 self.tenant.name if self.tenant else "Unknown",
                 file_path,
-                str(e)
+                str(e),
             )
             return False, f"路径验证失败: {str(e)}"
 
@@ -434,14 +431,14 @@ class GradeRegistryWriterService:
                     "文件大小超过限制 - 文件: %s, 大小: %d bytes, 限制: %d bytes",
                     file_path,
                     file_size,
-                    self.MAX_FILE_SIZE
+                    self.MAX_FILE_SIZE,
                 )
                 self.audit_logger.logger.warning(
                     "安全事件：文件大小超限 - 用户: %s, 租户: %s, 文件: %s, 大小: %.2fMB",
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
                     file_path,
-                    file_size / 1024 / 1024
+                    file_size / 1024 / 1024,
                 )
                 return False, (
                     f"文件大小超过限制 "
@@ -503,7 +500,7 @@ class GradeRegistryWriterService:
                     "Excel文件行数过多: %s, 行数: %d, 限制: %d",
                     file_path,
                     worksheet.max_row,
-                    MAX_ROWS
+                    MAX_ROWS,
                 )
                 workbook.close()
                 self.audit_logger.logger.warning(
@@ -511,7 +508,7 @@ class GradeRegistryWriterService:
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
                     file_path,
-                    worksheet.max_row
+                    worksheet.max_row,
                 )
                 return False, f"Excel文件行数过多（{worksheet.max_row} > {MAX_ROWS}）"
 
@@ -520,7 +517,7 @@ class GradeRegistryWriterService:
                     "Excel文件列数过多: %s, 列数: %d, 限制: %d",
                     file_path,
                     worksheet.max_column,
-                    MAX_COLS
+                    MAX_COLS,
                 )
                 workbook.close()
                 self.audit_logger.logger.warning(
@@ -528,7 +525,7 @@ class GradeRegistryWriterService:
                     self.user.username if self.user else "Unknown",
                     self.tenant.name if self.tenant else "Unknown",
                     file_path,
-                    worksheet.max_column
+                    worksheet.max_column,
                 )
                 return False, f"Excel文件列数过多（{worksheet.max_column} > {MAX_COLS}）"
 
@@ -539,18 +536,13 @@ class GradeRegistryWriterService:
             self.logger.error("Excel文件权限错误: %s - %s", file_path, str(e))
             return False, "无权限访问Excel文件"
         except Exception as e:
-            self.logger.error(
-                "Excel文件完整性验证失败: %s - %s",
-                file_path,
-                str(e),
-                exc_info=True
-            )
+            self.logger.error("Excel文件完整性验证失败: %s - %s", file_path, str(e), exc_info=True)
             self.audit_logger.logger.warning(
                 "安全事件：Excel文件验证失败 - 用户: %s, 租户: %s, 文件: %s, 错误: %s",
                 self.user.username if self.user else "Unknown",
                 self.tenant.name if self.tenant else "Unknown",
                 file_path,
-                str(e)
+                str(e),
             )
             return False, f"Excel文件损坏或格式错误: {str(e)}"
 
@@ -577,24 +569,24 @@ class GradeRegistryWriterService:
                 self.tenant.id if self.tenant else "None",
                 self.user.username if self.user else "None",
                 self.user.id if self.user else "None",
-                file_path
+                file_path,
             )
 
             # 检查用户是否属于当前租户
-            if self.user and hasattr(self.user, 'userprofile'):
+            if self.user and hasattr(self.user, "userprofile"):
                 user_tenant = self.user.userprofile.tenant
                 if user_tenant != self.tenant:
                     self.logger.error(
                         "租户隔离检查失败：用户租户不匹配 - 用户租户: %s, 当前租户: %s",
                         user_tenant.name if user_tenant else "None",
-                        self.tenant.name
+                        self.tenant.name,
                     )
                     self.audit_logger.logger.error(
                         "安全事件：租户隔离违规 - 用户: %s (租户: %s), 尝试访问租户: %s, 文件: %s",
                         self.user.username,
                         user_tenant.name if user_tenant else "None",
                         self.tenant.name,
-                        file_path
+                        file_path,
                     )
                     return False, "租户隔离检查失败：无权访问其他租户的数据"
 
@@ -611,10 +603,9 @@ class GradeRegistryWriterService:
                 self.tenant.name if self.tenant else "None",
                 self.user.username if self.user else "None",
                 file_path,
-                str(e)
+                str(e),
             )
             return False, f"租户隔离验证失败: {str(e)}"
-
 
     def process_grading_system_scenario(
         self,
@@ -675,7 +666,7 @@ class GradeRegistryWriterService:
                 if progress_tracker:
                     progress_tracker.fail(result["error_message"])
                 return result
-            
+
             # 安全加固：验证班级目录路径
             is_valid, error_msg = self._validate_path_security(class_dir, class_dir)
             if not is_valid:
@@ -684,7 +675,7 @@ class GradeRegistryWriterService:
                 if progress_tracker:
                     progress_tracker.fail(result["error_message"])
                 return result
-            
+
             # 安全加固：验证租户隔离
             is_valid, error_msg = self._validate_tenant_isolation(homework_dir)
             if not is_valid:
@@ -693,11 +684,9 @@ class GradeRegistryWriterService:
                 if progress_tracker:
                     progress_tracker.fail(result["error_message"])
                 return result
-            
+
             # 1. 从作业目录名提取作业批次
-            homework_number = GradeFileProcessor.extract_homework_number_from_path(
-                homework_dir
-            )
+            homework_number = GradeFileProcessor.extract_homework_number_from_path(homework_dir)
             if homework_number is None:
                 result["error_message"] = f"无法从目录名提取作业批次: {homework_dir}"
                 self.logger.error(result["error_message"])
@@ -719,7 +708,7 @@ class GradeRegistryWriterService:
 
             result["registry_path"] = registry_path
             self.logger.info("找到登分册: %s", registry_path)
-            
+
             # 安全加固：验证登分册文件大小
             is_valid, error_msg = self._validate_file_size(registry_path)
             if not is_valid:
@@ -728,7 +717,7 @@ class GradeRegistryWriterService:
                 if progress_tracker:
                     progress_tracker.fail(result["error_message"])
                 return result
-            
+
             # 安全加固：验证登分册文件完整性
             is_valid, error_msg = self._validate_excel_integrity(registry_path)
             if not is_valid:
@@ -764,15 +753,15 @@ class GradeRegistryWriterService:
             if progress_tracker:
                 progress_tracker.update_total(len(word_files))
             self.logger.info("找到 %d 个Word文档", len(word_files))
-            
+
             # 性能优化：文件数量警告
             if len(word_files) > self.MAX_FILES_WARNING_THRESHOLD:
                 self.logger.warning(
                     "文件数量超过阈值 (%d > %d)，处理可能需要较长时间",
                     len(word_files),
-                    self.MAX_FILES_WARNING_THRESHOLD
+                    self.MAX_FILES_WARNING_THRESHOLD,
                 )
-            
+
             self.logger.info("开始扫描作业目录: %s", homework_dir)
             self.logger.info("识别到 %d 个Word文档文件", len(word_files))
 
@@ -804,9 +793,7 @@ class GradeRegistryWriterService:
             # 6. 处理每个Word文档
             try:
                 # 查找或创建作业列
-                homework_col = registry_manager.find_or_create_homework_column(
-                    homework_number
-                )
+                homework_col = registry_manager.find_or_create_homework_column(homework_number)
 
                 for index, word_file in enumerate(word_files, start=1):
                     file_result = self._process_single_word_file(
@@ -888,9 +875,7 @@ class GradeRegistryWriterService:
 
         except Exception as e:
             result["error_message"] = f"处理作业评分系统场景时出错: {str(e)}"
-            self.logger.error(
-                "处理作业评分系统场景时出错: %s", str(e), exc_info=True
-            )
+            self.logger.error("处理作业评分系统场景时出错: %s", str(e), exc_info=True)
             if progress_tracker and result["error_message"]:
                 progress_tracker.fail(result["error_message"])
 
@@ -940,7 +925,7 @@ class GradeRegistryWriterService:
                 self.logger.warning("文件大小验证失败: %s - %s", file_basename, error_msg)
                 self.audit_logger.log_file_processing(word_file, "failed", error_msg)
                 return file_result
-            
+
             # 1. 提取学生姓名
             student_name = GradeFileProcessor.extract_student_name(word_file)
             if not student_name:
@@ -998,15 +983,11 @@ class GradeRegistryWriterService:
             student_row = registry_manager.find_student_row(matched_name)
             if not student_row:
                 file_result["error_message"] = f"未找到学生行: {matched_name}"
-                self.logger.warning(
-                    "未找到学生行: %s - 文件: %s", matched_name, file_basename
-                )
+                self.logger.warning("未找到学生行: %s - 文件: %s", matched_name, file_basename)
                 return file_result
 
             # 6. 写入成绩
-            written, old_grade = registry_manager.write_grade(
-                student_row, homework_col, grade
-            )
+            written, old_grade = registry_manager.write_grade(student_row, homework_col, grade)
 
             if written:
                 file_result["success"] = True
@@ -1030,26 +1011,19 @@ class GradeRegistryWriterService:
             else:
                 file_result["skipped"] = True
                 file_result["error_message"] = "成绩相同，跳过写入"
-                self.logger.debug(
-                    "成绩相同，跳过写入 - 学生: %s, 成绩: %s", matched_name, grade
-                )
+                self.logger.debug("成绩相同，跳过写入 - 学生: %s, 成绩: %s", matched_name, grade)
 
                 # 记录文件处理状态
-                self.audit_logger.log_file_processing(
-                    word_file, "skipped", "成绩相同，跳过写入"
-                )
+                self.audit_logger.log_file_processing(word_file, "skipped", "成绩相同，跳过写入")
 
         except Exception as e:
             file_result["error_message"] = f"处理文件时出错: {str(e)}"
             self.logger.error("处理文件时出错: %s - %s", word_file, str(e), exc_info=True)
 
             # 记录文件处理状态
-            self.audit_logger.log_file_processing(
-                word_file, "failed", file_result["error_message"]
-            )
+            self.audit_logger.log_file_processing(word_file, "failed", file_result["error_message"])
 
         return file_result
-
 
     def process_toolbox_scenario(self, class_dir: str) -> Dict[str, any]:
         """
@@ -1094,14 +1068,14 @@ class GradeRegistryWriterService:
                 result["error_message"] = f"班级目录路径验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
                 return result
-            
+
             # 安全加固：验证租户隔离
             is_valid, error_msg = self._validate_tenant_isolation(class_dir)
             if not is_valid:
                 result["error_message"] = error_msg
                 self.logger.error(result["error_message"])
                 return result
-            
+
             # 1. 查找登分册文件
             registry_path = self.find_grade_registry(class_dir)
             if not registry_path:
@@ -1111,14 +1085,14 @@ class GradeRegistryWriterService:
 
             result["registry_path"] = registry_path
             self.logger.info("找到登分册: %s", registry_path)
-            
+
             # 安全加固：验证登分册文件大小
             is_valid, error_msg = self._validate_file_size(registry_path)
             if not is_valid:
                 result["error_message"] = f"登分册文件验证失败: {error_msg}"
                 self.logger.error(result["error_message"])
                 return result
-            
+
             # 安全加固：验证登分册文件完整性
             is_valid, error_msg = self._validate_excel_integrity(registry_path)
             if not is_valid:
@@ -1140,9 +1114,7 @@ class GradeRegistryWriterService:
                     file_path = os.path.join(class_dir, file)
                     if file_path != registry_path:
                         # 检查文件名是否包含作业批次信息
-                        if GradeFileProcessor.extract_homework_number_from_filename(
-                            file_path
-                        ):
+                        if GradeFileProcessor.extract_homework_number_from_filename(file_path):
                             excel_files.append(file_path)
 
             if not excel_files:
@@ -1152,15 +1124,15 @@ class GradeRegistryWriterService:
 
             result["statistics"]["total_files"] = len(excel_files)
             self.logger.info("找到 %d 个Excel成绩文件", len(excel_files))
-            
+
             # 性能优化：文件数量警告
             if len(excel_files) > self.MAX_FILES_WARNING_THRESHOLD:
                 self.logger.warning(
                     "文件数量超过阈值 (%d > %d)，处理可能需要较长时间",
                     len(excel_files),
-                    self.MAX_FILES_WARNING_THRESHOLD
+                    self.MAX_FILES_WARNING_THRESHOLD,
                 )
-            
+
             self.logger.info("开始扫描班级目录: %s", class_dir)
             self.logger.info("识别到 %d 个Excel成绩文件", len(excel_files))
 
@@ -1186,27 +1158,17 @@ class GradeRegistryWriterService:
             # 5. 处理每个Excel文件
             try:
                 for excel_file in excel_files:
-                    file_result = self._process_single_excel_file(
-                        excel_file, registry_manager
-                    )
+                    file_result = self._process_single_excel_file(excel_file, registry_manager)
 
                     if file_result["success"]:
                         result["processed_files"].append(file_result)
-                        result["statistics"]["success"] += file_result[
-                            "students_processed"
-                        ]
-                        result["statistics"]["total_students"] += file_result[
-                            "students_total"
-                        ]
+                        result["statistics"]["success"] += file_result["students_processed"]
+                        result["statistics"]["total_students"] += file_result["students_total"]
                     elif file_result["partial_success"]:
                         result["processed_files"].append(file_result)
-                        result["statistics"]["success"] += file_result[
-                            "students_processed"
-                        ]
+                        result["statistics"]["success"] += file_result["students_processed"]
                         result["statistics"]["failed"] += file_result["students_failed"]
-                        result["statistics"]["total_students"] += file_result[
-                            "students_total"
-                        ]
+                        result["statistics"]["total_students"] += file_result["students_total"]
                     else:
                         result["failed_files"].append(file_result)
                         result["statistics"]["failed"] += 1
@@ -1283,9 +1245,7 @@ class GradeRegistryWriterService:
         if len(matches) == 1:
             return matches[0]
         if len(matches) > 1:
-            self.logger.warning(
-                "文件名包含多个学生姓名: %s -> %s", filename, matches
-            )
+            self.logger.warning("文件名包含多个学生姓名: %s -> %s", filename, matches)
         return None
 
     @staticmethod
@@ -1335,7 +1295,7 @@ class GradeRegistryWriterService:
                 self.logger.warning("文件大小验证失败: %s - %s", excel_file, error_msg)
                 self.audit_logger.log_file_processing(excel_file, "failed", error_msg)
                 return file_result
-            
+
             # 安全加固：验证Excel文件完整性
             is_valid, error_msg = self._validate_excel_integrity(excel_file)
             if not is_valid:
@@ -1343,11 +1303,9 @@ class GradeRegistryWriterService:
                 self.logger.warning("Excel文件完整性验证失败: %s - %s", excel_file, error_msg)
                 self.audit_logger.log_file_processing(excel_file, "failed", error_msg)
                 return file_result
-            
+
             # 1. 从文件名提取作业批次
-            homework_number = GradeFileProcessor.extract_homework_number_from_filename(
-                excel_file
-            )
+            homework_number = GradeFileProcessor.extract_homework_number_from_filename(excel_file)
             if homework_number is None:
                 file_result["error_message"] = "无法从文件名提取作业批次"
                 self.logger.warning("无法从文件名提取作业批次: %s", excel_file)
@@ -1368,9 +1326,7 @@ class GradeRegistryWriterService:
             self.logger.info("从Excel提取了 %d 个学生成绩", len(grades_data))
 
             # 3. 查找或创建作业列
-            homework_col = registry_manager.find_or_create_homework_column(
-                homework_number
-            )
+            homework_col = registry_manager.find_or_create_homework_column(homework_number)
 
             # 4. 处理每个学生成绩（性能优化：缓存学生列表避免重复查询）
             student_names = list(registry_manager.student_names.keys())
@@ -1422,9 +1378,7 @@ class GradeRegistryWriterService:
 
         except Exception as e:
             file_result["error_message"] = f"处理Excel文件时出错: {str(e)}"
-            self.logger.error(
-                "处理Excel文件时出错: %s - %s", excel_file, str(e), exc_info=True
-            )
+            self.logger.error("处理Excel文件时出错: %s - %s", excel_file, str(e), exc_info=True)
 
             # 记录文件处理状态
             self.audit_logger.log_file_processing(
@@ -1486,22 +1440,16 @@ class GradeRegistryWriterService:
                 return student_detail
 
             # 3. 写入成绩
-            written, old_grade = registry_manager.write_grade(
-                student_row, homework_col, grade
-            )
+            written, old_grade = registry_manager.write_grade(student_row, homework_col, grade)
 
             if written:
                 student_detail["success"] = True
                 student_detail["old_grade"] = old_grade
-                self.logger.debug(
-                    "成功写入成绩 - 学生: %s, 成绩: %s", matched_name, grade
-                )
+                self.logger.debug("成功写入成绩 - 学生: %s, 成绩: %s", matched_name, grade)
 
                 # 记录审计日志 - 从homework_col推断作业批次
                 # 注意：这里我们需要从列索引反推作业批次，暂时使用列索引
-                self.audit_logger.log_grade_write(
-                    matched_name, homework_col, grade, old_grade
-                )
+                self.audit_logger.log_grade_write(matched_name, homework_col, grade, old_grade)
             else:
                 student_detail["success"] = True  # 跳过也算成功
                 student_detail["skipped"] = True
@@ -1517,7 +1465,6 @@ class GradeRegistryWriterService:
             )
 
         return student_detail
-
 
     def find_grade_registry(self, class_dir: str) -> Optional[str]:
         """
@@ -1554,9 +1501,7 @@ class GradeRegistryWriterService:
             return None
 
         except Exception as e:
-            self.logger.error(
-                "查找登分册文件时出错: %s - %s", class_dir, str(e), exc_info=True
-            )
+            self.logger.error("查找登分册文件时出错: %s - %s", class_dir, str(e), exc_info=True)
             return None
 
     def process(self, **kwargs) -> Dict[str, any]:

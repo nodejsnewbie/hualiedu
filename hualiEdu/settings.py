@@ -41,9 +41,7 @@ ALLOWED_EXTENSIONS = set(
 # 使用本地内存缓存（开发环境）或Redis（生产环境）
 CACHES = {
     "default": {
-        "BACKEND": os.environ.get(
-            "CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"
-        ),
+        "BACKEND": os.environ.get("CACHE_BACKEND", "django.core.cache.backends.locmem.LocMemCache"),
         "LOCATION": os.environ.get("CACHE_LOCATION", "unique-snowflake"),
         "TIMEOUT": int(os.environ.get("CACHE_TIMEOUT", "300")),  # 默认5分钟
         "OPTIONS": {

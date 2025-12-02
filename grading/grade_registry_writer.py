@@ -7,22 +7,24 @@
 - NameMatcher: 学生姓名匹配
 """
 
+import errno
+import logging
 import os
 import re
-import logging
 import shutil
-import errno
 from datetime import datetime
-from typing import Optional, Tuple, List, Dict
+from typing import Dict, List, Optional, Tuple
 
 # fcntl is Unix-only, use msvcrt on Windows
 try:
     import fcntl
+
     HAS_FCNTL = True
 except ImportError:
     HAS_FCNTL = False
     try:
         import msvcrt
+
         HAS_MSVCRT = True
     except ImportError:
         HAS_MSVCRT = False
@@ -31,7 +33,6 @@ from docx import Document
 from openpyxl import load_workbook
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
-
 
 logger = logging.getLogger(__name__)
 
@@ -114,11 +115,11 @@ class GradeFileProcessor:
 
     # 支持的成绩等级
     VALID_GRADES = ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]
-    
+
     # 百分制成绩范围
     PERCENTAGE_MIN = 0
     PERCENTAGE_MAX = 100
-    
+
     # 文件数量限制
     MAX_FILES_WARNING_THRESHOLD = 500
 
@@ -126,16 +127,16 @@ class GradeFileProcessor:
     def extract_student_name(file_path: str) -> Optional[str]:
         """
         从文件名提取学生姓名
-        
+
         支持的格式：
         - 姓名_作业X.docx
         - 作业X_姓名.docx
         - 姓名-作业X.docx
         - 作业X-姓名.docx
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             学生姓名，如果无法提取则返回None
         """
@@ -144,12 +145,12 @@ class GradeFileProcessor:
 
             # 获取文件名（不含扩展名）
             filename = os.path.splitext(os.path.basename(file_path))[0]
-            
+
             # 尝试多种分隔符
             for separator in ["_", "-", "—"]:
                 if separator in filename:
                     parts = filename.split(separator)
-                    
+
                     # 检查是否包含作业标识
                     for i, part in enumerate(parts):
                         if re.search(r"作业\d+|homework\d+|hw\d+", part, re.IGNORECASE):
@@ -163,22 +164,29 @@ class GradeFileProcessor:
                                 student_name = parts[0].strip()
                                 logger.debug("提取到学生姓名: %s (从文件名)", student_name)
                                 return student_name
-            
+
             # 如果文件名本身不包含“作业”“homework”等关键字，直接使用文件名
-            if not re.search(r"(作业|homework|hw)\s*\d+", filename, re.IGNORECASE) and "作业" not in filename:
+            if (
+                not re.search(r"(作业|homework|hw)\s*\d+", filename, re.IGNORECASE)
+                and "作业" not in filename
+            ):
                 logger.debug("提取到学生姓名: %s (从文件名整体)", filename.strip())
                 return filename.strip()
 
             # 如果没有分隔符，尝试从路径中提取
             # 例如：/path/to/张三/作业1.docx
             parent_dir = os.path.basename(os.path.dirname(file_path))
-            if parent_dir and "作业" not in parent_dir and not re.search(r"(homework|hw)\s*\d+", parent_dir, re.IGNORECASE):
+            if (
+                parent_dir
+                and "作业" not in parent_dir
+                and not re.search(r"(homework|hw)\s*\d+", parent_dir, re.IGNORECASE)
+            ):
                 logger.debug("提取到学生姓名: %s (从目录名)", parent_dir.strip())
                 return parent_dir.strip()
-            
+
             logger.warning("无法从文件名提取学生姓名: %s", file_path)
             return None
-            
+
         except (OSError, ValueError, AttributeError) as e:
             logger.error("提取学生姓名时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
             return None
@@ -187,16 +195,16 @@ class GradeFileProcessor:
     def extract_homework_number_from_path(file_path: str) -> Optional[int]:
         """
         从目录路径提取作业次数（作业评分系统场景）
-        
+
         支持的格式：
         - 第X次作业
         - 作业X
         - homework_X
         - hw_X
-        
+
         Args:
             file_path: 文件路径或目录路径
-            
+
         Returns:
             作业次数，如果无法识别则返回None
         """
@@ -212,7 +220,7 @@ class GradeFileProcessor:
                 rf"homework[_\s]?([\d{chinese_digits}]+)",
                 rf"hw[_\s]?([\d{chinese_digits}]+)",
             ]
-            
+
             for pattern in patterns:
                 match = re.search(pattern, file_path, re.IGNORECASE)
                 if match:
@@ -220,10 +228,10 @@ class GradeFileProcessor:
                     if homework_number is not None:
                         logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
                         return homework_number
-            
+
             logger.warning("无法从路径提取作业次数: %s", file_path)
             return None
-            
+
         except (ValueError, AttributeError) as e:
             logger.error("提取作业次数时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
             return None
@@ -232,16 +240,16 @@ class GradeFileProcessor:
     def extract_homework_number_from_filename(file_path: str) -> Optional[int]:
         """
         从文件名提取作业次数（工具箱模块场景）
-        
+
         支持的格式：
         - 第X次作业成绩.xlsx
         - 作业X成绩.xlsx
         - homework_X.xlsx
         - hw_X.xlsx
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             作业次数，如果无法识别则返回None
         """
@@ -250,7 +258,7 @@ class GradeFileProcessor:
 
             # 获取文件名（不含扩展名）
             filename = os.path.splitext(os.path.basename(file_path))[0]
-            
+
             # 匹配模式：第X次作业、作业X、homework_X、hw_X
             chinese_digits = CHINESE_NUMERAL_CHARS
             patterns = [
@@ -259,7 +267,7 @@ class GradeFileProcessor:
                 rf"homework[_\s]?([\d{chinese_digits}]+)",
                 rf"hw[_\s]?([\d{chinese_digits}]+)",
             ]
-            
+
             for pattern in patterns:
                 match = re.search(pattern, filename, re.IGNORECASE)
                 if match:
@@ -267,10 +275,10 @@ class GradeFileProcessor:
                     if homework_number is not None:
                         logger.debug("提取到作业次数: %d (模式: %s)", homework_number, pattern)
                         return homework_number
-            
+
             logger.warning("无法从文件名提取作业次数: %s", file_path)
             return None
-            
+
         except (OSError, ValueError, AttributeError) as e:
             logger.error("提取作业次数时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
             return None
@@ -279,31 +287,31 @@ class GradeFileProcessor:
     def is_lab_report(file_path: str) -> bool:
         """
         判断是否为实验报告
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             True表示是实验报告，False表示是普通作业
         """
         try:
             doc = Document(file_path)
-            
+
             # 检查文档中是否包含实验报告的特征标记
             for paragraph in doc.paragraphs:
                 text = paragraph.text.strip()
                 if "实验报告" in text or "实验名称" in text:
                     return True
-            
+
             # 检查表格中是否有"教师（签字）："标记
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if "教师（签字）" in cell.text or "教师签字" in cell.text:
                             return True
-            
+
             return False
-            
+
         except (OSError, ValueError) as e:
             logger.error("判断是否为实验报告时出错: %s, 错误: %s", file_path, str(e))
             return False
@@ -312,10 +320,10 @@ class GradeFileProcessor:
     def extract_grade_from_word(file_path: str) -> Optional[str]:
         """
         从Word文档提取单个学生成绩（作业评分系统场景）
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             成绩等级，如果无法提取则返回None
         """
@@ -324,7 +332,7 @@ class GradeFileProcessor:
 
             doc = Document(file_path)
             is_lab = GradeFileProcessor.is_lab_report(file_path)
-            
+
             if is_lab:
                 logger.debug("识别为实验报告，使用实验报告提取方法")
                 # 实验报告：在"教师（签字）："单元格中查找评分
@@ -340,7 +348,7 @@ class GradeFileProcessor:
                 logger.warning("未能提取到成绩: %s", file_path)
 
             return grade
-                
+
         except (OSError, ValueError) as e:
             logger.error("提取成绩时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
             return None
@@ -402,7 +410,12 @@ class GradeFileProcessor:
                     name_col_idx = local_name_idx
                     grade_col_idx = local_grade_idx
                     header_row = row_idx
-                    logger.debug("检测到表头行: %d (姓名列: %d, 成绩列: %s)", header_row, name_col_idx, grade_col_idx)
+                    logger.debug(
+                        "检测到表头行: %d (姓名列: %d, 成绩列: %s)",
+                        header_row,
+                        name_col_idx,
+                        grade_col_idx,
+                    )
                     break
 
             if name_col_idx is None or header_row is None:
@@ -428,7 +441,7 @@ class GradeFileProcessor:
 
                         # 验证成绩格式（支持字母、文字和百分制）
                         is_valid = False
-                        
+
                         # 检查是否是字母或文字等级
                         if grade in GradeFileProcessor.VALID_GRADES:
                             is_valid = True
@@ -436,7 +449,11 @@ class GradeFileProcessor:
                             # 检查是否是百分制成绩
                             try:
                                 grade_value = float(grade)
-                                if GradeFileProcessor.PERCENTAGE_MIN <= grade_value <= GradeFileProcessor.PERCENTAGE_MAX:
+                                if (
+                                    GradeFileProcessor.PERCENTAGE_MIN
+                                    <= grade_value
+                                    <= GradeFileProcessor.PERCENTAGE_MAX
+                                ):
                                     # 格式化为整数或保留一位小数
                                     if grade_value == int(grade_value):
                                         grade = str(int(grade_value))
@@ -445,14 +462,13 @@ class GradeFileProcessor:
                                     is_valid = True
                             except (ValueError, TypeError):
                                 pass
-                        
+
                         if is_valid:
                             grades.append({"name": name, "grade": grade})
                             logger.debug("提取学生成绩: %s - %s", name, grade)
                         else:
                             logger.warning(
-                                "无效的成绩格式: %s, 学生: %s, 文件: %s",
-                                grade, name, file_path
+                                "无效的成绩格式: %s, 学生: %s, 文件: %s", grade, name, file_path
                             )
 
             workbook.close()
@@ -467,7 +483,7 @@ class GradeFileProcessor:
     def _extract_grade_from_lab_report(doc: Document) -> Optional[str]:
         """
         从实验报告提取成绩
-        
+
         需求: 4.5, 5.2, 7.1-7.7
         """
         # 在表格中查找"教师（签字）："单元格
@@ -480,21 +496,21 @@ class GradeFileProcessor:
                         grade = GradeFileProcessor._find_grade_in_text(cell_text)
                         if grade:
                             return grade
-                        
+
                         # 检查下一个单元格
                         if i + 1 < len(row.cells):
                             next_cell_text = row.cells[i + 1].text.strip()
                             grade = GradeFileProcessor._find_grade_in_text(next_cell_text)
                             if grade:
                                 return grade
-        
+
         return None
-    
+
     @staticmethod
     def _extract_comment_from_lab_report(doc: Document) -> Optional[str]:
         """
         从实验报告提取评价
-        
+
         需求: 4.5, 5.2, 7.1-7.7
         """
         # 在表格中查找"教师（签字）："单元格
@@ -504,9 +520,9 @@ class GradeFileProcessor:
                     cell_text = cell.text.strip()
                     if "教师（签字）" in cell_text or "教师签字" in cell_text:
                         # 提取评价内容（在评分之后，"教师（签字）"之前的内容）
-                        lines = cell_text.split('\n')
+                        lines = cell_text.split("\n")
                         comment_lines = []
-                        
+
                         for line in lines:
                             line = line.strip()
                             # 跳过评分行
@@ -521,25 +537,25 @@ class GradeFileProcessor:
                             # 跳过格式错误锁定标记
                             if "【格式错误-已锁定】" in line or "格式错误-已锁定" in line:
                                 continue
-                            
+
                             comment_lines.append(line)
-                        
+
                         if comment_lines:
-                            return '\n'.join(comment_lines)
-        
+                            return "\n".join(comment_lines)
+
         return None
-    
+
     @staticmethod
     def validate_lab_report_comment(file_path: str) -> Tuple[bool, Optional[str]]:
         """
         验证实验报告是否有评价
-        
+
         Args:
             file_path: 文件路径
-            
+
         Returns:
             (is_valid, error_message): 如果有评价返回(True, None)，否则返回(False, error_message)
-            
+
         需求: 4.5, 5.2, 7.1-7.7
         """
         try:
@@ -547,20 +563,20 @@ class GradeFileProcessor:
             if not GradeFileProcessor.is_lab_report(file_path):
                 # 不是实验报告，不需要验证评价
                 return True, None
-            
+
             # 读取文档
             doc = Document(file_path)
-            
+
             # 提取评价
             comment = GradeFileProcessor._extract_comment_from_lab_report(doc)
-            
+
             if comment and comment.strip():
                 # 有评价，验证通过
                 return True, None
             else:
                 # 没有评价，验证失败
                 return False, "实验报告必须添加评价"
-                
+
         except Exception as e:
             logger.error("验证实验报告评价时出错: %s, 错误: %s", file_path, str(e), exc_info=True)
             return False, f"验证评价时出错: {str(e)}"
@@ -576,34 +592,38 @@ class GradeFileProcessor:
                 grade = GradeFileProcessor._find_grade_in_text(text)
                 if grade:
                     return grade
-        
+
         return None
 
     @staticmethod
     def _find_grade_in_text(text: str) -> Optional[str]:
         """
         在文本中查找成绩等级
-        
+
         支持：
         - 字母等级：A/B/C/D/E
         - 文字等级：优秀/良好/中等/及格/不及格
         - 百分制：0-100的数字
-        
+
         需求: 4.1, 4.3, 4.4, 7.1-7.7
         """
         import re
-        
+
         # 首先尝试匹配百分制成绩（数字）
         # 匹配模式：非负数字（可能带小数点），可能后面跟"分"
         # 使用(?<![0-9-])确保前面不是数字或负号，避免匹配"-10"中的"10"
-        percentage_pattern = r'(?<![0-9-])(\d+(?:\.\d+)?)\s*分?'
+        percentage_pattern = r"(?<![0-9-])(\d+(?:\.\d+)?)\s*分?"
         percentage_matches = re.findall(percentage_pattern, text)
-        
+
         for match in percentage_matches:
             try:
                 grade_value = float(match)
                 # 验证百分制范围
-                if GradeFileProcessor.PERCENTAGE_MIN <= grade_value <= GradeFileProcessor.PERCENTAGE_MAX:
+                if (
+                    GradeFileProcessor.PERCENTAGE_MIN
+                    <= grade_value
+                    <= GradeFileProcessor.PERCENTAGE_MAX
+                ):
                     # 格式化为整数或保留一位小数
                     if grade_value == int(grade_value):
                         return str(int(grade_value))
@@ -611,14 +631,13 @@ class GradeFileProcessor:
                         return f"{grade_value:.1f}"
             except (ValueError, TypeError):
                 continue
-        
+
         # 如果没有找到百分制成绩，尝试匹配字母或文字等级
         for grade in GradeFileProcessor.VALID_GRADES:
             if grade in text:
                 return grade
-        
-        return None
 
+        return None
 
 
 class RegistryManager:
@@ -629,7 +648,7 @@ class RegistryManager:
     def __init__(self, registry_path: str):
         """
         初始化登分册管理器
-        
+
         Args:
             registry_path: Excel登分册文件路径
         """
@@ -647,7 +666,7 @@ class RegistryManager:
     def _acquire_file_lock(self) -> bool:
         """
         获取文件锁（并发控制）
-        
+
         Returns:
             True表示成功获取锁，False表示文件被占用
         """
@@ -655,14 +674,14 @@ class RegistryManager:
         if not HAS_FCNTL and not HAS_MSVCRT:
             logger.warning("File locking not available on this platform")
             return True
-            
+
         try:
             # 创建锁文件路径
             self.lock_file_path = f"{self.registry_path}.lock"
-            
+
             # 尝试打开锁文件
-            self.lock_file_handle = open(self.lock_file_path, 'w')
-            
+            self.lock_file_handle = open(self.lock_file_path, "w")
+
             # 尝试获取独占锁（非阻塞）
             try:
                 if HAS_FCNTL:
@@ -686,7 +705,7 @@ class RegistryManager:
                     return False
                 else:
                     raise
-                    
+
         except Exception as e:
             logger.error("获取文件锁失败: %s", str(e), exc_info=True)
             self.last_error_message = f"获取文件锁失败: {str(e)}"
@@ -706,30 +725,30 @@ class RegistryManager:
                     msvcrt.locking(self.lock_file_handle.fileno(), msvcrt.LK_UNLCK, 1)
                 self.lock_file_handle.close()
                 self.lock_file_handle = None
-                
+
                 # 删除锁文件
                 if self.lock_file_path and os.path.exists(self.lock_file_path):
                     os.remove(self.lock_file_path)
                     logger.info("成功释放文件锁: %s", self.lock_file_path)
-                    
+
         except Exception as e:
             logger.error("释放文件锁失败: %s", str(e), exc_info=True)
 
     def _check_file_in_use(self) -> Tuple[bool, Optional[str]]:
         """
         检测Excel文件是否被占用（并发控制）
-        
+
         Returns:
             (是否被占用, 错误消息)
         """
         # If no locking mechanism is available, skip check
         if not HAS_FCNTL and not HAS_MSVCRT:
             return False, None
-            
+
         try:
             # 方法1：尝试以独占模式打开文件
             try:
-                with open(self.registry_path, 'r+b') as f:
+                with open(self.registry_path, "r+b") as f:
                     # 尝试获取文件锁
                     try:
                         if HAS_FCNTL:
@@ -740,8 +759,9 @@ class RegistryManager:
                             msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                         return False, None
                     except (IOError, OSError) as e:
-                        if (HAS_FCNTL and e.errno in (errno.EACCES, errno.EAGAIN)) or \
-                           (HAS_MSVCRT and e.errno == errno.EACCES):
+                        if (HAS_FCNTL and e.errno in (errno.EACCES, errno.EAGAIN)) or (
+                            HAS_MSVCRT and e.errno == errno.EACCES
+                        ):
                             logger.error("文件被占用: %s", self.registry_path)
                             return True, "成绩登分册文件被占用，请关闭后重试"
                         else:
@@ -749,7 +769,7 @@ class RegistryManager:
             except PermissionError:
                 logger.error("无权限访问文件: %s", self.registry_path)
                 return True, "无权限访问文件"
-                
+
         except Exception as e:
             logger.error("检测文件占用状态失败: %s", str(e), exc_info=True)
             return False, None
@@ -787,18 +807,10 @@ class RegistryManager:
 
             # 性能优化：不使用read_only模式（因为需要写入），但使用data_only=False保留公式
             # keep_vba=False 可以减少内存占用
-            self.workbook = load_workbook(
-                self.registry_path,
-                data_only=False,
-                keep_vba=False
-            )
+            self.workbook = load_workbook(self.registry_path, data_only=False, keep_vba=False)
             self.worksheet = self.workbook.active
 
-            logger.info(
-                "成功加载登分册: %s (工作表: %s)",
-                self.registry_path,
-                self.worksheet.title
-            )
+            logger.info("成功加载登分册: %s (工作表: %s)", self.registry_path, self.worksheet.title)
             return True
 
         except (OSError, ValueError) as e:
@@ -811,7 +823,7 @@ class RegistryManager:
     def validate_format(self) -> Tuple[bool, Optional[str]]:
         """
         验证登分册格式
-        
+
         Returns:
             (是否有效, 错误消息)
         """
@@ -820,7 +832,7 @@ class RegistryManager:
 
             if not self.worksheet:
                 return False, "工作表未加载"
-            
+
             # 查找"姓名"列（允许表头位于前几行）
             self.name_column_index = None
             self.header_row_index = None
@@ -840,14 +852,14 @@ class RegistryManager:
             if self.name_column_index is None or self.header_row_index is None:
                 logger.error("成绩登分册格式错误：缺少姓名列")
                 return False, "成绩登分册格式错误：缺少姓名列"
-            
+
             # 构建学生姓名映射
             self._build_student_name_map()
-            
+
             logger.info("登分册格式验证通过，找到%d个学生", len(self.student_names))
             logger.debug("学生列表: %s", list(self.student_names.keys())[:10])  # 只记录前10个
             return True, None
-            
+
         except (ValueError, AttributeError, KeyError) as e:
             error_msg = "验证登分册格式时出错: {}".format(str(e))
             logger.error(error_msg, exc_info=True)
@@ -866,9 +878,9 @@ class RegistryManager:
                 min_row=header_row + 1,
                 min_col=self.name_column_index,
                 max_col=self.name_column_index,
-                values_only=True
+                values_only=True,
             ),
-            start=header_row + 1
+            start=header_row + 1,
         ):
             name = row[0]
             if name:
@@ -882,10 +894,10 @@ class RegistryManager:
     def find_student_row(self, student_name: str) -> Optional[int]:
         """
         查找学生行
-        
+
         Args:
             student_name: 学生姓名
-            
+
         Returns:
             行号，如果未找到则返回None
         """
@@ -894,10 +906,10 @@ class RegistryManager:
     def find_or_create_homework_column(self, homework_number: int) -> int:
         """
         查找或创建作业列
-        
+
         Args:
             homework_number: 作业次数
-            
+
         Returns:
             列索引
         """
@@ -911,7 +923,7 @@ class RegistryManager:
             target_col = self.name_column_index + homework_number
             self.worksheet.cell(header_row, target_col)  # 确保单元格存在，但不写入标题
             return target_col
-            
+
         except (ValueError, AttributeError) as e:
             logger.error("查找或创建作业列时出错: %s", str(e), exc_info=True)
             raise
@@ -919,12 +931,12 @@ class RegistryManager:
     def write_grade(self, row: int, col: int, grade: str) -> Tuple[bool, Optional[str]]:
         """
         写入成绩到指定单元格
-        
+
         Args:
             row: 行号
             col: 列号
             grade: 成绩
-            
+
         Returns:
             (是否成功, 旧成绩值)
         """
@@ -933,22 +945,24 @@ class RegistryManager:
 
             cell = self.worksheet.cell(row, col)
             old_grade = cell.value
-            
+
             # 如果旧成绩和新成绩相同，跳过
             if old_grade == grade:
                 logger.debug("成绩相同，跳过写入: 行%d, 列%d, 成绩%s", row, col, grade)
                 return False, old_grade
-            
+
             # 写入新成绩
             cell.value = grade
-            
+
             if old_grade:
-                logger.info("覆盖成绩: 行%d, 列%d, 旧成绩%s -> 新成绩%s", row, col, old_grade, grade)
+                logger.info(
+                    "覆盖成绩: 行%d, 列%d, 旧成绩%s -> 新成绩%s", row, col, old_grade, grade
+                )
             else:
                 logger.info("写入成绩: 行%d, 列%d, 成绩%s", row, col, grade)
-            
+
             return True, old_grade
-            
+
         except (ValueError, AttributeError) as e:
             logger.error("写入成绩时出错: 行%d, 列%d, 错误: %s", row, col, str(e), exc_info=True)
             raise
@@ -956,7 +970,7 @@ class RegistryManager:
     def save(self) -> bool:
         """
         保存Excel文件（带并发控制）
-        
+
         Returns:
             True表示保存成功，False表示失败
         """
@@ -966,19 +980,19 @@ class RegistryManager:
             if not self.workbook:
                 logger.error("工作簿未加载，无法保存")
                 return False
-            
+
             # 并发控制：保存前再次检查文件锁
             if not self.lock_file_handle:
                 logger.error("文件锁已丢失，无法保存: %s", self.registry_path)
                 return False
-            
+
             self.workbook.save(self.registry_path)
             logger.info("成功保存登分册: %s", self.registry_path)
-            
+
             # 并发控制：保存成功后释放文件锁
             self._release_file_lock()
             return True
-            
+
         except (OSError, ValueError) as e:
             logger.error("保存登分册失败: %s, 错误: %s", self.registry_path, str(e), exc_info=True)
             # 保存失败时也要释放锁
@@ -988,7 +1002,7 @@ class RegistryManager:
     def create_backup(self) -> bool:
         """
         创建备份
-        
+
         Returns:
             True表示备份成功，False表示失败
         """
@@ -998,11 +1012,11 @@ class RegistryManager:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_filename = f"{os.path.splitext(self.registry_path)[0]}_backup_{timestamp}.xlsx"
             self.backup_path = backup_filename
-            
+
             shutil.copy2(self.registry_path, self.backup_path)
             logger.info("创建备份成功: %s", self.backup_path)
             return True
-            
+
         except (OSError, IOError) as e:
             logger.error("创建备份失败: %s", str(e), exc_info=True)
             return False
@@ -1010,7 +1024,7 @@ class RegistryManager:
     def restore_from_backup(self) -> bool:
         """
         从备份恢复（带并发控制）
-        
+
         Returns:
             True表示恢复成功，False表示失败
         """
@@ -1020,14 +1034,14 @@ class RegistryManager:
             if not self.backup_path or not os.path.exists(self.backup_path):
                 logger.error("备份文件不存在，无法恢复: %s", self.backup_path)
                 return False
-            
+
             shutil.copy2(self.backup_path, self.registry_path)
             logger.info("从备份恢复成功: %s -> %s", self.backup_path, self.registry_path)
-            
+
             # 并发控制：恢复后释放文件锁
             self._release_file_lock()
             return True
-            
+
         except (OSError, IOError) as e:
             logger.error("从备份恢复失败: %s", str(e), exc_info=True)
             # 恢复失败时也要释放锁
@@ -1037,7 +1051,7 @@ class RegistryManager:
     def delete_backup(self) -> bool:
         """
         删除备份文件
-        
+
         Returns:
             True表示删除成功，False表示失败
         """
@@ -1048,14 +1062,14 @@ class RegistryManager:
                 os.remove(self.backup_path)
                 logger.info("删除备份成功: %s", self.backup_path)
                 return True
-            
+
             logger.debug("备份文件不存在，无需删除")
             return False
-            
+
         except OSError as e:
             logger.error("删除备份失败: %s", str(e), exc_info=True)
             return False
-    
+
     def __del__(self):
         """析构函数：确保释放文件锁"""
         self._release_file_lock()
@@ -1068,11 +1082,11 @@ class NameMatcher:
     def exact_match(name: str, name_list: List[str]) -> Optional[str]:
         """
         精确匹配
-        
+
         Args:
             name: 要匹配的姓名
             name_list: 姓名列表
-            
+
         Returns:
             匹配的姓名，如果未找到则返回None
         """
@@ -1084,23 +1098,23 @@ class NameMatcher:
     def fuzzy_match(name: str, name_list: List[str]) -> Tuple[Optional[str], List[str]]:
         """
         模糊匹配（去除空格和特殊字符）
-        
+
         Args:
             name: 要匹配的姓名
             name_list: 姓名列表
-            
+
         Returns:
             (匹配的姓名, 所有匹配结果列表)
             如果找到唯一匹配返回该姓名，如果有多个匹配或无匹配返回None
         """
         normalized_name = NameMatcher.normalize_name(name)
         matches = []
-        
+
         for candidate in name_list:
             normalized_candidate = NameMatcher.normalize_name(candidate)
             if normalized_name == normalized_candidate:
                 matches.append(candidate)
-        
+
         if len(matches) == 1:
             return matches[0], matches
         elif len(matches) > 1:
@@ -1113,35 +1127,35 @@ class NameMatcher:
     def normalize_name(name: str) -> str:
         """
         规范化姓名（去除空格和特殊字符）
-        
+
         Args:
             name: 原始姓名
-            
+
         Returns:
             规范化后的姓名
         """
         if not name:
             return ""
-        
+
         # 去除所有空格
         normalized = name.replace(" ", "").replace("\t", "").replace("\n", "")
-        
+
         # 去除常见特殊字符
         special_chars = ["·", "•", ".", "。", "-", "_", "—"]
         for char in special_chars:
             normalized = normalized.replace(char, "")
-        
+
         return normalized.strip()
 
     @staticmethod
     def match(name: str, name_list: List[str]) -> Tuple[Optional[str], str]:
         """
         匹配姓名（先精确匹配，再模糊匹配）
-        
+
         Args:
             name: 要匹配的姓名
             name_list: 姓名列表
-            
+
         Returns:
             (匹配的姓名, 匹配类型: 'exact'/'fuzzy'/'none'/'multiple')
         """
@@ -1152,7 +1166,7 @@ class NameMatcher:
         if exact_result:
             logger.debug("精确匹配成功: %s", exact_result)
             return exact_result, "exact"
-        
+
         # 再尝试模糊匹配
         fuzzy_result, all_matches = NameMatcher.fuzzy_match(name, name_list)
         if fuzzy_result:
