@@ -358,6 +358,39 @@ class Submission(models.Model):
         super().save(*args, **kwargs)
 
 
+class FileGradeStatus(models.Model):
+    """作业文件评分状态 - 记录上次评分时间"""
+
+    repository = models.ForeignKey(
+        Repository,
+        on_delete=models.CASCADE,
+        related_name="file_grade_statuses",
+        help_text="所属仓库",
+    )
+    file_path = models.CharField(max_length=500, help_text="文件相对路径")
+    last_graded_at = models.DateTimeField(default=timezone.now, help_text="上次评分时间")
+    last_graded_commit = models.CharField(
+        max_length=64, blank=True, null=True, help_text="上次评分时的仓库提交"
+    )
+    last_graded_by = models.CharField(
+        max_length=200, blank=True, null=True, help_text="上次评分教师"
+    )
+    updated_at = models.DateTimeField(auto_now=True, help_text="记录更新时间")
+
+    class Meta:
+        db_table = "grading_file_grade_status"
+        verbose_name = "文件评分状态"
+        verbose_name_plural = "文件评分状态"
+        unique_together = ["repository", "file_path"]
+        indexes = [
+            models.Index(fields=["repository", "file_path"]),
+            models.Index(fields=["repository", "last_graded_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.repository_id}:{self.file_path}"
+
+
 class GradeTypeConfig(models.Model):
     """评分类型配置模型 - 支持多租户"""
 

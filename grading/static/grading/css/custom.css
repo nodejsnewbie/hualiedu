@@ -185,7 +185,10 @@
 
 /* 目录树样式 */
 #directory-tree {
-    background-color: #fff;
+    background-color: #fbfcfd;
+    border: 1px solid #e7eaee;
+    border-radius: 0.5rem;
+    padding: 0.25rem;
 }
 
 #directory-tree .jstree-anchor {
@@ -343,6 +346,13 @@
     font-size: 0.875em;
     font-weight: 600;
     border-radius: 0.25rem;
+}
+
+.homework-update-badge {
+    color: #f0a500;
+    margin-right: 0.4rem;
+    font-size: 0.85em;
+    text-shadow: 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
 /* 图标样式 */

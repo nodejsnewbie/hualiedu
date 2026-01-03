@@ -19,6 +19,14 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+
   web:
     build: .
     ports:
@@ -26,12 +34,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       - DJANGO_SETTINGS_MODULE=hualiEdu.settings
       - DATABASE_HOST=db
       - DATABASE_NAME=${MYSQL_DATABASE:-mydatabase}
       - DATABASE_USER=${MYSQL_USER:-user}
       - DATABASE_PASSWORD=${MYSQL_PASSWORD:-password}
+      - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-your-secret-key-here}
       - DEBUG=0
     volumes:
@@ -45,5 +56,6 @@ services:
 
 volumes:
   db_data:
+  redis_data:
   static_volume:
   media_volume:

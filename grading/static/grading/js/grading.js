@@ -14,6 +14,7 @@ let isLabCourse = false;  // 是否为实验课
 let isFileLocked = false;  // 当前文件是否被锁定（格式错误）
 let isLabReport = false;  // 当前文件是否为实验报告
 let hasComment = false;  // 当前文件是否有评价
+let pendingConfirmForComment = false;  // 确定按钮触发的评价流程
 
 // 将关键变量暴露到window对象，供其他脚本使用
 window.currentCourse = null;
@@ -412,30 +413,11 @@ window.handleGradeInfo = function(gradeInfo) {
     hasComment = gradeInfo.has_comment || false;
     console.log('文件类型检查: isLabReport=', isLabReport, ', hasComment=', hasComment);
     
-    // 如果是实验报告且没有评价，显示警告并禁用确定按钮
+    // 如果是实验报告且没有评价，提示填写评价但允许点击确定
     if (isLabReport && !hasComment) {
-        console.log('实验报告缺少评价，禁用确定按钮');
-        $('#add-grade-to-file').prop('disabled', true);
-        
-        // 显示醒目的警告提示
-        const warningMessage = `
-            <div id="lab-report-warning" class="alert alert-warning alert-dismissible fade show mt-3" role="alert">
-                <h5 class="alert-heading">
-                    <i class="bi bi-exclamation-triangle-fill"></i> 实验报告必须添加评价
-                </h5>
-                <p class="mb-0">
-                    此文件为实验报告，根据评分规则必须包含教师评价。<br>
-                    请先点击 <strong>"教师评价"</strong> 按钮添加评价内容，然后再进行评分。
-                </p>
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>
-        `;
-        // 移除旧的警告提示（如果存在）
+        console.log('实验报告缺少评价');
+        $('#add-grade-to-file').prop('disabled', false);
         $('#lab-report-warning').remove();
-        // 在文件内容前添加警告提示
-        $('#file-content').prepend(warningMessage);
-        
-        // 高亮教师评价按钮
         $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
     } else {
         // 移除警告提示（如果存在）
@@ -920,6 +902,12 @@ window.addGradeToFile = function(grade) {
         return;
     }
 
+    if (isLabReport && !hasComment) {
+        $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+        $('#teacherCommentModal').modal('show');
+        return;
+    }
+
     if (!grade) {
         showError('请先选择一个评分');
         return;
@@ -979,6 +967,18 @@ window.addGradeToFile = function(grade) {
                 console.log('Current file index:', currentIndex);
                 console.log('Total files:', fileNodes.length);
 
+                const tree = $('#directory-tree').jstree(true);
+                if (tree) {
+                    const node = tree.get_node(currentFilePath);
+                    if (node && node.data) {
+                        node.data.has_updates = false;
+                        tree.redraw_node(node);
+                        if (typeof window.addHomeworkUpdateBadges === 'function') {
+                            window.addHomeworkUpdateBadges();
+                        }
+                    }
+                }
+
                 // 自动导航到下一个文件
                 if (currentIndex < fileNodes.length - 1) {
                     const nextNode = fileNodes[currentIndex + 1];
@@ -1009,21 +1009,9 @@ window.addGradeToFile = function(grade) {
                 
                 // 如果是实验报告缺少评价的错误，显示特殊提示
                 if (errorMessage.includes('实验报告必须添加评价')) {
-                    const warningHtml = `
-                        <div class="alert alert-danger alert-dismissible fade show" role="alert">
-                            <h5 class="alert-heading">
-                                <i class="bi bi-x-circle-fill"></i> 无法保存评分
-                            </h5>
-                            <p class="mb-0">
-                                ${errorMessage}<br>
-                                请先点击 <strong>"教师评价"</strong> 按钮添加评价内容。
-                            </p>
-                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-                        </div>
-                    `;
-                    $('#file-content').prepend(warningHtml);
-                    // 高亮教师评价按钮
+                    pendingConfirmForComment = true;
                     $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+                    $('#teacherCommentModal').modal('show');
                     return;
                 }
             } else {
@@ -1216,6 +1204,9 @@ window.initTree = function() {
                 if (typeof window.addHomeworkTypeLabels === 'function') {
                     window.addHomeworkTypeLabels();
                 }
+                if (typeof window.addHomeworkUpdateBadges === 'function') {
+                    window.addHomeworkUpdateBadges();
+                }
                 
                 // 树初始化完成后，如果有初始选中的节点，加载其内容
                 const selectedNodes = $('#directory-tree').jstree('get_selected');
@@ -1224,6 +1215,14 @@ window.initTree = function() {
                     if (node && node.type === 'file') {
                         loadFile(node.id);
                     }
+                }
+            })
+            .on('open_node.jstree', function() {
+                if (typeof window.addHomeworkTypeLabels === 'function') {
+                    window.addHomeworkTypeLabels();
+                }
+                if (typeof window.addHomeworkUpdateBadges === 'function') {
+                    window.addHomeworkUpdateBadges();
                 }
             })
             .on('select_node.jstree', function(e, data) {
@@ -1371,6 +1370,13 @@ document.addEventListener('DOMContentLoaded', function() {
         $(this).addClass('active');
         selectedGrade = grade;
         
+        if (isLabReport && !hasComment) {
+            pendingConfirmForComment = true;
+            $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+            $('#teacherCommentModal').modal('show');
+            return;
+        }
+
         // 立即保存评分并转到下一个文件
         addGradeToFile(grade);
     });
@@ -1416,6 +1422,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (!currentFilePath) {
             showError('请先选择要评分的文件');
+            return;
+        }
+
+        if (isLabReport && !hasComment) {
+            pendingConfirmForComment = true;
+            $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+            $('#teacherCommentModal').modal('show');
             return;
         }
 
@@ -1535,6 +1548,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (response.status === 'success') {
                     // 使用一个模态框或者alert来显示结果
                     alert(`AI评分完成！\n\n分数: ${response.score}\n等级: ${response.grade}\n\n评语:\n${response.comment}`);
+                    const tree = $('#directory-tree').jstree(true);
+                    if (tree && currentFilePath) {
+                        const node = tree.get_node(currentFilePath);
+                        if (node && node.data) {
+                            node.data.has_updates = false;
+                            tree.redraw_node(node);
+                            if (typeof window.addHomeworkUpdateBadges === 'function') {
+                                window.addHomeworkUpdateBadges();
+                            }
+                        }
+                    }
                     // 刷新文件内容以显示新的评分和评语
                     loadFile(currentFilePath);
                 } else {
@@ -1904,8 +1928,24 @@ window.saveTeacherComment = function() {
 
                 $('#teacherCommentModal').modal('hide');
                 
-                // 自动跳转到下一个文件
-                navigateToNextFile();
+                if (pendingConfirmForComment) {
+                    pendingConfirmForComment = false;
+                } else {
+                    // 自动跳转到下一个文件
+                    navigateToNextFile();
+                }
+
+                const tree = $('#directory-tree').jstree(true);
+                if (tree && currentFilePath) {
+                    const node = tree.get_node(currentFilePath);
+                    if (node && node.data) {
+                        node.data.has_updates = false;
+                        tree.redraw_node(node);
+                        if (typeof window.addHomeworkUpdateBadges === 'function') {
+                            window.addHomeworkUpdateBadges();
+                        }
+                    }
+                }
             } else {
                 console.error('保存失败:', response.message);
                 alert('保存失败: ' + response.message);

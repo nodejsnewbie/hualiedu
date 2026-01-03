@@ -46,7 +46,15 @@ cp .env.example .env
 # 至少需要设置 SECRET_KEY
 ```
 
-### 5. 初始化数据库
+### 5. 启动 MySQL / Redis (Podman)
+
+```bash
+./scripts/podman_services.sh
+```
+
+说明：`make runserver` 会自动确保 Podman 服务已启动。
+
+### 6. 初始化数据库
 
 ```bash
 # 运行数据库迁移
@@ -56,7 +64,7 @@ make migrate
 make createsuperuser
 ```
 
-### 6. 启动开发服务器
+### 7. 启动开发服务器
 
 ```bash
 make runserver

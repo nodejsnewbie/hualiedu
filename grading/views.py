@@ -5,6 +5,7 @@ import logging
 import mimetypes
 import os
 import re
+import subprocess
 import threading
 import time
 import traceback
@@ -148,6 +149,95 @@ def validate_file_path(file_path, base_dir=None, request=None, repo_id=None, cou
         return False, None, "无权限读取文件"
 
     return True, full_path, None
+
+
+def get_teacher_display_name(user):
+    if not user:
+        return ""
+    full_name = user.get_full_name().strip()
+    if full_name:
+        return full_name
+    return user.username
+
+
+def update_file_grade_status(repository, relative_path, course_name=None, user=None):
+    """更新作业文件的上次评分时间。"""
+    if not repository or not relative_path:
+        return
+
+    normalized_path = relative_path.replace("\\", "/").lstrip("/")
+    if course_name:
+        course_name = course_name.strip()
+        if course_name and not normalized_path.startswith(f"{course_name}/"):
+            normalized_path = f"{course_name}/{normalized_path}"
+
+    try:
+        from grading.models import FileGradeStatus
+        last_commit = None
+        repo_root = repository.get_full_path()
+        if GitHandler.is_git_repo(repo_root):
+            try:
+                result = subprocess.run(
+                    ["git", "rev-parse", "HEAD"],
+                    cwd=repo_root,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    last_commit = result.stdout.strip()
+            except Exception as e:
+                logger.warning(f"读取仓库提交失败: {e}")
+
+        FileGradeStatus.objects.update_or_create(
+            repository=repository,
+            file_path=normalized_path,
+            defaults={
+                "last_graded_at": timezone.now(),
+                "last_graded_commit": last_commit,
+                "last_graded_by": get_teacher_display_name(user),
+            },
+        )
+    except Exception as e:
+        logger.warning(f"更新评分状态失败: {e}")
+
+
+def maybe_sync_repository(repository, request=None, min_interval_seconds=60):
+    """按需同步 Git 仓库，避免频繁拉取。
+
+    返回 True 表示已执行同步并成功，False 表示未同步或同步失败。
+    """
+    if not repository or not repository.can_sync():
+        return False
+
+    now = timezone.now()
+    if repository.last_sync and (now - repository.last_sync).total_seconds() < min_interval_seconds:
+        return False
+
+    full_path = repository.get_full_path()
+    try:
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+    except Exception as e:
+        logger.warning(f"创建仓库根目录失败: {e}")
+
+    if os.path.exists(full_path):
+        success = GitHandler.pull_repo(full_path, repository.branch or None)
+    else:
+        success = GitHandler.clone_repo_remote(repository.url, full_path, repository.branch or None)
+
+    if success:
+        repository.last_sync = now
+        repository.save(update_fields=["last_sync"])
+
+        cache_manager = get_cache_manager(request)
+        cache_manager.clear_dir_tree()
+        cache_manager.clear_file_count()
+        cache_manager.clear_file_content()
+        logger.info(f"仓库自动同步成功: {repository.name}")
+        return True
+
+    logger.warning(f"仓库自动同步失败: {repository.name}")
+    return False
 
 
 def validate_file_write_permission(full_path):
@@ -1346,13 +1436,147 @@ def grading_view(request):
         )
 
 
-def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_name: str = None):
+def _get_repo_head_commit(repository):
+    repo_root = repository.get_full_path()
+    if not GitHandler.is_git_repo(repo_root):
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception as e:
+        logger.warning(f"读取仓库提交失败: {e}")
+    return None
+
+
+def _file_has_updates(
+    repository, rel_path, abs_path, repo_rel_prefix="", current_head=None, base_dir=None
+):
+    """判断单个文件是否有更新（相对上次评分）。"""
+    if not repository or not rel_path:
+        return False
+
+    try:
+        from grading.models import FileGradeStatus
+
+        file_keys = [rel_path]
+        fallback_key = None
+        if repo_rel_prefix and rel_path.startswith(f"{repo_rel_prefix}/"):
+            fallback_key = rel_path[len(repo_rel_prefix) + 1 :]
+            file_keys.append(fallback_key)
+
+        status = FileGradeStatus.objects.filter(
+            repository=repository, file_path__in=file_keys
+        ).first()
+
+        if not status:
+            grade_info = get_file_grade_info(abs_path, base_dir=base_dir)
+            if grade_info.get("has_grade"):
+                return False
+            return True
+
+        if current_head and status.last_graded_commit and current_head != status.last_graded_commit:
+            return True
+
+        if status.last_graded_at and os.path.getmtime(abs_path) > status.last_graded_at.timestamp():
+            return True
+
+    except Exception as e:
+        logger.warning(f"检测文件更新失败: {e}")
+
+    return False
+
+
+def _homework_folder_has_updates(
+    repository, folder_abs_path, folder_rel_path, repo_rel_prefix="", current_head=None
+):
+    """判断作业文件夹是否有更新（相对上次评分）。"""
+    if not repository or not folder_abs_path:
+        return False
+
+    try:
+        if not os.path.isdir(folder_abs_path):
+            return False
+
+        files = []
+        base_depth = folder_abs_path.rstrip(os.sep).count(os.sep)
+        for root, _, filenames in os.walk(folder_abs_path):
+            depth = root.rstrip(os.sep).count(os.sep) - base_depth
+            if depth > 2:
+                continue
+            for filename in filenames:
+                if filename.startswith("."):
+                    continue
+                abs_path = os.path.join(root, filename)
+                rel_sub = os.path.relpath(abs_path, folder_abs_path).replace("\\", "/")
+                rel_path = f"{folder_rel_path}/{rel_sub}".replace("\\", "/").lstrip("/")
+                if repo_rel_prefix:
+                    rel_path = f"{repo_rel_prefix}/{rel_path}".replace("\\", "/")
+                files.append((rel_path, abs_path))
+
+        if not files:
+            return False
+
+        from grading.models import FileGradeStatus
+
+        file_keys = []
+        fallback_keys = []
+        for rel_path, _ in files:
+            file_keys.append(rel_path)
+            if repo_rel_prefix and rel_path.startswith(f"{repo_rel_prefix}/"):
+                fallback_keys.append(rel_path[len(repo_rel_prefix) + 1 :])
+
+        status_queryset = FileGradeStatus.objects.filter(
+            repository=repository, file_path__in=(file_keys + fallback_keys)
+        )
+        status_map = {status.file_path: status.last_graded_at for status in status_queryset}
+        commit_map = {status.file_path: status.last_graded_commit for status in status_queryset}
+
+        current_head = current_head or _get_repo_head_commit(repository)
+
+        for rel_path, abs_path in files:
+            alt_path = None
+            if repo_rel_prefix and rel_path.startswith(f"{repo_rel_prefix}/"):
+                alt_path = rel_path[len(repo_rel_prefix) + 1 :]
+            last_graded_at = status_map.get(rel_path) or (
+                status_map.get(alt_path) if alt_path else None
+            )
+            last_graded_commit = commit_map.get(rel_path) or (
+                commit_map.get(alt_path) if alt_path else None
+            )
+            if current_head and last_graded_commit and current_head != last_graded_commit:
+                return True
+            if not last_graded_at:
+                return True
+            if os.path.getmtime(abs_path) > last_graded_at.timestamp():
+                return True
+
+    except Exception as e:
+        logger.warning(f"检测作业更新失败: {e}")
+
+    return False
+
+
+def get_directory_tree(
+    file_path: str = "",
+    base_dir: str | None = None,
+    course_name: str = None,
+    request=None,
+    repository=None,
+):
     """获取目录树结构（返回Python对象列表）
 
     Args:
         file_path: 相对路径（相对于 base_dir）
         base_dir: 基础目录，若为空则读取全局默认目录
         course_name: 课程名称，用于查询作业类型
+        request: Django请求对象（用于缓存）
     """
     try:
         if not base_dir:
@@ -1387,6 +1611,8 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
             return []
 
         items = []
+        current_head = _get_repo_head_commit(repository) if repository else None
+        repo_base_dir = repository.get_full_path() if repository else None
         try:
             # 获取目录内容并过滤掉隐藏文件和目录
             for item in sorted(os.listdir(full_path)):
@@ -1421,7 +1647,11 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
                 # 如果是目录，递归获取子目录并统计文件数量
                 if is_dir:
                     children = get_directory_tree(
-                        relative_path, base_dir=base_dir, course_name=course_name
+                        relative_path,
+                        base_dir=base_dir,
+                        course_name=course_name,
+                        request=request,
+                        repository=repository,
                     )
                     if children:
                         node["children"] = children
@@ -1471,6 +1701,18 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
                                 )
                         except Course.DoesNotExist:
                             pass
+
+                        if repository:
+                            repo_rel_prefix = course_name if course_name else ""
+                            has_updates = _homework_folder_has_updates(
+                                repository,
+                                item_path,
+                                relative_path,
+                                repo_rel_prefix=repo_rel_prefix,
+                                current_head=current_head,
+                            )
+                            if has_updates:
+                                node["data"]["has_updates"] = True
                 # 如果是文件，添加文件特定的属性
                 else:
                     # 获取文件扩展名
@@ -1480,6 +1722,21 @@ def get_directory_tree(file_path: str = "", base_dir: str | None = None, course_
                         "data-type": "file",
                         "data-ext": ext.lower(),
                     }
+                    if repository:
+                        rel_path = relative_path.replace("\\", "/").lstrip("/")
+                        repo_rel_prefix = course_name if course_name else ""
+                        if repo_rel_prefix and not rel_path.startswith(f"{repo_rel_prefix}/"):
+                            rel_path = f"{repo_rel_prefix}/{rel_path}"
+                        if _file_has_updates(
+                            repository,
+                            rel_path,
+                            item_path,
+                            repo_rel_prefix=repo_rel_prefix,
+                            current_head=current_head,
+                            base_dir=repo_base_dir,
+                        ):
+                            node["data"] = node.get("data", {})
+                            node["data"]["has_updates"] = True
 
                 items.append(node)
                 logger.info(f"Added {'directory' if is_dir else 'file'}: {item}")
@@ -1773,6 +2030,7 @@ def get_courses_list_view(request):
 
         try:
             repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+            maybe_sync_repository(repo, request=request)
             base_dir = repo.get_full_path()
         except Repository.DoesNotExist:
             return JsonResponse({"status": "error", "message": "仓库不存在", "courses": []})
@@ -1820,10 +2078,13 @@ def get_directory_tree_view(request):
         rel_path = request.GET.get("path", "").strip()
 
         base_dir = None
+        repository = None
         if repo_id:
             # 按仓库ID定位用户仓库
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                maybe_sync_repository(repo, request=request)
+                repository = repo
                 base_dir = repo.get_full_path()
 
                 # 如果指定了课程，则基础目录为课程目录
@@ -1834,7 +2095,9 @@ def get_directory_tree_view(request):
             except Repository.DoesNotExist:
                 return JsonResponse({"children": []}, safe=False)
 
-        data = get_directory_tree(rel_path, base_dir=base_dir, course_name=course)
+        data = get_directory_tree(
+            rel_path, base_dir=base_dir, course_name=course, request=request, repository=repository
+        )
         # 转换为前端模板期望的格式（包含children属性）
         return JsonResponse({"children": data}, safe=False)
     except Exception as e:
@@ -2136,6 +2399,7 @@ def get_file_content(request):
             if repo_id:
                 try:
                     repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                    maybe_sync_repository(repo, request=request)
                     base_dir = repo.get_full_path()
 
                     # 如果指定了课程，则基础目录为课程目录
@@ -2421,9 +2685,20 @@ def get_file_content(request):
                         # 读取 Excel 文件
                         df = pd.read_excel(full_path, engine="openpyxl")
 
+                        # 处理列名：移除 Unnamed 列或替换为空字符串
+                        df.columns = [
+                            "" if str(col).startswith("Unnamed") else str(col)
+                            for col in df.columns
+                        ]
+
+                        # 处理 NaN 值：替换为空字符串
+                        df = df.fillna("")
+
                         # 转换为 HTML
                         html_content = df.to_html(
-                            index=False, classes="table table-bordered table-striped"
+                            index=False,
+                            classes="table table-bordered table-striped",
+                            na_rep="",  # NaN 显示为空字符串
                         )
 
                         # 获取文件评分信息
@@ -2898,13 +3173,27 @@ def add_grade_to_file(request):
 
         # 调用统一的文件写入接口
         warning = write_grade_and_comment_to_file(
-            full_path, grade=grade, base_dir=base_dir, is_lab_report=is_lab_report
+            full_path,
+            grade=grade,
+            base_dir=base_dir,
+            is_lab_report=is_lab_report,
+            teacher_name=get_teacher_display_name(request.user),
         )
 
         logger.info(f"✅ 成功添加评分: {full_path}, 评分={grade}, 评分方式={grade_type}")
 
         file_type = get_file_extension(full_path)
         response_data = {"file_type": file_type, "grade": grade, "grade_type": grade_type}
+
+        repo_id = request.POST.get("repo_id")
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                update_file_grade_status(
+                    repo, request.POST.get("path"), course_name=course, user=request.user
+                )
+            except Repository.DoesNotExist:
+                logger.warning("评分状态更新失败：仓库不存在或无权限")
 
         # 如果有警告信息，添加到响应中
         if warning:
@@ -3318,8 +3607,22 @@ def save_teacher_comment(request):
 
         # 使用统一函数同时写入评分和评价
         warning = write_grade_and_comment_to_file(
-            full_path, grade=grade, comment=comment, base_dir=base_dir, is_lab_report=is_lab_report
+            full_path,
+            grade=grade,
+            comment=comment,
+            base_dir=base_dir,
+            is_lab_report=is_lab_report,
+            teacher_name=get_teacher_display_name(request.user),
         )
+
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                update_file_grade_status(
+                    repo, file_path, course_name=course, user=request.user
+                )
+            except Repository.DoesNotExist:
+                logger.warning("教师评价评分状态更新失败：仓库不存在或无权限")
 
         if warning:
             logger.warning(f"保存时有警告: {warning}")
@@ -4145,6 +4448,12 @@ def ai_score_view(request):
         logger.info(f"AI评分结果: {result}")
 
         if result["success"]:
+            if repo_id:
+                try:
+                    repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                    update_file_grade_status(repo, path, user=request.user)
+                except Repository.DoesNotExist:
+                    logger.warning("AI评分状态更新失败：仓库不存在或无权限")
             logger.info("AI评分成功")
             return JsonResponse(
                 {
@@ -4756,7 +5065,16 @@ def extract_grade_and_comment_from_cell(cell):
     return grade, comment, signature_text
 
 
-def write_to_teacher_signature_cell(cell, grade, comment, signature_text):
+def build_teacher_signature_text(teacher_name, sign_time):
+    if not teacher_name:
+        teacher_name = ""
+    date_str = sign_time.strftime("%Y年%m月%d日") if sign_time else ""
+    return f"教师（签字）：{teacher_name}\n时间：{date_str}"
+
+
+def write_to_teacher_signature_cell(
+    cell, grade, comment, signature_text, teacher_name=None, sign_time=None
+):
     """
     向"教师（签字）"单元格写入评分和评价
 
@@ -4808,20 +5126,24 @@ def write_to_teacher_signature_cell(cell, grade, comment, signature_text):
     else:
         logger.info("✗ 未提供评价，跳过第二行")
 
-    # 第三行及之后：保留原始的"教师（签字）"文本
-    if signature_text:
+    # 第三行及之后：写入"教师（签字）"与时间
+    signature_output = signature_text
+    if teacher_name or sign_time:
+        signature_output = build_teacher_signature_text(teacher_name, sign_time)
+
+    if signature_output:
         p3 = cell.add_paragraph()
-        run3 = p3.add_run(signature_text)
+        run3 = p3.add_run(signature_output)
         run3.font.size = Pt(10)
         p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        logger.info(f"✓ 已写入签字文本（第三行及之后）: {signature_text[:50]}...")
+        logger.info(f"✓ 已写入签字文本（第三行及之后）: {signature_output[:50]}...")
     else:
         logger.warning("✗ 未找到签字文本，可能导致格式不完整")
 
     logger.info("=== 教师签字单元格写入完成 ===")
 
 
-def write_grade_to_lab_report(doc, grade, comment=None):
+def write_grade_to_lab_report(doc, grade, comment=None, teacher_name=None, sign_time=None):
     """
     将评分写入实验报告的表格中
 
@@ -4868,7 +5190,9 @@ def write_grade_to_lab_report(doc, grade, comment=None):
                 logger.info(f"自动生成评价: {comment}")
 
         # 步骤4：写入新的评分和评价到表格单元格
-        write_to_teacher_signature_cell(cell, grade, comment, signature_text)
+        write_to_teacher_signature_cell(
+            cell, grade, comment, signature_text, teacher_name=teacher_name, sign_time=sign_time
+        )
 
         logger.info(f"✅ 成功写入实验报告表格: 评分={grade}, 评价={comment[:30]}...")
         return True, grade, comment
@@ -4883,7 +5207,7 @@ def write_grade_to_lab_report(doc, grade, comment=None):
 
 
 def write_grade_and_comment_to_file(
-    full_path, grade=None, comment=None, base_dir=None, is_lab_report=None
+    full_path, grade=None, comment=None, base_dir=None, is_lab_report=None, teacher_name=None
 ):
     """
     统一的函数：向文件写入评分和评价
@@ -4926,7 +5250,7 @@ def write_grade_and_comment_to_file(
         if is_lab_report and grade:
             logger.info(f">>> 尝试按实验报告格式写入: 评分={grade}, 评价={comment}")
             success, modified_grade, modified_comment = write_grade_to_lab_report(
-                doc, grade, comment
+                doc, grade, comment, teacher_name=teacher_name, sign_time=timezone.now()
             )
 
             if success:
@@ -6644,6 +6968,12 @@ def sync_repository_view(request):
             else:
                 message = f"仓库 '{repository.name}' 克隆失败"
 
+        if success:
+            cache_manager = get_cache_manager(request)
+            cache_manager.clear_dir_tree()
+            cache_manager.clear_file_count()
+            cache_manager.clear_file_content()
+
         logger.info(f"用户 {request.user.username} 同步仓库: {repository.name} - {message}")
 
         return JsonResponse(
@@ -6972,7 +7302,17 @@ def ai_score_view(request):
                 grade=ai_grade,
                 comment=f"AI评价：{ai_comment}",
                 base_dir=base_dir,
+                teacher_name=get_teacher_display_name(request.user),
             )
+
+            if repo_id:
+                try:
+                    repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                    update_file_grade_status(
+                        repo, file_path, course_name=course, user=request.user
+                    )
+                except Repository.DoesNotExist:
+                    logger.warning("AI评分状态更新失败：仓库不存在或无权限")
 
             if format_warning:
                 logger.warning(f"AI评分写入警告: {format_warning}")
@@ -7057,6 +7397,7 @@ def batch_ai_score_view(request):
             return create_error_response("未提供目录路径")
 
         # 获取基础目录
+        repo = None
         if repo_id:
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
@@ -7187,7 +7528,14 @@ def batch_ai_score_view(request):
                         comment=f"AI评价：{comment}",
                         base_dir=base_dir,
                         is_lab_report=is_lab_report,
+                        teacher_name=get_teacher_display_name(request.user),
                     )
+
+                    if repo:
+                        rel_path = os.path.relpath(file_path, base_dir).replace("\\", "/")
+                        update_file_grade_status(
+                            repo, rel_path, course_name=course, user=request.user
+                        )
 
                     results["success"] += 1
                     result_detail = {

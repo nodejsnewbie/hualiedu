@@ -28,7 +28,12 @@
                             </select>
                         </div>
                         <div class="col-sm-4">
-                            <a href="{% url 'grading:repository_management' %}" class="btn btn-sm btn-secondary">管理仓库</a>
+                            <div class="d-flex gap-2">
+                                <button id="refreshRepoBtn" class="btn btn-sm btn-outline-primary" type="button">
+                                    <i class="bi bi-arrow-clockwise"></i> 刷新
+                                </button>
+                                <a href="{% url 'grading:repository_management' %}" class="btn btn-sm btn-secondary">管理仓库</a>
+                            </div>
                         </div>
                     </div>
                     <div class="row">
@@ -226,6 +231,46 @@
         // 仓库管理相关功能
         // 加载用户仓库列表
         loadRepositoryList();
+
+        // 手动刷新仓库
+        $('#refreshRepoBtn').click(function() {
+            const selectedRepo = $('#repositorySelect').val();
+            if (!selectedRepo) {
+                alert('请先选择仓库');
+                return;
+            }
+
+            const $btn = $(this);
+            const originalHtml = $btn.html();
+            $btn.prop('disabled', true).html('<i class="bi bi-arrow-repeat"></i> 刷新中...');
+
+            $.ajax({
+                url: '{% url "grading:sync_repository" %}',
+                method: 'POST',
+                data: {
+                    repository_id: selectedRepo,
+                    csrfmiddlewaretoken: '{{ csrf_token }}'
+                },
+                success: function(response) {
+                    if (response.status === 'success') {
+                        const currentCourse = $('#courseSelect').val();
+                        loadCoursesList(selectedRepo);
+                        if (currentCourse) {
+                            loadCourseFiles(selectedRepo, currentCourse);
+                        }
+                    } else {
+                        alert(response.message || '仓库刷新失败');
+                    }
+                },
+                error: function(xhr) {
+                    console.error('仓库刷新失败:', xhr.status, xhr.responseText);
+                    alert('仓库刷新失败，请稍后重试');
+                },
+                complete: function() {
+                    $btn.prop('disabled', false).html(originalHtml);
+                }
+            });
+        });
 
         // 仓库选择变化事件
         $('#repositorySelect').change(function() {

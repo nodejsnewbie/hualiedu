@@ -51,6 +51,7 @@ test-file:
 # 开发服务器
 runserver:
 	@echo "启动开发服务器..."
+	@bash ./scripts/podman_services.sh
 	@uv run python manage.py runserver $(if $(PORT),$(PORT),8000)
 
 # 数据库相关

@@ -153,7 +153,7 @@ urlpatterns = [
     path("add-repository/", views.add_repository_view, name="add_repository"),
     path("update-repository/", views.update_repository_view, name="update_repository"),
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
-    # Removed: sync-repository route (no longer needed with remote-first architecture)
+    path("sync-repository/", views.sync_repository_view, name="sync_repository"),
     path(
         "validate-git-connection/",
         views.validate_git_connection_view,

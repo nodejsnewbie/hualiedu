@@ -83,6 +83,58 @@ window.addHomeworkTypeLabels = function() {
     console.log('Homework type labels added');
 };
 
+// 为作业文件夹添加更新标识
+window.addHomeworkUpdateBadges = function() {
+    console.log('Adding homework update badges...');
+    const tree = jQuery('#directory-tree').jstree(true);
+    if (!tree) {
+        console.log('Tree not initialized');
+        return;
+    }
+
+    jQuery('.homework-update-badge').remove();
+
+    function addBadgeToNode(nodeId) {
+        const node = tree.get_node(nodeId);
+        if (!node) return;
+
+        if (node.type === 'file' && node.data && node.data.has_updates) {
+            const nodeElement = tree.get_node(nodeId, true);
+            if (nodeElement && nodeElement.length > 0) {
+                const anchorElement = nodeElement.children('a.jstree-anchor');
+                if (anchorElement.length > 0) {
+                    if (anchorElement.find('.homework-update-badge').length === 0) {
+                        const badge = jQuery('<span>')
+                            .addClass('homework-update-badge')
+                            .attr('title', '有新提交需要重新评分')
+                            .text('★');
+
+                        const iconElement = anchorElement.children('i.jstree-icon').first();
+                        if (iconElement.length > 0) {
+                            iconElement.after(badge);
+                        } else {
+                            anchorElement.prepend(badge);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (node.children && node.children.length > 0) {
+            node.children.forEach(function(childId) {
+                addBadgeToNode(childId);
+            });
+        }
+    }
+
+    const rootNodes = tree.get_node('#').children;
+    rootNodes.forEach(function(nodeId) {
+        addBadgeToNode(nodeId);
+    });
+
+    console.log('Homework update badges added');
+};
+
 // 显示作业类型修改模态框
 window.showHomeworkTypeModal = function(nodeId, currentType) {
     const tree = jQuery('#directory-tree').jstree(true);
@@ -197,6 +249,9 @@ window.updateHomeworkType = function(nodeId, folderName, homeworkType, modal) {
                 
                 // 重新渲染标签
                 window.addHomeworkTypeLabels();
+                if (typeof window.addHomeworkUpdateBadges === 'function') {
+                    window.addHomeworkUpdateBadges();
+                }
                 
                 // 1秒后自动关闭模态框
                 setTimeout(function() {

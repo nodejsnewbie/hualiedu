@@ -7,7 +7,9 @@
 ### 环境要求
 - Python 3.13（使用 uv 管理）
 - Django 4.2.20
-- SQLite (开发) / PostgreSQL (生产)
+- MySQL 8
+- Redis 7
+- Podman（用于本地管理 MySQL/Redis）
 
 ### 安装和运行
 
@@ -18,10 +20,13 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 # 2. 安装依赖
 make install
 
-# 3. 初始化数据库
+# 3. 启动 MySQL/Redis
+./scripts/podman_services.sh
+
+# 4. 初始化数据库
 make migrate
 
-# 4. 启动开发服务器
+# 5. 启动开发服务器
 make runserver
 ```
 
