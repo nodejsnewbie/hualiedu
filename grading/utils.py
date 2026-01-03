@@ -180,6 +180,62 @@ class GitHandler:
             return False
 
     @staticmethod
+    def commit_and_push(repo_path, message, branch=None, paths=None):
+        """提交并推送指定路径的更改"""
+        try:
+            if branch and not GitHandler.ensure_branch(repo_path, branch):
+                logger.error(f"切换到分支 {branch} 失败: {repo_path}")
+                return False
+
+            status_cmd = ["git", "status", "--porcelain"]
+            if paths:
+                status_cmd.extend(paths if isinstance(paths, list) else [paths])
+            status_result = subprocess.run(
+                status_cmd, cwd=repo_path, capture_output=True, text=True
+            )
+            if status_result.returncode != 0:
+                logger.error(f"git status 失败: {status_result.stderr}")
+                return False
+
+            if not status_result.stdout.strip():
+                logger.info("无可提交的更改，跳过推送")
+                return True
+
+            add_cmd = ["git", "add"]
+            if paths:
+                add_cmd.extend(paths if isinstance(paths, list) else [paths])
+            else:
+                add_cmd.append("-A")
+            add_result = subprocess.run(add_cmd, cwd=repo_path, capture_output=True, text=True)
+            if add_result.returncode != 0:
+                logger.error(f"git add 失败: {add_result.stderr}")
+                return False
+
+            commit_result = subprocess.run(
+                ["git", "commit", "-m", message],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+            if commit_result.returncode != 0:
+                logger.error(f"git commit 失败: {commit_result.stderr}")
+                return False
+
+            push_cmd = ["git", "push"]
+            if branch:
+                push_cmd.extend(["origin", branch])
+            push_result = subprocess.run(push_cmd, cwd=repo_path, capture_output=True, text=True)
+            if push_result.returncode != 0:
+                logger.error(f"git push 失败: {push_result.stderr}")
+                return False
+
+            logger.info("评分更改已推送到远程仓库")
+            return True
+        except Exception as e:
+            logger.error(f"提交推送失败: {str(e)}")
+            return False
+
+    @staticmethod
     def checkout_branch(repo_path, branch):
         """切换分支"""
         try:

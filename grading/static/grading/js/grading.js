@@ -378,14 +378,14 @@ window.handleGradeInfo = function(gradeInfo) {
     console.log('评分信息:', gradeInfo);
     console.log('当前评分方式:', gradeMode);
     console.log('当前评分:', selectedGrade);
+    console.log('识别为实验报告:', gradeInfo.is_lab_report);
+    window.handleGradeInfo.lastArg = gradeInfo;
 
     // 检查文件是否被锁定
-    if (gradeInfo.locked) {
-        console.log('文件已被锁定，禁用所有评分功能');
-        // 设置全局锁定状态
+    if (gradeInfo.locked && gradeInfo.format_valid === false) {
+        console.log('文件已被锁定且格式未修复，禁用评分功能');
         isFileLocked = true;
         
-        // 禁用所有评分按钮
         $('.grade-button').prop('disabled', true).addClass('disabled');
         $('.grade-mode-btn').prop('disabled', true).addClass('disabled');
         $('#add-grade-to-file').prop('disabled', true);
@@ -393,13 +393,22 @@ window.handleGradeInfo = function(gradeInfo) {
         $('#teacher-comment-btn').prop('disabled', true);
         $('#ai-score-btn').prop('disabled', true);
         
-        // 显示锁定提示（使用固定ID以便后续检查）
-        const lockMessage = '<div id="file-lock-warning" class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误已被锁定</strong><br>不允许修改评分和评价。如需解锁，请让学生重新提交正确格式的作业。</div>';
-        // 移除旧的锁定提示（如果存在）
+        const lockMessage = '<div id="file-lock-warning" class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误已被锁定</strong><br>请先修复实验报告格式，再修改评分和评价。</div>';
         $('#file-lock-warning').remove();
-        // 在文件内容前添加锁定提示
         $('#file-content').prepend(lockMessage);
         return;
+    } else if (gradeInfo.locked) {
+        console.log('文件已被锁定但格式已修复，允许教师覆盖修改');
+        isFileLocked = false;
+        const lockMessage = '<div id="file-lock-warning" class="alert alert-warning mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误被标记</strong><br>格式已修复，教师可覆盖修改评分与评价。</div>';
+        $('#file-lock-warning').remove();
+        $('#file-content').prepend(lockMessage);
+        $('.grade-button').prop('disabled', false).removeClass('disabled');
+        $('.grade-mode-btn').prop('disabled', false).removeClass('disabled');
+        $('#add-grade-to-file').prop('disabled', false);
+        $('#cancel-grade').prop('disabled', false);
+        $('#teacher-comment-btn').prop('disabled', false);
+        $('#ai-score-btn').prop('disabled', false);
     } else {
         // 如果文件未锁定，移除可能存在的锁定提示
         isFileLocked = false;
@@ -902,7 +911,7 @@ window.addGradeToFile = function(grade) {
         return;
     }
 
-    if (isLabReport && !hasComment) {
+    if (isLabReport) {
         $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
         $('#teacherCommentModal').modal('show');
         return;
@@ -995,6 +1004,12 @@ window.addGradeToFile = function(grade) {
                     loadFile(currentFilePath);
                 }
             } else {
+                if (response.message && response.message.includes('实验报告必须添加评价')) {
+                    pendingConfirmForComment = true;
+                    $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+                    $('#teacherCommentModal').modal('show');
+                    return;
+                }
                 showError(response.message);
             }
         },
@@ -1370,7 +1385,7 @@ document.addEventListener('DOMContentLoaded', function() {
         $(this).addClass('active');
         selectedGrade = grade;
         
-        if (isLabReport && !hasComment) {
+        if (isLabReport) {
             pendingConfirmForComment = true;
             $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
             $('#teacherCommentModal').modal('show');
@@ -1425,7 +1440,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        if (isLabReport && !hasComment) {
+        if (isLabReport) {
             pendingConfirmForComment = true;
             $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
             $('#teacherCommentModal').modal('show');

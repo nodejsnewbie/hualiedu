@@ -202,6 +202,25 @@ def update_file_grade_status(repository, relative_path, course_name=None, user=N
         logger.warning(f"更新评分状态失败: {e}")
 
 
+def push_grade_changes(repository, full_path):
+    if not repository or not repository.is_git_repository():
+        return
+
+    repo_root = repository.get_full_path()
+    try:
+        rel_path = os.path.relpath(full_path, repo_root)
+    except Exception:
+        rel_path = None
+
+    message = f"评分更新: {rel_path or os.path.basename(full_path)}"
+    GitHandler.commit_and_push(
+        repo_root,
+        message=message,
+        branch=repository.branch or None,
+        paths=rel_path,
+    )
+
+
 def maybe_sync_repository(repository, request=None, min_interval_seconds=60):
     """按需同步 Git 仓库，避免频繁拉取。
 
@@ -688,6 +707,19 @@ def get_course_type_from_name(course_name):
     return "theory"
 
 
+def _extract_homework_folder(file_path, base_dir):
+    try:
+        rel_path = os.path.relpath(file_path, base_dir)
+        path_parts = rel_path.split(os.sep)
+        if not path_parts:
+            return None
+        if len(path_parts) >= 2 and ("班" in path_parts[0] or "class" in path_parts[0].lower()):
+            return path_parts[1]
+        return path_parts[0]
+    except Exception:
+        return None
+
+
 def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, base_dir=None):
     """
     综合判断文件是否是实验报告
@@ -707,6 +739,9 @@ def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, b
         bool: 是否是实验报告
     """
     # 方法1：根据作业批次类型判断（最准确）
+    if course_name and not homework_folder and file_path and base_dir:
+        homework_folder = _extract_homework_folder(file_path, base_dir)
+
     if course_name and homework_folder:
         try:
             from grading.models import Course, Homework
@@ -1455,8 +1490,37 @@ def _get_repo_head_commit(repository):
     return None
 
 
+def _file_changed_since_commit(repository, rel_path, last_commit, current_head):
+    repo_root = repository.get_full_path()
+    if not last_commit or not current_head:
+        return False
+    if not GitHandler.is_git_repo(repo_root):
+        return False
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--name-only", f"{last_commit}..{current_head}", "--", rel_path],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            logger.warning(f"git diff 失败: {result.stderr}")
+            return False
+        return bool(result.stdout.strip())
+    except Exception as e:
+        logger.warning(f"检测提交变更失败: {e}")
+        return False
+
+
 def _file_has_updates(
-    repository, rel_path, abs_path, repo_rel_prefix="", current_head=None, base_dir=None
+    repository,
+    rel_path,
+    abs_path,
+    repo_rel_prefix="",
+    current_head=None,
+    base_dir=None,
+    course_name=None,
 ):
     """判断单个文件是否有更新（相对上次评分）。"""
     if not repository or not rel_path:
@@ -1476,13 +1540,18 @@ def _file_has_updates(
         ).first()
 
         if not status:
-            grade_info = get_file_grade_info(abs_path, base_dir=base_dir)
+            grade_info = get_file_grade_info(
+                abs_path, base_dir=base_dir, course_name=course_name
+            )
             if grade_info.get("has_grade"):
                 return False
             return True
 
         if current_head and status.last_graded_commit and current_head != status.last_graded_commit:
-            return True
+            if _file_changed_since_commit(
+                repository, rel_path, status.last_graded_commit, current_head
+            ):
+                return True
 
         if status.last_graded_at and os.path.getmtime(abs_path) > status.last_graded_at.timestamp():
             return True
@@ -1734,6 +1803,7 @@ def get_directory_tree(
                             repo_rel_prefix=repo_rel_prefix,
                             current_head=current_head,
                             base_dir=repo_base_dir,
+                            course_name=course_name,
                         ):
                             node["data"] = node.get("data", {})
                             node["data"]["has_updates"] = True
@@ -2105,7 +2175,7 @@ def get_directory_tree_view(request):
         return JsonResponse({"children": []}, safe=False)
 
 
-def get_file_grade_info(full_path, base_dir=None):
+def get_file_grade_info(full_path, base_dir=None, course_name=None):
     """获取文件中的评分信息
 
     Args:
@@ -2129,10 +2199,13 @@ def get_file_grade_info(full_path, base_dir=None):
             "locked": False,  # 是否被锁定（格式错误的实验报告）
             "is_lab_report": False,  # 是否为实验报告
             "has_comment": False,  # 是否有评价
+            "format_valid": True,  # 格式是否有效（锁定时用于放行教师修改）
         }
 
         # 判断是否为实验报告
-        grade_info["is_lab_report"] = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        grade_info["is_lab_report"] = is_lab_report_file(
+            course_name=course_name, file_path=full_path, base_dir=base_dir
+        )
 
         if ext == ".docx":
             # 对于 Word 文档，使用 python-docx 检查评分
@@ -2140,7 +2213,7 @@ def get_file_grade_info(full_path, base_dir=None):
                 doc = Document(full_path)
 
                 # 首先检查表格中是否有评分
-                for table in doc.tables:
+                for table in _iter_tables(doc):
                     for row_idx, row in enumerate(table.rows):
                         for col_idx, cell in enumerate(row.cells):
                             cell_text = cell.text.strip()
@@ -2263,6 +2336,10 @@ def get_file_grade_info(full_path, base_dir=None):
                                     except (ValueError, TypeError):
                                         grade_info["grade_type"] = "letter"  # 默认
 
+                        if grade_info["locked"]:
+                            cell, _, _, _ = find_teacher_signature_cell(doc)
+                            grade_info["format_valid"] = bool(cell)
+
                         if grade_info["has_grade"] and grade_info["locked"]:
                             break
 
@@ -2303,6 +2380,10 @@ def get_file_grade_info(full_path, base_dir=None):
                                     except (ValueError, TypeError):
                                         grade_info["grade_type"] = "letter"  # 默认
                                 break
+
+                if grade_info["locked"]:
+                    cell, _, _, _ = find_teacher_signature_cell(doc)
+                    grade_info["format_valid"] = bool(cell)
 
             except Exception as e:
                 logger.error(f"检查文件评分失败: {str(e)}")
@@ -2506,7 +2587,7 @@ def get_file_content(request):
                         final_content = css + f'<div class="docx-content">{html_content}</div>'
 
                         # 获取文件评分信息
-                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir, course_name=course)
 
                         logger.info(f"成功处理Word文档，内容长度: {len(final_content)}")
                         logger.info(f"评分信息: {grade_info}")
@@ -2563,7 +2644,7 @@ def get_file_content(request):
                                     html_content.append(f"<p>{text}</p>")
 
                         # 处理表格
-                        for table in doc.tables:
+                        for table in _iter_tables(doc):
                             html_content.append("<table>")
                             for row in table.rows:
                                 html_content.append("<tr>")
@@ -2635,7 +2716,7 @@ def get_file_content(request):
                         """
 
                         final_content = css + "".join(html_content)
-                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir, course_name=course)
 
                         return JsonResponse(
                             {
@@ -2702,7 +2783,7 @@ def get_file_content(request):
                         )
 
                         # 获取文件评分信息
-                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir, course_name=course)
 
                         return JsonResponse(
                             {
@@ -2726,7 +2807,9 @@ def get_file_content(request):
                         with open(full_path, "r", encoding="utf-8") as f:
                             content = f.read()
                             # 获取文件评分信息
-                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                            grade_info = get_file_grade_info(
+                                full_path, base_dir=base_dir, course_name=course
+                            )
 
                             return JsonResponse(
                                 {
@@ -2741,7 +2824,9 @@ def get_file_content(request):
                         try:
                             with open(full_path, "r", encoding="gbk") as f:
                                 content = f.read()
-                                grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                                grade_info = get_file_grade_info(
+                                    full_path, base_dir=base_dir, course_name=course
+                                )
                                 return JsonResponse(
                                     {
                                         "status": "success",
@@ -2833,7 +2918,9 @@ def get_file_content(request):
                             final_content = css + f'<div class="docx-content">{html_content}</div>'
 
                             # 获取文件评分信息
-                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                            grade_info = get_file_grade_info(
+                                full_path, base_dir=base_dir, course_name=course
+                            )
 
                             return JsonResponse(
                                 {
@@ -2887,7 +2974,7 @@ def get_file_content(request):
                                         html_content.append(f"<p>{text}</p>")
 
                             # 处理表格
-                            for table in doc.tables:
+                            for table in _iter_tables(doc):
                                 html_content.append('<table class="table table-bordered">')
                                 for row in table.rows:
                                     html_content.append("<tr>")
@@ -3030,7 +3117,7 @@ def get_file_content(request):
                 try:
                     with open(full_path, "r", encoding="utf-8") as f:
                         content = f.read()
-                        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                        grade_info = get_file_grade_info(full_path, base_dir=base_dir, course_name=course)
                         return JsonResponse(
                             {
                                 "status": "success",
@@ -3043,7 +3130,9 @@ def get_file_content(request):
                     try:
                         with open(full_path, "r", encoding="gbk") as f:
                             content = f.read()
-                            grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+                            grade_info = get_file_grade_info(
+                                full_path, base_dir=base_dir, course_name=course
+                            )
                             return JsonResponse(
                                 {
                                     "status": "success",
@@ -3093,6 +3182,7 @@ def add_grade_to_file(request):
     # 获取请求参数
     grade = request.POST.get("grade")
     grade_type = request.POST.get("grade_type", "letter")  # 评分方式：letter, text 或 percentage
+    repo_id = request.POST.get("repo_id")
     course = request.POST.get("course", "").strip()
     is_lab_report = request.POST.get("is_lab_report", "false").lower() == "true"
 
@@ -3157,6 +3247,12 @@ def add_grade_to_file(request):
                     cell, _, _, _ = find_teacher_signature_cell(doc)
                     if cell:
                         _, existing_comment, _ = extract_grade_and_comment_from_cell(cell)
+                    else:
+                        for paragraph in doc.paragraphs:
+                            text = paragraph.text.strip()
+                            if text.startswith(("教师评价：", "AI评价：", "评价：")):
+                                existing_comment = text.split("：", 1)[1].strip()
+                                break
             except Exception as e:
                 logger.warning(f"检查现有评价时出错: {e}")
 
@@ -3178,14 +3274,21 @@ def add_grade_to_file(request):
             base_dir=base_dir,
             is_lab_report=is_lab_report,
             teacher_name=get_teacher_display_name(request.user),
+            allow_locked=True,
         )
+
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                push_grade_changes(repo, full_path)
+            except Repository.DoesNotExist:
+                logger.warning("评分推送失败：仓库不存在或无权限")
 
         logger.info(f"✅ 成功添加评分: {full_path}, 评分={grade}, 评分方式={grade_type}")
 
         file_type = get_file_extension(full_path)
         response_data = {"file_type": file_type, "grade": grade, "grade_type": grade_type}
 
-        repo_id = request.POST.get("repo_id")
         if repo_id:
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
@@ -3613,7 +3716,15 @@ def save_teacher_comment(request):
             base_dir=base_dir,
             is_lab_report=is_lab_report,
             teacher_name=get_teacher_display_name(request.user),
+            allow_locked=True,
         )
+
+        if repo_id:
+            try:
+                repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+                push_grade_changes(repo, full_path)
+            except Repository.DoesNotExist:
+                logger.warning("教师评价推送失败：仓库不存在或无权限")
 
         if repo_id:
             try:
@@ -3649,9 +3760,11 @@ def get_file_grade_info_api(request):
         if request.method == "GET":
             path = request.GET.get("path")
             repo_id = request.GET.get("repo_id")
+            course = request.GET.get("course", "").strip()
         else:
             path = request.POST.get("path")
             repo_id = request.POST.get("repo_id")
+            course = request.POST.get("course", "").strip()
 
         if not path:
             logger.error("未提供文件路径")
@@ -3689,7 +3802,7 @@ def get_file_grade_info_api(request):
             return JsonResponse({"has_grade": False, "error": "路径不是文件"}, status=400)
 
         # 获取评分信息
-        grade_info = get_file_grade_info(full_path, base_dir=base_dir)
+        grade_info = get_file_grade_info(full_path, base_dir=base_dir, course_name=course)
         logger.info(f"评分信息: {grade_info}")
 
         # 构造前端期望的响应格式
@@ -3697,6 +3810,8 @@ def get_file_grade_info_api(request):
             "has_grade": bool(grade_info.get("grade")),
             "grade": grade_info.get("grade", ""),
             "grade_type": grade_info.get("grade_type", ""),
+            "locked": bool(grade_info.get("locked")),
+            "format_valid": bool(grade_info.get("format_valid", True)),
         }
 
         return JsonResponse(response_data)
@@ -4452,6 +4567,7 @@ def ai_score_view(request):
                 try:
                     repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
                     update_file_grade_status(repo, path, user=request.user)
+                    push_grade_changes(repo, full_path)
                 except Repository.DoesNotExist:
                     logger.warning("AI评分状态更新失败：仓库不存在或无权限")
             logger.info("AI评分成功")
@@ -4968,6 +5084,14 @@ def update_lab_report_comment(doc, comment):
         return False
 
 
+def _iter_tables(container):
+    for table in container.tables:
+        yield table
+        for row in table.rows:
+            for cell in row.cells:
+                yield from _iter_tables(cell)
+
+
 def find_teacher_signature_cell(doc):
     """
     查找实验报告中包含"教师（签字）"的单元格
@@ -4975,16 +5099,59 @@ def find_teacher_signature_cell(doc):
     Returns:
         tuple: (cell, table_idx, row_idx, col_idx) 如果找到，否则返回 (None, None, None, None)
     """
-    for table_idx, table in enumerate(doc.tables):
+    def normalize_text(text):
+        if not text:
+            return ""
+        normalized = text.replace("（", "(").replace("）", ")").replace("：", ":")
+        normalized = normalized.replace("\u3000", "")  # 全角空格
+        normalized = "".join(normalized.split())
+        return normalized
+
+    def has_signature_marker(text):
+        normalized = normalize_text(text)
+        return (
+            "教师(签字)" in normalized
+            or "教师签字" in normalized
+            or ("教师" in normalized and "签字" in normalized)
+            or "指导教师" in normalized
+            or "指导老师" in normalized
+        )
+
+    for table_idx, table in enumerate(_iter_tables(doc)):
         for row_idx, row in enumerate(table.rows):
             for col_idx, cell in enumerate(row.cells):
                 cell_text = cell.text.strip()
-                if "教师（签字）" in cell_text or "教师(签字)" in cell_text:
+                if has_signature_marker(cell_text):
                     logger.info(
                         f"找到'教师（签字）'单元格: 表格{table_idx+1}, 行{row_idx+1}, 列{col_idx+1}"
                     )
                     return cell, table_idx, row_idx, col_idx
     return None, None, None, None
+
+
+def find_teacher_signature_paragraph(doc):
+    def normalize_text(text):
+        if not text:
+            return ""
+        normalized = text.replace("（", "(").replace("）", ")").replace("：", ":")
+        normalized = normalized.replace("\u3000", "")
+        normalized = "".join(normalized.split())
+        return normalized
+
+    def has_signature_marker(text):
+        normalized = normalize_text(text)
+        return (
+            "教师(签字)" in normalized
+            or "教师签字" in normalized
+            or ("教师" in normalized and "签字" in normalized)
+            or "指导教师" in normalized
+            or "指导老师" in normalized
+        )
+
+    for paragraph in doc.paragraphs:
+        if has_signature_marker(paragraph.text):
+            return paragraph
+    return None
 
 
 def extract_grade_and_comment_from_cell(cell):
@@ -5022,8 +5189,16 @@ def extract_grade_and_comment_from_cell(cell):
 
     # 步骤1：查找"教师（签字）"所在行的索引
     signature_line_idx = -1
+    def is_signature_line(text):
+        normalized = text.replace("（", "(").replace("）", ")").replace("：", ":")
+        normalized = normalized.replace("\u3000", "")
+        normalized = "".join(normalized.split())
+        return "教师(签字)" in normalized or "教师签字" in normalized or (
+            "教师" in normalized and "签字" in normalized
+        )
+
     for i, line in enumerate(lines):
-        if "教师（签字）" in line or "教师(签字)" in line:
+        if is_signature_line(line):
             signature_line_idx = i
             # 保留从这行开始的所有内容（包括"教师（签字）："）
             signature_text = "\n".join(lines[i:])
@@ -5143,6 +5318,52 @@ def write_to_teacher_signature_cell(
     logger.info("=== 教师签字单元格写入完成 ===")
 
 
+def write_grade_and_comment_paragraphs(doc, grade, comment, anchor_paragraph=None):
+    def remove_paragraph(paragraph):
+        element = paragraph._element
+        element.getparent().remove(element)
+
+    # 如果提供了锚点，优先将评分/评价写在签字前
+    existing_grade_paragraph = None
+    existing_comment_paragraph = None
+    for paragraph in doc.paragraphs:
+        text = paragraph.text.strip()
+        if text.startswith(("老师评分：", "评定分数：")):
+            existing_grade_paragraph = paragraph
+        elif text.startswith(("教师评价：", "AI评价：", "评价：")):
+            existing_comment_paragraph = paragraph
+
+    if anchor_paragraph:
+        if existing_grade_paragraph:
+            remove_paragraph(existing_grade_paragraph)
+            existing_grade_paragraph = None
+        if existing_comment_paragraph:
+            remove_paragraph(existing_comment_paragraph)
+            existing_comment_paragraph = None
+
+    if not existing_grade_paragraph and grade:
+        if anchor_paragraph:
+            comment_anchor = anchor_paragraph
+            if comment:
+                comment_anchor = anchor_paragraph.insert_paragraph_before(
+                    f"教师评价：{comment}"
+                )
+            comment_anchor.insert_paragraph_before(f"老师评分：{grade}")
+        else:
+            doc.add_paragraph(f"老师评分：{grade}")
+    elif existing_grade_paragraph:
+        existing_grade_paragraph.text = f"老师评分：{grade}" if grade else ""
+
+    if comment:
+        if not existing_comment_paragraph:
+            if anchor_paragraph and not grade:
+                anchor_paragraph.insert_paragraph_before(f"教师评价：{comment}")
+            elif not anchor_paragraph:
+                doc.add_paragraph(f"教师评价：{comment}")
+        elif existing_comment_paragraph:
+            existing_comment_paragraph.text = f"教师评价：{comment}"
+
+
 def write_grade_to_lab_report(doc, grade, comment=None, teacher_name=None, sign_time=None):
     """
     将评分写入实验报告的表格中
@@ -5207,7 +5428,13 @@ def write_grade_to_lab_report(doc, grade, comment=None, teacher_name=None, sign_
 
 
 def write_grade_and_comment_to_file(
-    full_path, grade=None, comment=None, base_dir=None, is_lab_report=None, teacher_name=None
+    full_path,
+    grade=None,
+    comment=None,
+    base_dir=None,
+    is_lab_report=None,
+    teacher_name=None,
+    allow_locked=False,
 ):
     """
     统一的函数：向文件写入评分和评价
@@ -5242,8 +5469,18 @@ def write_grade_and_comment_to_file(
         for paragraph in doc.paragraphs:
             text = paragraph.text.strip()
             if "【格式错误-已锁定】" in text or "格式错误-已锁定" in text:
-                logger.warning(f"文件已锁定，不允许修改: {full_path}")
-                return "此文件因格式错误已被锁定，不允许修改评分和评价"
+                if not allow_locked:
+                    logger.warning(f"文件已锁定，不允许修改: {full_path}")
+                    return "此文件因格式错误已被锁定，不允许修改评分和评价"
+
+                cell, _, _, _ = find_teacher_signature_cell(doc)
+                if not cell:
+                    logger.warning(f"文件已锁定且格式未修复: {full_path}")
+                    return "实验报告格式仍不正确，请先修复格式后再修改评分和评价"
+
+                # 格式已修复，清除锁定标记
+                paragraph.text = ""
+                logger.info(f"文件已锁定但格式已修复，允许教师覆盖修改: {full_path}")
 
         # 如果是实验报告，使用特殊的表格格式
         format_warning = None
@@ -5280,41 +5517,7 @@ def write_grade_and_comment_to_file(
         # 只有在非实验报告或实验报告写入失败时才执行
         if not is_lab_report:
             logger.info(f">>> 按普通作业格式写入段落: 评分={grade}, 评价={comment}")
-            # 检查是否已有评分段落
-            has_existing_grade = False
-            for paragraph in doc.paragraphs:
-                text = paragraph.text.strip()
-                if text.startswith(("老师评分：", "评定分数：")):
-                    has_existing_grade = True
-                    # 更新现有评分段落的内容
-                    paragraph.text = f"老师评分：{grade}" if grade else ""
-                    logger.info(f"更新现有评分段落: {paragraph.text}")
-                    break
-
-            # 如果没有现有评分，添加新的
-            if not has_existing_grade and grade:
-                doc.add_paragraph(f"老师评分：{grade}")
-                logger.info(f"添加新评分段落: 老师评分：{grade}")
-
-            # 处理评价：只有明确提供了评价时才更新
-            if comment:
-                # 检查是否已有评价段落
-                has_existing_comment = False
-                for paragraph in doc.paragraphs:
-                    text = paragraph.text.strip()
-                    if text.startswith(("教师评价：", "AI评价：", "评价：")):
-                        has_existing_comment = True
-                        # 更新现有评价段落的内容
-                        paragraph.text = f"教师评价：{comment}"
-                        logger.info(f"更新现有评价段落: {paragraph.text}")
-                        break
-
-                # 如果没有现有评价，添加新的
-                if not has_existing_comment:
-                    doc.add_paragraph(f"教师评价：{comment}")
-                    logger.info(f"添加新评价段落: 教师评价：{comment}")
-            else:
-                logger.info("未提供评价，保留原有评价（如果存在）")
+            write_grade_and_comment_paragraphs(doc, grade, comment)
 
             doc.save(full_path)
             logger.info(f"已写入Word文档: 评分={grade}, 评价={comment or '无'}")
@@ -7303,6 +7506,7 @@ def ai_score_view(request):
                 comment=f"AI评价：{ai_comment}",
                 base_dir=base_dir,
                 teacher_name=get_teacher_display_name(request.user),
+                allow_locked=True,
             )
 
             if repo_id:
@@ -7311,6 +7515,7 @@ def ai_score_view(request):
                     update_file_grade_status(
                         repo, file_path, course_name=course, user=request.user
                     )
+                    push_grade_changes(repo, full_path)
                 except Repository.DoesNotExist:
                     logger.warning("AI评分状态更新失败：仓库不存在或无权限")
 
@@ -7529,6 +7734,7 @@ def batch_ai_score_view(request):
                         base_dir=base_dir,
                         is_lab_report=is_lab_report,
                         teacher_name=get_teacher_display_name(request.user),
+                        allow_locked=True,
                     )
 
                     if repo:
@@ -7536,6 +7742,7 @@ def batch_ai_score_view(request):
                         update_file_grade_status(
                             repo, rel_path, course_name=course, user=request.user
                         )
+                        push_grade_changes(repo, file_path)
 
                     results["success"] += 1
                     result_detail = {
