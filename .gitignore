@@ -119,9 +119,8 @@ test_repo*/
 [!-~]/
 *[^A-Za-z0-9_.-]*/
 
-# Directories with control characters or special encodings (like 0ñ\x04)
-# These are typically created by buggy test code
-*[\x00-\x1F\x7F-\x9F]*/
+# Directories with control characters (buggy test artifacts)
+*[[:cntrl:]]*/
 
 # Specific test course directories
 其他课程/
