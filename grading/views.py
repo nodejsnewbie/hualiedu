@@ -23,7 +23,10 @@ from django.views import View  # noqa: F401
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from docx import Document
-from volcenginesdkarkruntime import Ark
+try:
+    from volcenginesdkarkruntime import Ark
+except ImportError:  # Optional dependency for AI scoring
+    Ark = None
 
 from .models import GlobalConfig, GradeTypeConfig, Repository
 from .utils import FileHandler, GitHandler
@@ -2835,6 +2838,9 @@ def rate_limit_api_request():
 
 
 def volcengine_score_homework(content):
+    if Ark is None:
+        logger.error("volcenginesdkarkruntime is not installed; AI scoring unavailable")
+        return None, "AI scoring dependency missing; please contact an admin"
     logger.info("=== 开始调用火山引擎AI评分 ===")
     logger.info(f"输入内容长度: {len(content)}")
     logger.info(f"输入内容前100字符: {content[:100]}...")

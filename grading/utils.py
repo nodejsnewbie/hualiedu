@@ -7,6 +7,10 @@ import subprocess
 
 import mammoth
 from django.conf import settings
+try:
+    from volcenginesdkarkruntime import Ark
+except ImportError:  # Optional dependency for AI scoring
+    Ark = None
 
 from .config import FILE_ENCODINGS
 
@@ -16,7 +20,7 @@ logger = logging.getLogger(__name__)
 class GitHandler:
     @staticmethod
     def is_git_repo(path):
-        """检查目录是否为 Git 仓库"""
+        """Docstring."""
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--is-inside-work-tree"],
@@ -30,25 +34,25 @@ class GitHandler:
 
     @staticmethod
     def clone_repo(source_path, target_path):
-        """克隆本地仓库到目标路径"""
+        """Docstring."""
         try:
-            logger.info(f"开始克隆仓库: 从 {source_path} 到 {target_path}")
+            logger.info(f"开始克隆仓?? ??{source_path} ??{target_path}")
 
-            # 检查源路径是否为 Git 仓库
+            # 检查源路径是否??Git 仓库
             if not os.path.exists(source_path):
                 raise Exception(f"源路径不存在: {source_path}")
 
             if not GitHandler.is_git_repo(source_path):
                 raise Exception(f"源路径不是有效的 Git 仓库: {source_path}")
 
-            # 如果目标路径已存在，先删除
+            # 如果目标路径已存在，先删??
             if os.path.exists(target_path):
                 logger.info(f"目标路径已存在，正在删除: {target_path}")
                 shutil.rmtree(target_path)
 
-            # 创建父目录
+            # 创建父目??
             parent_dir = os.path.dirname(target_path)
-            logger.info(f"创建父目录: {parent_dir}")
+            logger.info(f"创建父目?? {parent_dir}")
             os.makedirs(parent_dir, exist_ok=True)
 
             # 使用 git clone --local 克隆本地仓库
@@ -72,7 +76,7 @@ class GitHandler:
 
     @staticmethod
     def get_repo_name(path):
-        """获取仓库名称"""
+        """Docstring."""
         try:
             # 尝试获取远程仓库名称
             result = subprocess.run(
@@ -82,7 +86,7 @@ class GitHandler:
                 text=True,
             )
             if result.returncode == 0 and result.stdout:
-                # 从远程 URL 中提取仓库名
+                # 从远??URL 中提取仓库名
                 repo_name = os.path.splitext(os.path.basename(result.stdout.strip()))[0]
             else:
                 # 如果没有远程仓库，使用目录名
@@ -95,7 +99,7 @@ class GitHandler:
 
     @staticmethod
     def clone_repo_remote(repo_name, target_path):
-        """克隆远程仓库"""
+        """Docstring."""
         try:
             result = subprocess.run(
                 ["git", "clone", repo_name, target_path], capture_output=True, text=True
@@ -106,7 +110,7 @@ class GitHandler:
 
     @staticmethod
     def pull_repo(repo_path):
-        """拉取仓库更新"""
+        """Docstring."""
         try:
             result = subprocess.run(["git", "pull"], cwd=repo_path, capture_output=True, text=True)
             return result.returncode == 0
@@ -115,7 +119,7 @@ class GitHandler:
 
     @staticmethod
     def checkout_branch(repo_path, branch):
-        """切换分支"""
+        """Docstring."""
         try:
             result = subprocess.run(
                 ["git", "checkout", branch], cwd=repo_path, capture_output=True, text=True
@@ -126,7 +130,7 @@ class GitHandler:
 
     @staticmethod
     def get_branches(repo_path):
-        """获取分支列表"""
+        """Docstring."""
         try:
             result = subprocess.run(
                 ["git", "branch", "-r"], cwd=repo_path, capture_output=True, text=True
@@ -139,12 +143,12 @@ class GitHandler:
 
     @staticmethod
     def is_git_repository(path):
-        """检查是否为Git仓库"""
+        """Docstring."""
         return os.path.exists(os.path.join(path, ".git"))
 
     @staticmethod
     def get_current_branch(path):
-        """获取当前分支"""
+        """Docstring."""
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"],
@@ -162,8 +166,8 @@ class GitHandler:
 class FileHandler:
     @staticmethod
     def is_safe_path(path):
-        """检查路径是否在允许的范围内"""
-        # 检查路径是否在媒体目录内
+        """Docstring."""
+        # 检查路径是否在媒体目录??
         media_root = getattr(settings, "MEDIA_ROOT", "")
         if media_root:
             try:
@@ -173,12 +177,12 @@ class FileHandler:
             except (OSError, ValueError):
                 return False
 
-        # 如果没有设置MEDIA_ROOT，使用基本检查
+        # 如果没有设置MEDIA_ROOT，使用基本检??
         return not path.startswith("/") and ".." not in path
 
     @staticmethod
     def get_mime_type(file_path):
-        """获取文件的MIME类型"""
+        """Docstring."""
         try:
             mime_type, _ = mimetypes.guess_type(file_path)
             return mime_type
@@ -187,7 +191,7 @@ class FileHandler:
 
     @staticmethod
     def get_file_size(file_path):
-        """获取文件大小"""
+        """Docstring."""
         try:
             return os.path.getsize(file_path)
         except OSError:
@@ -195,26 +199,26 @@ class FileHandler:
 
     @staticmethod
     def create_directory_if_not_exists(path):
-        """创建目录（如果不存在）"""
+        """Docstring."""
         os.makedirs(path, exist_ok=True)
 
     @staticmethod
     def validate_file_extension(file_path):
-        """验证文件扩展名"""
+        """Docstring."""
         allowed_extensions = {".txt", ".pdf", ".docx", ".doc"}
         ext = os.path.splitext(file_path)[1].lower()
         return ext in allowed_extensions
 
     @staticmethod
     def is_allowed_file(file_path):
-        """检查文件是否允许访问"""
+        """Docstring."""
         # 检查文件扩展名
         allowed_extensions = {".txt", ".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg", ".gif"}
         ext = os.path.splitext(file_path)[1].lower()
         if ext not in allowed_extensions:
             return False
 
-        # 检查文件大小
+        # 检查文件大??
         max_size = getattr(settings, "MAX_UPLOAD_SIZE", 10 * 1024 * 1024)  # 10MB
         try:
             if os.path.getsize(file_path) > max_size:
@@ -226,7 +230,7 @@ class FileHandler:
 
     @staticmethod
     def read_text_file(file_path):
-        """读取文本文件"""
+        """Docstring."""
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return f.read()
@@ -242,7 +246,7 @@ class FileHandler:
 
     @staticmethod
     def handle_docx(file_path):
-        """处理DOCX文件"""
+        """Docstring."""
         try:
             # 使用mammoth转换DOCX为HTML
             with open(file_path, "rb") as docx_file:
@@ -270,12 +274,12 @@ class FileHandler:
 class DirectoryHandler:
     @staticmethod
     def ensure_directory(path):
-        """确保目录存在"""
+        """Docstring."""
         os.makedirs(path, exist_ok=True)
 
     @staticmethod
     def get_directory_structure(root_dir):
-        """获取目录结构"""
+        """Docstring."""
         structure = []
 
         try:
@@ -315,19 +319,19 @@ class DirectoryHandler:
 class GradeHandler:
     @staticmethod
     def validate_grade(grade):
-        """验证成绩格式"""
+        """Docstring."""
         valid_grades = ["A", "B", "C", "D", "E"]
         return grade.upper() in valid_grades if grade else False
 
     @staticmethod
     def get_grade_description(grade):
-        """获取成绩描述"""
-        descriptions = {"A": "优秀", "B": "良好", "C": "中等", "D": "及格", "E": "不及格"}
+        """Docstring."""
+        descriptions = {"A": "Excellent", "B": "Good", "C": "Average", "D": "Pass", "E": "Fail"}
         return descriptions.get(grade.upper(), "未知")
 
 
 def read_word_file(file_path):
-    """读取Word文件内容"""
+    """Docstring."""
     try:
         from docx import Document
 
@@ -339,12 +343,13 @@ def read_word_file(file_path):
 
 
 def get_ai_evaluation(api_key, text):
-    """获取AI评价"""
+    """Docstring."""
+    if Ark is None:
+        logger.error("volcenginesdkarkruntime is not installed; AI scoring unavailable")
+        return "AI scoring dependency missing; please contact an admin"
     try:
-        from volcenginesdkarkruntime import Ark
-
         client = Ark(api_key=api_key)
-        prompt = f"请阅读以下内容并给出成绩和 50 字以内的评价：\n{text}"
+        prompt = f"请阅读以下内容并给出成绩??50 字以内的评价：\n{text}"
 
         response = client.chat.completions.create(
             model="deepseek-r1-250528",
@@ -358,7 +363,7 @@ def get_ai_evaluation(api_key, text):
 
 
 def process_multiple_files(api_key, file_paths):
-    """批量处理多个文件"""
+    """Docstring."""
     results = []
 
     for file_path in file_paths:
@@ -375,3 +380,4 @@ def process_multiple_files(api_key, file_paths):
             )
 
     return results
+
