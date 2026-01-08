@@ -15,6 +15,7 @@ let isFileLocked = false;  // 当前文件是否被锁定（格式错误）
 let isLabReport = false;  // 当前文件是否为实验报告
 let hasComment = false;  // 当前文件是否有评价
 let pendingConfirmForComment = false;  // 确定按钮触发的评价流程
+let pendingDefaultLabComment = null;  // 实验报告默认评价待应用
 
 // 将关键变量暴露到window对象，供其他脚本使用
 window.currentCourse = null;
@@ -292,6 +293,37 @@ function disableTeacherCommentButton() {
   console.log('Disabling teacher comment button');
   $('#teacher-comment-btn').prop('disabled', true);
   checkTeacherCommentButton();
+}
+
+// 切换实验报告默认评价区块显示
+function toggleLabReportDefaultComments() {
+  const container = $('#labReportDefaultComments');
+  if (!container.length) {
+    return;
+  }
+  if (isLabReport) {
+    container.show();
+  } else {
+    container.hide();
+  }
+}
+
+// 获取实验报告默认评价
+function getDefaultLabReportComment(grade) {
+  if (!grade) {
+    return '';
+  }
+  const button = $(`.default-lab-comment[data-grade="${grade}"]`);
+  const commentFromDom = button.data('comment');
+  if (commentFromDom) {
+    return commentFromDom;
+  }
+  const fallback = {
+    A: '实验内容完整，原理理解准确，步骤清晰，数据分析充分，结论可靠，报告规范。',
+    B: '实验内容基本完整，原理理解较好，步骤清楚，数据分析较为充分，结论合理，报告较规范。',
+    C: '实验内容完成一般，原理理解有欠缺，步骤描述不够清晰，数据分析不足，结论不够充分，需改进。'
+  };
+  return fallback[grade] || '';
 }
 
 // 启用AI评分按钮
@@ -1386,6 +1418,8 @@ document.addEventListener('DOMContentLoaded', function() {
         selectedGrade = grade;
         
         if (isLabReport) {
+            const defaultComment = getDefaultLabReportComment(grade);
+            pendingDefaultLabComment = defaultComment ? { grade: grade, comment: defaultComment } : null;
             pendingConfirmForComment = true;
             $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
             $('#teacherCommentModal').modal('show');
@@ -1532,6 +1566,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
+    // 实验报告默认评价按钮
+    $(document).on('click', '.default-lab-comment', function() {
+        if (!isLabReport) {
+            return;
+        }
+        const grade = $(this).data('grade');
+        const comment = $(this).data('comment');
+        if (!comment) {
+            return;
+        }
+
+        if (grade) {
+            switchGradeMode('letter');
+            setGradeButtonState(grade);
+        }
+
+        $('#teacherCommentText').val(comment).trigger('input').focus();
+        console.log('已应用实验报告默认评价:', grade);
+    });
+
     // 新增：绑定AI评分按钮点击事件
     $(document).on('click', '#ai-score-btn', function() {
         console.log('=== AI评分按钮被点击 ===');
@@ -1614,6 +1668,8 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('=== 教师评价模态框显示 ===');
         console.log('当前文件路径:', currentFilePath);
         console.log('输入框元素:', $('#teacherCommentText').length);
+
+        toggleLabReportDefaultComments();
 
         if (currentFilePath) {
             console.log('开始加载评价内容...');
@@ -1749,6 +1805,13 @@ window.loadTeacherComment = function(filePath) {
                 if (!currentValue || currentValue === '暂无评价') {
                     console.log('文件中没有找到评价内容，显示提示信息');
                     $('#teacherCommentText').attr('placeholder', '文件中没有找到评价内容，请在此输入新的评价...');
+                }
+
+                if (pendingDefaultLabComment && (!currentValue || currentValue === '暂无评价')) {
+                    $('#teacherCommentText')
+                        .val(pendingDefaultLabComment.comment)
+                        .trigger('input');
+                    pendingDefaultLabComment = null;
                 }
             } else {
                 console.error('获取评价失败:', response.message);

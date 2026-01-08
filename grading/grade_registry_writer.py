@@ -30,6 +30,11 @@ except ImportError:
         HAS_MSVCRT = False
 
 from docx import Document
+from grading.docx_grade_utils import (
+    extract_grade_and_comment_from_cell,
+    extract_grade_from_homework_doc,
+    find_teacher_signature_cell,
+)
 from openpyxl import load_workbook
 from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -486,23 +491,12 @@ class GradeFileProcessor:
 
         需求: 4.5, 5.2, 7.1-7.7
         """
-        # 在表格中查找"教师（签字）："单元格
-        for table in doc.tables:
-            for row in table.rows:
-                for i, cell in enumerate(row.cells):
-                    cell_text = cell.text.strip()
-                    if "教师（签字）" in cell_text or "教师签字" in cell_text:
-                        # 检查同一单元格或下一个单元格中的成绩
-                        grade = GradeFileProcessor._find_grade_in_text(cell_text)
-                        if grade:
-                            return grade
+        cell, _, _, _ = find_teacher_signature_cell(doc)
+        if not cell:
+            return None
 
-                        # 检查下一个单元格
-                        if i + 1 < len(row.cells):
-                            next_cell_text = row.cells[i + 1].text.strip()
-                            grade = GradeFileProcessor._find_grade_in_text(next_cell_text)
-                            if grade:
-                                return grade
+        grade, _, _ = extract_grade_and_comment_from_cell(cell)
+        return grade
 
         return None
 
@@ -584,16 +578,7 @@ class GradeFileProcessor:
     @staticmethod
     def _extract_grade_from_homework(doc: Document) -> Optional[str]:
         """从普通作业提取成绩"""
-        # 从文档末尾向前查找"老师评分："标记
-        paragraphs = doc.paragraphs
-        for paragraph in reversed(paragraphs):
-            text = paragraph.text.strip()
-            if "老师评分" in text or "教师评分" in text:
-                grade = GradeFileProcessor._find_grade_in_text(text)
-                if grade:
-                    return grade
-
-        return None
+        return extract_grade_from_homework_doc(doc)
 
     @staticmethod
     def _find_grade_in_text(text: str) -> Optional[str]:
@@ -609,33 +594,34 @@ class GradeFileProcessor:
         """
         import re
 
-        # 首先尝试匹配百分制成绩（数字）
-        # 匹配模式：非负数字（可能带小数点），可能后面跟"分"
-        # 使用(?<![0-9-])确保前面不是数字或负号，避免匹配"-10"中的"10"
-        percentage_pattern = r"(?<![0-9-])(\d+(?:\.\d+)?)\s*分?"
-        percentage_matches = re.findall(percentage_pattern, text)
-
-        for match in percentage_matches:
-            try:
-                grade_value = float(match)
-                # 验证百分制范围
-                if (
-                    GradeFileProcessor.PERCENTAGE_MIN
-                    <= grade_value
-                    <= GradeFileProcessor.PERCENTAGE_MAX
-                ):
-                    # 格式化为整数或保留一位小数
-                    if grade_value == int(grade_value):
-                        return str(int(grade_value))
-                    else:
-                        return f"{grade_value:.1f}"
-            except (ValueError, TypeError):
-                continue
-
-        # 如果没有找到百分制成绩，尝试匹配字母或文字等级
+        # 优先匹配字母或文字等级，避免误把"第1次"等数字当成绩
         for grade in GradeFileProcessor.VALID_GRADES:
             if grade in text:
                 return grade
+
+        # 尝试匹配百分制成绩（数字）
+        # 优先匹配带关键字或“分”的数字，避免误匹配编号/日期
+        patterns = []
+        if re.search(r"(评分|成绩|得分)", text):
+            patterns.append(r"(?:评分|成绩|得分)[：:\s]*([0-9]+(?:\.[0-9]+)?)")
+        patterns.append(r"(?<![0-9-])([0-9]+(?:\.[0-9]+)?)\s*分")
+
+        for pattern in patterns:
+            for match in re.findall(pattern, text):
+                try:
+                    grade_value = float(match)
+                    # 验证百分制范围
+                    if (
+                        GradeFileProcessor.PERCENTAGE_MIN
+                        <= grade_value
+                        <= GradeFileProcessor.PERCENTAGE_MAX
+                    ):
+                        # 格式化为整数或保留一位小数
+                        if grade_value == int(grade_value):
+                            return str(int(grade_value))
+                        return f"{grade_value:.1f}"
+                except (ValueError, TypeError):
+                    continue
 
         return None
 

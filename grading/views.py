@@ -41,6 +41,7 @@ except ImportError:
     ARK_AVAILABLE = False
     logger.warning("volcenginesdkarkruntime not available, AI scoring will be disabled")
 
+from grading import docx_grade_utils
 from grading.services.grade_registry_writer_service import (
     BatchGradeProgressTracker,
     GradeRegistryWriterService,
@@ -5093,40 +5094,7 @@ def _iter_tables(container):
 
 
 def find_teacher_signature_cell(doc):
-    """
-    查找实验报告中包含"教师（签字）"的单元格
-
-    Returns:
-        tuple: (cell, table_idx, row_idx, col_idx) 如果找到，否则返回 (None, None, None, None)
-    """
-    def normalize_text(text):
-        if not text:
-            return ""
-        normalized = text.replace("（", "(").replace("）", ")").replace("：", ":")
-        normalized = normalized.replace("\u3000", "")  # 全角空格
-        normalized = "".join(normalized.split())
-        return normalized
-
-    def has_signature_marker(text):
-        normalized = normalize_text(text)
-        return (
-            "教师(签字)" in normalized
-            or "教师签字" in normalized
-            or ("教师" in normalized and "签字" in normalized)
-            or "指导教师" in normalized
-            or "指导老师" in normalized
-        )
-
-    for table_idx, table in enumerate(_iter_tables(doc)):
-        for row_idx, row in enumerate(table.rows):
-            for col_idx, cell in enumerate(row.cells):
-                cell_text = cell.text.strip()
-                if has_signature_marker(cell_text):
-                    logger.info(
-                        f"找到'教师（签字）'单元格: 表格{table_idx+1}, 行{row_idx+1}, 列{col_idx+1}"
-                    )
-                    return cell, table_idx, row_idx, col_idx
-    return None, None, None, None
+    return docx_grade_utils.find_teacher_signature_cell(doc)
 
 
 def find_teacher_signature_paragraph(doc):
@@ -5155,167 +5123,19 @@ def find_teacher_signature_paragraph(doc):
 
 
 def extract_grade_and_comment_from_cell(cell):
-    """
-    从"教师（签字）"单元格中提取评分、评价和签字文本
-
-    逻辑：
-    1. 查找"教师（签字）："所在的行
-    2. 提取"教师（签字）："之前的内容（评分和评价）
-    3. 保留"教师（签字）："及之后的内容（签字文本）
-
-    单元格格式：
-    第一行：评分（如"A"）
-    第二行：评价（如"作业完成得非常出色..."）
-    第三行及之后：教师（签字）：时间：...
-
-    Returns:
-        tuple: (grade, comment, signature_text)
-            - grade: 评分（如"A"、"优秀"等），如果没有则为None
-            - comment: 评价内容，如果没有则为None
-            - signature_text: "教师（签字）："及之后的完整文本
-    """
-    logger.info("=== 开始提取单元格内容 ===")
-
-    cell_text = cell.text.strip()
-    lines = cell_text.split("\n")
-
-    logger.info(f"单元格总行数: {len(lines)}")
-    for i, line in enumerate(lines):
-        logger.info(f"  第{i+1}行: {line[:50]}...")
-
-    grade = None
-    comment = None
-    signature_text = ""
-
-    # 步骤1：查找"教师（签字）"所在行的索引
-    signature_line_idx = -1
-    def is_signature_line(text):
-        normalized = text.replace("（", "(").replace("）", ")").replace("：", ":")
-        normalized = normalized.replace("\u3000", "")
-        normalized = "".join(normalized.split())
-        return "教师(签字)" in normalized or "教师签字" in normalized or (
-            "教师" in normalized and "签字" in normalized
-        )
-
-    for i, line in enumerate(lines):
-        if is_signature_line(line):
-            signature_line_idx = i
-            # 保留从这行开始的所有内容（包括"教师（签字）："）
-            signature_text = "\n".join(lines[i:])
-            logger.info(f"✓ 找到'教师（签字）'在第{i+1}行")
-            break
-
-    if signature_line_idx == -1:
-        logger.warning("✗ 单元格中未找到'教师（签字）'文本")
-        return None, None, ""
-
-    # 步骤2：提取"教师（签字）"之前的内容（评分和评价）
-    before_signature = lines[:signature_line_idx]
-    logger.info(f"'教师（签字）'之前有{len(before_signature)}行内容")
-
-    # 第一行是评分
-    if len(before_signature) >= 1:
-        potential_grade = before_signature[0].strip()
-        # 验证是否是有效的评分
-        if potential_grade in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
-            grade = potential_grade
-            logger.info(f"✓ 提取到评分（第一行）: {grade}")
-        else:
-            logger.warning(f"✗ 第一行不是有效评分: {potential_grade}")
-
-    # 第二行是评价
-    if len(before_signature) >= 2:
-        comment = before_signature[1].strip()
-        if comment:
-            logger.info(f"✓ 提取到评价（第二行）: {comment[:50]}...")
-        else:
-            logger.info("✗ 第二行为空，无评价")
-    else:
-        logger.info("✗ 没有第二行，无评价")
-
-    # 步骤3：保留签字文本
-    logger.info(f"✓ 提取到签字文本: {signature_text[:50]}...")
-    logger.info("=== 单元格内容提取完成 ===")
-
-    return grade, comment, signature_text
+    return docx_grade_utils.extract_grade_and_comment_from_cell(cell)
 
 
 def build_teacher_signature_text(teacher_name, sign_time):
-    if not teacher_name:
-        teacher_name = ""
-    date_str = sign_time.strftime("%Y年%m月%d日") if sign_time else ""
-    return f"教师（签字）：{teacher_name}\n时间：{date_str}"
+    return docx_grade_utils.build_teacher_signature_text(teacher_name, sign_time)
 
 
 def write_to_teacher_signature_cell(
     cell, grade, comment, signature_text, teacher_name=None, sign_time=None
 ):
-    """
-    向"教师（签字）"单元格写入评分和评价
-
-    逻辑：
-    1. 清空单元格中"教师（签字）："之前的所有内容
-    2. 按顺序写入：评分（第一行）、评价（第二行）、教师（签字）：文本（第三行及之后）
-
-    写入格式：
-    第一行：评分（如"A"）
-    第二行：评价（如"作业完成得非常出色..."）
-    第三行及之后：教师（签字）：时间：...（保留原有内容）
-    """
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt
-
-    logger.info("=== 开始写入教师签字单元格 ===")
-    logger.info(f"评分: {grade}")
-    logger.info(f"评价: {comment}")
-    logger.info(f"签字文本: {signature_text[:50] if signature_text else '无'}...")
-
-    # 步骤1：清空单元格的所有段落（清除"教师（签字）："之前的所有内容）
-    for paragraph in cell.paragraphs:
-        paragraph.clear()
-
-    # 删除多余的段落，只保留一个空段落
-    while len(cell.paragraphs) > 1:
-        p = cell.paragraphs[-1]._element
-        p.getparent().remove(p)
-
-    logger.info("已清空单元格内容")
-
-    # 步骤2：按顺序写入新内容
-
-    # 第一行：评分（居中显示，加粗）
-    p1 = cell.paragraphs[0]
-    run1 = p1.add_run(grade)
-    run1.font.size = Pt(14)
-    run1.bold = True
-    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    logger.info(f"✓ 已写入评分（第一行）: {grade}")
-
-    # 第二行：评价（左对齐）
-    if comment:
-        p2 = cell.add_paragraph()
-        run2 = p2.add_run(comment)
-        run2.font.size = Pt(11)
-        p2.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        logger.info(f"✓ 已写入评价（第二行）: {comment[:50]}...")
-    else:
-        logger.info("✗ 未提供评价，跳过第二行")
-
-    # 第三行及之后：写入"教师（签字）"与时间
-    signature_output = signature_text
-    if teacher_name or sign_time:
-        signature_output = build_teacher_signature_text(teacher_name, sign_time)
-
-    if signature_output:
-        p3 = cell.add_paragraph()
-        run3 = p3.add_run(signature_output)
-        run3.font.size = Pt(10)
-        p3.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        logger.info(f"✓ 已写入签字文本（第三行及之后）: {signature_output[:50]}...")
-    else:
-        logger.warning("✗ 未找到签字文本，可能导致格式不完整")
-
-    logger.info("=== 教师签字单元格写入完成 ===")
+    return docx_grade_utils.write_to_teacher_signature_cell(
+        cell, grade, comment, signature_text, teacher_name=teacher_name, sign_time=sign_time
+    )
 
 
 def write_grade_and_comment_paragraphs(doc, grade, comment, anchor_paragraph=None):

@@ -173,6 +173,14 @@
                         <div class="modal-body">
                             <div class="mb-3">
                                 <label for="teacherCommentText" class="form-label">评价内容</label>
+                                <div class="mb-2" id="labReportDefaultComments" style="display: none;">
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <button type="button" class="btn btn-outline-success btn-sm default-lab-comment" data-grade="A" data-comment="实验内容完整，原理理解准确，步骤清晰，数据分析充分，结论可靠，报告规范。">A 默认评价</button>
+                                        <button type="button" class="btn btn-outline-primary btn-sm default-lab-comment" data-grade="B" data-comment="实验内容基本完整，原理理解较好，步骤清楚，数据分析较为充分，结论合理，报告较规范。">B 默认评价</button>
+                                        <button type="button" class="btn btn-outline-secondary btn-sm default-lab-comment" data-grade="C" data-comment="实验内容完成一般，原理理解有欠缺，步骤描述不够清晰，数据分析不足，结论不够充分，需改进。">C 默认评价</button>
+                                    </div>
+                                    <div class="form-text text-muted">仅实验报告显示，可一键填入评价并同步评分。</div>
+                                </div>
                                 <textarea class="form-control" id="teacherCommentText" rows="5" placeholder="请输入评价内容..."></textarea>
                             </div>
                             <div class="mb-3">
