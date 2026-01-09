@@ -58,7 +58,7 @@ function Ensure-Podman {
             -e "MYSQL_DATABASE=$mysqlDatabase" `
             -e "MYSQL_USER=$mysqlUser" `
             -e "MYSQL_PASSWORD=$mysqlPassword" `
-            -v "$mysqlVolume:/var/lib/mysql" `
+            -v "${mysqlVolume}:/var/lib/mysql" `
             $mysqlImage | Out-Null
     } else {
         podman start $mysqlContainer | Out-Null

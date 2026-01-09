@@ -99,8 +99,13 @@ class GitHandler:
             return os.path.basename(path)
 
     @staticmethod
+<<<<<<< HEAD
     def clone_repo_remote(repo_name, target_path):
         """Docstring."""
+=======
+    def clone_repo_remote(repo_name, target_path, branch=None):
+        """克隆远程仓库"""
+>>>>>>> aa3908763b6527542feba3f3d5b76f75166e31cc
         try:
             result = subprocess.run(
                 ["git", "clone", repo_name, target_path], capture_output=True, text=True
@@ -110,8 +115,13 @@ class GitHandler:
             return False
 
     @staticmethod
+<<<<<<< HEAD
     def pull_repo(repo_path):
         """Docstring."""
+=======
+    def pull_repo(repo_path, branch=None):
+        """拉取仓库更新，自动处理未提交的更改"""
+>>>>>>> aa3908763b6527542feba3f3d5b76f75166e31cc
         try:
             result = subprocess.run(["git", "pull"], cwd=repo_path, capture_output=True, text=True)
             return result.returncode == 0
@@ -381,4 +391,3 @@ def process_multiple_files(api_key, file_paths):
             )
 
     return results
-
