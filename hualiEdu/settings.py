@@ -37,6 +37,19 @@ ALLOWED_EXTENSIONS = set(
     os.environ.get("ALLOWED_EXTENSIONS", "txt,pdf,png,jpg,jpeg,gif,doc,docx").split(",")
 )
 
+# 缓存配置（Redis）
+REDIS_URL = os.environ.get("REDIS_URL", "redis://127.0.0.1:6379/0")
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": REDIS_URL,
+        "TIMEOUT": int(os.environ.get("CACHE_TIMEOUT", "300")),  # 默认5分钟
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    }
+}
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -48,6 +61,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "grading",
+    "toolbox",
     "corsheaders",
 ]
 
@@ -60,6 +74,7 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "grading.middleware.MultiTenantMiddleware",
 ]
 
 ROOT_URLCONF = "hualiEdu.urls"
@@ -86,12 +101,28 @@ WSGI_APPLICATION = "hualiEdu.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+if DATABASE_URL.startswith("sqlite"):
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "NAME": os.environ.get("MYSQL_DATABASE", "huali_edu"),
+            "USER": os.environ.get("MYSQL_USER", "huali_user"),
+            "PASSWORD": os.environ.get("MYSQL_PASSWORD", "change-this-to-secure-password"),
+            "HOST": os.environ.get("MYSQL_HOST", os.environ.get("DATABASE_HOST", "127.0.0.1")),
+            "PORT": os.environ.get("MYSQL_PORT", os.environ.get("DATABASE_PORT", "3306")),
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
+    }
 
 
 # Password validation
@@ -239,6 +270,7 @@ JAZZMIN_SETTINGS = {
     "site_brand": "华理教育",
     "welcome_sign": "欢迎使用华理教育管理系统",
     "copyright": "华理教育",
+    "use_google_fonts_cdn": False,
     "icons": {
         "auth": "fas fa-users-cog",
         "auth.user": "fas fa-user",

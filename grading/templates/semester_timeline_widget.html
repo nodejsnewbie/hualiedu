@@ -1,0 +1,146 @@
+{% load semester_tags %}
+
+<div class="semester-timeline-widget">
+    <div class="timeline-header">
+        <h4>📅 学期时间线</h4>
+    </div>
+
+    <div class="timeline-content">
+        {% if timeline %}
+            {% for item in timeline %}
+            <div class="timeline-item {% if item.is_current %}current{% else %}{{ item.relation }}{% endif %}">
+                <div class="timeline-marker">
+                    {% if item.is_current %}
+                        📍
+                    {% elif item.relation == 'past' %}
+                        ✅
+                    {% elif item.relation == 'future' %}
+                        ⏳
+                    {% else %}
+                        📅
+                    {% endif %}
+                </div>
+                <div class="timeline-content-item">
+                    <div class="semester-name">{{ item.semester.name }}</div>
+                    <div class="semester-dates">
+                        {{ item.semester.start_date|date:"m月d日" }} - {{ item.semester.end_date|date:"m月d日" }}
+                    </div>
+                    {% if item.semester.season_text %}
+                    <div class="semester-season">{{ item.semester.season_text }}</div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <div class="no-timeline">
+                <span>暂无学期信息</span>
+            </div>
+        {% endif %}
+    </div>
+
+    {% if next_semester %}
+    <div class="timeline-footer">
+        <div class="next-info">
+            <strong>即将到来:</strong> {{ next_semester.semester.name }}
+            <span class="countdown">({{ next_semester.countdown_text }})</span>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<style>
+.semester-timeline-widget {
+    background: white;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.timeline-header h4 {
+    margin: 0 0 20px 0;
+    color: #333;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.timeline-item {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 15px;
+    padding: 10px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+}
+
+.timeline-item:hover {
+    background-color: #f8f9fa;
+}
+
+.timeline-item.current {
+    background-color: #e8f5e8;
+    border-left: 4px solid #28a745;
+}
+
+.timeline-item.past {
+    opacity: 0.7;
+}
+
+.timeline-item.future {
+    border-left: 4px solid #17a2b8;
+}
+
+.timeline-marker {
+    font-size: 18px;
+    margin-right: 12px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.timeline-content-item {
+    flex: 1;
+}
+
+.semester-name {
+    font-weight: 500;
+    color: #333;
+    margin-bottom: 4px;
+}
+
+.semester-dates {
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 2px;
+}
+
+.semester-season {
+    font-size: 11px;
+    color: #888;
+    background: #f0f0f0;
+    padding: 2px 6px;
+    border-radius: 10px;
+    display: inline-block;
+}
+
+.timeline-footer {
+    border-top: 1px solid #e0e0e0;
+    padding-top: 15px;
+    margin-top: 15px;
+}
+
+.next-info {
+    font-size: 14px;
+    color: #17a2b8;
+}
+
+.countdown {
+    font-size: 12px;
+    color: #666;
+}
+
+.no-timeline {
+    text-align: center;
+    color: #666;
+    padding: 20px;
+}
+</style>

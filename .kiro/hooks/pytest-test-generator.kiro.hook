@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Pytest Test Generator",
+  "description": "Automatically generates pytest test files when you save a new Python module in the project",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.py"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A Python module has been saved. Analyze the module at the changed file path and generate comprehensive pytest tests for it. \n\nInstructions:\n1. Read and understand the Python module that was just saved\n2. Identify all functions, classes, and methods that need testing\n3. Generate pytest test cases covering:\n   - Normal/happy path scenarios\n   - Edge cases and boundary conditions\n   - Error handling and exceptions\n   - Different input types and values\n4. Follow Django testing patterns if it's a Django module (use TestCase, fixtures, etc.)\n5. Use appropriate pytest fixtures and parametrize decorators\n6. Place the test file in the appropriate location:\n   - For app modules in grading/: place in grading/tests/test_<module_name>.py\n   - For app modules in toolbox/: place in toolbox/tests/test_<module_name>.py\n   - For project-level modules: place in tests/test_<module_name>.py\n7. Follow the project's testing conventions and import patterns\n8. Include docstrings explaining what each test validates\n9. Ensure tests are isolated and can run independently\n\nGenerate comprehensive, well-structured pytest tests that follow the project's conventions."
+  }
+}

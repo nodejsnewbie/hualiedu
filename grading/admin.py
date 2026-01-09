@@ -3,19 +3,36 @@ import os
 import shutil
 import subprocess
 import tempfile
-from urllib.parse import urlparse
 
 import git
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
-from django.http import HttpResponseForbidden, HttpResponseRedirect, JsonResponse
+from django.http import HttpResponseRedirect, JsonResponse
 from django.shortcuts import render
 from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html
 
-from .models import Assignment, GlobalConfig, Repository, Student, Submission
+from .models import (
+    Assignment,
+    Class,
+    CommentTemplate,
+    Course,
+    CourseSchedule,
+    CourseWeekSchedule,
+    GlobalConfig,
+    GradeTypeConfig,
+    Homework,
+    Repository,
+    Semester,
+    SemesterTemplate,
+    Student,
+    Submission,
+    Tenant,
+    TenantConfig,
+    UserProfile,
+)
 
 # 获取日志记录器
 logger = logging.getLogger(__name__)
@@ -28,26 +45,308 @@ class StudentAdmin(admin.ModelAdmin):
     list_filter = ["class_name"]
 
 
+class AssignmentForm(forms.ModelForm):
+    """作业配置表单
+
+    实现动态字段显示和密码加密处理。
+
+    Requirements:
+        - 2.2: 根据提交方式动态显示相关配置字段
+        - 10.7: 安全地加密存储Git认证凭据
+    """
+
+    # 添加一个非模型字段用于密码输入
+    git_password = forms.CharField(
+        label="Git密码",
+        required=False,
+        widget=forms.PasswordInput(
+            attrs={
+                "class": "vTextField",
+                "style": "width: 50%;",
+                "placeholder": "Git密码（可选，将加密存储）",
+                "autocomplete": "new-password",
+            }
+        ),
+        help_text="留空表示不修改已保存的密码",
+    )
+
+    class Meta:
+        model = Assignment
+        fields = [
+            "name",
+            "course",
+            "class_obj",
+            "storage_type",
+            "git_url",
+            "git_branch",
+            "git_username",
+            "base_path",
+            "description",
+            "is_active",
+        ]
+        widgets = {
+            "name": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "输入作业名称",
+                }
+            ),
+            "description": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "class": "vLargeTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "作业描述",
+                }
+            ),
+            "git_url": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "Git仓库URL（如：https://github.com/user/repo.git）",
+                }
+            ),
+            "git_branch": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 50%;",
+                    "placeholder": "分支名称（默认：main）",
+                }
+            ),
+            "git_username": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 50%;",
+                    "placeholder": "Git用户名（可选）",
+                }
+            ),
+            "base_path": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "文件系统基础路径（自动生成）",
+                    "readonly": "readonly",
+                }
+            ),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # 动态设置字段的required属性（Requirement 2.2）
+        storage_type = None
+        if self.instance and self.instance.pk:
+            storage_type = self.instance.storage_type
+        elif self.data:
+            storage_type = self.data.get("storage_type")
+
+        if storage_type == "git":
+            self.fields["git_url"].required = True
+            self.fields["base_path"].required = False
+        elif storage_type == "filesystem":
+            self.fields["git_url"].required = False
+            self.fields["base_path"].required = False
+        else:
+            # 默认情况
+            self.fields["git_url"].required = False
+            self.fields["base_path"].required = False
+
+        # 如果是编辑现有记录且有加密密码，显示提示
+        if self.instance and self.instance.pk and self.instance.git_password_encrypted:
+            self.fields["git_password"].help_text = (
+                "已保存加密密码。留空表示不修改，输入新密码将覆盖原密码"
+            )
+
+    def clean(self):
+        """验证表单数据"""
+        cleaned_data = super().clean()
+        storage_type = cleaned_data.get("storage_type")
+        git_url = cleaned_data.get("git_url")
+        course = cleaned_data.get("course")
+        class_obj = cleaned_data.get("class_obj")
+        name = cleaned_data.get("name")
+
+        # 验证Git方式必须提供URL（Requirement 2.4）
+        if storage_type == "git" and not git_url:
+            raise ValidationError("Git仓库方式必须提供仓库URL")
+
+        # 验证班级属于课程
+        if course and class_obj and class_obj.course != course:
+            raise ValidationError(f"班级 {class_obj.name} 不属于课程 {course.name}")
+
+        # 验证唯一性（在同一教师、课程、班级下名称唯一）
+        if (
+            name
+            and course
+            and class_obj
+            and hasattr(self.instance, "owner")
+            and self.instance.owner
+        ):
+            existing = Assignment.objects.filter(
+                owner=self.instance.owner,
+                course=course,
+                class_obj=class_obj,
+                name=name,
+                is_active=True,
+            )
+            if self.instance.pk:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise ValidationError(f"该课程和班级下已存在名为 '{name}' 的作业配置")
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        """保存时处理密码加密和路径生成
+
+        Requirements:
+            - 4.1: 自动生成文件系统基础路径
+            - 10.7: 加密存储Git密码
+        """
+        instance = super().save(commit=False)
+
+        # 如果是文件系统方式，自动生成base_path（Requirement 4.1）
+        if instance.storage_type == "filesystem":
+            from grading.assignment_utils import PathValidator
+
+            course_name = PathValidator.sanitize_name(instance.course.name)
+            class_name = PathValidator.sanitize_name(instance.class_obj.name)
+            instance.base_path = f"{course_name}/{class_name}/"
+
+        # 处理密码加密（Requirement 10.7）
+        git_password = self.cleaned_data.get("git_password")
+        if git_password:
+            # 用户输入了新密码，进行加密
+            from grading.assignment_utils import CredentialEncryption
+
+            try:
+                instance.git_password_encrypted = CredentialEncryption.encrypt(git_password)
+                logger.info(f"成功加密Git密码 for assignment: {instance.name}")
+            except Exception as e:
+                logger.error(f"加密Git密码失败: {str(e)}")
+                raise ValidationError(f"密码加密失败: {str(e)}")
+        # 如果没有输入新密码，保持原有的加密密码不变
+
+        if commit:
+            instance.save()
+        return instance
+
+    class Media:
+        js = ("admin/js/assignment_form.js",)
+
+
+@admin.register(Assignment)
 class AssignmentAdmin(admin.ModelAdmin):
-    list_display = ["name", "description", "due_date", "created_at"]
-    search_fields = ["name", "description"]
-    list_filter = ["due_date", "created_at"]
-    date_hierarchy = "due_date"
+    """作业配置管理界面"""
+
+    form = AssignmentForm
+    list_display = (
+        "name",
+        "course",
+        "class_obj",
+        "storage_type",
+        "owner",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("storage_type", "is_active", "course", "class_obj", "created_at")
+    search_fields = ("name", "description", "course__name", "class_obj__name", "owner__username")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at", "owner", "tenant")
+
+    fieldsets = (
+        (
+            "基本信息",
+            {
+                "fields": ("name", "course", "class_obj", "storage_type", "description"),
+                "description": "配置作业的基本信息和提交方式。",
+            },
+        ),
+        (
+            "Git仓库配置",
+            {
+                "fields": ("git_url", "git_branch", "git_username", "git_password"),
+                "classes": ("collapse", "git-storage-fields"),
+                "description": "当选择Git仓库方式时需要配置。密码将加密存储。",
+            },
+        ),
+        (
+            "文件系统配置",
+            {
+                "fields": ("base_path",),
+                "classes": ("collapse", "filesystem-storage-fields"),
+                "description": "文件系统方式的基础路径（自动生成）。",
+            },
+        ),
+        (
+            "状态和权限",
+            {
+                "fields": ("is_active", "owner", "tenant"),
+                "classes": ("collapse",),
+            },
+        ),
+        (
+            "系统信息",
+            {
+                "fields": ("created_at", "updated_at"),
+                "classes": ("collapse",),
+            },
+        ),
+    )
+
+    def get_queryset(self, request):
+        """只显示当前教师的作业配置"""
+        qs = super().get_queryset(request).select_related("course", "class_obj", "owner", "tenant")
+        if not request.user.is_superuser:
+            # 教师只能看到自己创建的作业配置
+            return qs.filter(owner=request.user, is_active=True)
+        return qs
+
+    def save_model(self, request, obj, form, change):
+        """保存时自动设置owner和tenant"""
+        if not change:  # 新建时
+            obj.owner = request.user
+            if hasattr(request.user, "profile"):
+                obj.tenant = request.user.profile.tenant
+        super().save_model(request, obj, form, change)
+
+    def has_add_permission(self, request):
+        """允许添加作业配置"""
+        return True
+
+    def has_change_permission(self, request, obj=None):
+        """允许修改作业配置"""
+        if obj is None:
+            return True
+        # 只能修改自己创建的作业配置
+        return request.user.is_superuser or obj.owner == request.user
+
+    def has_delete_permission(self, request, obj=None):
+        """允许删除作业配置"""
+        if obj is None:
+            return True
+        # 只能删除自己创建的作业配置
+        return request.user.is_superuser or obj.owner == request.user
+
+    def has_view_permission(self, request, obj=None):
+        """允许查看作业配置"""
+        return True
 
 
 class SubmissionAdmin(admin.ModelAdmin):
     list_display = [
-        "student",
-        "assignment",
+        "file_name",
+        "repository",
         "submitted_at",
         "grade",
-        "status",
+        "graded_at",
         "teacher_comment_action",
     ]
-    search_fields = ["student__name", "student__student_id", "assignment__name"]
-    list_filter = ["status", "submitted_at", "assignment"]
+    search_fields = ["file_name", "repository__name"]
+    list_filter = ["submitted_at", "graded_at", "repository"]
     date_hierarchy = "submitted_at"
-    raw_id_fields = ["student", "assignment"]
+    raw_id_fields = ["repository"]
 
     def get_urls(self):
         from django.urls import path
@@ -180,72 +479,40 @@ class GlobalConfigForm(forms.ModelForm):
 
     class Meta:
         model = GlobalConfig
-        fields = (
-            "https_username",
-            "https_password",
-            "ssh_key",
-            "ssh_key_file",
-            "repo_base_dir",
-        )
+        fields = ("key", "value", "description")
         widgets = {
-            "https_password": forms.PasswordInput(render_value=True),
-            "ssh_key": forms.Textarea(
-                attrs={
-                    "rows": 10,
-                    "cols": 80,
-                    "class": "vLargeTextField",
-                    "style": "display: block !important; width: 100%; height: 200px; font-family: monospace; margin-bottom: 10px;",
-                    "placeholder": "如果不上传文件，也可以直接粘贴 SSH 私钥内容到这里（支持 RSA 格式）",
-                }
-            ),
-            "repo_base_dir": forms.TextInput(
+            "key": forms.TextInput(
                 attrs={
                     "class": "vTextField",
                     "style": "width: 100%;",
-                    "placeholder": "例如：~/jobs",
+                    "placeholder": "配置键，如：default_repo_base_dir",
+                }
+            ),
+            "value": forms.Textarea(
+                attrs={
+                    "rows": 5,
+                    "cols": 80,
+                    "class": "vLargeTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "配置值",
+                }
+            ),
+            "description": forms.TextInput(
+                attrs={
+                    "class": "vTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "配置描述",
                 }
             ),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.instance and self.instance.pk and self.instance.ssh_key:
-            self.initial["ssh_key"] = self.instance.ssh_key
-            self.fields["ssh_key"].widget.attrs[
-                "style"
-            ] = "display: block !important; width: 100%; height: 200px; font-family: monospace; margin-bottom: 10px;"
-        # 设置 repo_base_dir 的默认值
+        # 设置默认值
         if not self.instance.pk:
-            self.initial["repo_base_dir"] = "~/jobs"
-
-    def clean(self):
-        """验证表单数据"""
-        cleaned_data = super().clean()
-
-        # 处理 SSH 密钥文件
-        ssh_key_file = cleaned_data.get("ssh_key_file")
-        if ssh_key_file:
-            try:
-                content = ssh_key_file.read().decode("utf-8")
-                cleaned_data["ssh_key"] = content
-            except Exception:
-                pass
-
-        return cleaned_data
-
-    def save(self, commit=True):
-        """保存表单数据"""
-        instance = super().save(commit=False)
-        if commit:
-            instance.save()
-        return instance
-
-    class Media:
-        css = {"all": ("grading/admin/css/grading_ssh_key_input.css",)}
-        js = (
-            "grading/admin/js/grading_ssh_key_input.js",
-            "grading/admin/js/grading_repo_dir_browser.js",
-        )
+            self.initial["key"] = "default_repo_base_dir"
+            self.initial["value"] = "~/jobs"
+            self.initial["description"] = "默认仓库基础目录"
 
 
 @admin.register(GlobalConfig)
@@ -253,26 +520,14 @@ class GlobalConfigAdmin(admin.ModelAdmin):
     """全局配置管理界面"""
 
     form = GlobalConfigForm
-    list_display = ("updated_at", "has_https_auth", "has_ssh_key", "get_repo_base_dir")
+    list_display = ("key", "value", "description", "updated_at")
     readonly_fields = ("created_at", "updated_at")
     fieldsets = (
         (
-            "认证信息",
+            "配置信息",
             {
-                "fields": (
-                    "https_username",
-                    "https_password",
-                    "ssh_key_file",
-                    "ssh_key",
-                ),
-                "description": "配置访问 Git 仓库所需的认证信息。可以使用 HTTPS 用户名密码或 SSH 私钥。",
-            },
-        ),
-        (
-            "仓库配置",
-            {
-                "fields": ("repo_base_dir",),
-                "description": "配置仓库克隆的基础目录。默认为 ~/jobs。",
+                "fields": ("key", "value", "description"),
+                "description": "配置全局系统参数。",
             },
         ),
         (
@@ -280,101 +535,56 @@ class GlobalConfigAdmin(admin.ModelAdmin):
             {
                 "fields": ("created_at", "updated_at"),
                 "classes": ("collapse",),
-                "description": "系统自动记录的时间信息。",
             },
         ),
     )
+    search_fields = ("key", "value", "description")
+    list_filter = ("updated_at",)
+    ordering = ("-updated_at",)
 
-    def has_https_auth(self, obj):
-        """检查是否配置了 HTTPS 认证"""
-        return bool(obj.https_username and obj.https_password)
 
-    has_https_auth.boolean = True
-    has_https_auth.short_description = "HTTPS 认证"
+@admin.register(Tenant)
+class TenantAdmin(admin.ModelAdmin):
+    """租户管理界面"""
 
-    def has_ssh_key(self, obj):
-        """检查是否配置了 SSH 密钥"""
-        return bool(obj.ssh_key)
+    list_display = ("name", "description", "is_active", "created_at", "updated_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name", "description")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
 
-    has_ssh_key.boolean = True
-    has_ssh_key.short_description = "SSH 密钥"
 
-    def get_repo_base_dir(self, obj):
-        """获取仓库基础目录"""
-        return obj.repo_base_dir
+@admin.register(UserProfile)
+class UserProfileAdmin(admin.ModelAdmin):
+    """用户配置文件管理界面"""
 
-    get_repo_base_dir.short_description = "仓库目录"
+    list_display = ("user", "tenant", "repo_base_dir", "is_tenant_admin", "created_at")
+    list_filter = ("tenant", "is_tenant_admin", "created_at")
+    search_fields = ("user__username", "user__email", "tenant__name")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at")
 
-    def get_readonly_fields(self, request, obj=None):
-        """获取只读字段"""
-        if obj:  # 编辑现有对象
-            return self.readonly_fields + ("created_at",)
-        return self.readonly_fields
 
-    def save_model(self, request, obj, form, change):
-        """保存模型时的处理"""
-        # 直接保存模型
-        super().save_model(request, obj, form, change)
-        messages.success(request, "全局配置已保存")
+@admin.register(TenantConfig)
+class TenantConfigAdmin(admin.ModelAdmin):
+    """租户配置管理界面"""
 
-    def has_add_permission(self, request):
-        """控制是否允许添加新对象"""
-        return not GlobalConfig.objects.exists()
+    list_display = ("tenant", "key", "value", "created_at", "updated_at")
+    list_filter = ("tenant", "created_at")
+    search_fields = ("tenant__name", "key", "value")
+    ordering = ("-updated_at",)
+    readonly_fields = ("created_at", "updated_at")
 
-    def has_delete_permission(self, request, obj=None):
-        """控制是否允许删除对象"""
-        return False
 
-    def get_urls(self):
-        """添加目录浏览 URL"""
-        urls = super().get_urls()
-        custom_urls = [
-            path(
-                "browse-directory/",
-                self.admin_site.admin_view(self.browse_directory),
-                name="grading_globalconfig_browse_directory",
-            ),
-        ]
-        return custom_urls + urls
+@admin.register(GradeTypeConfig)
+class GradeTypeConfigAdmin(admin.ModelAdmin):
+    """评分类型配置管理界面"""
 
-    def browse_directory(self, request):
-        """浏览目录"""
-        if not request.user.is_staff:
-            return HttpResponseForbidden("只有管理员可以浏览目录")
-
-        try:
-            # 获取要浏览的目录
-            dir_path = request.GET.get("dir", "")
-
-            # 如果是空路径，从用户家目录开始
-            if not dir_path:
-                dir_path = os.path.expanduser("~")
-
-            # 确保路径是绝对路径
-            if not os.path.isabs(dir_path):
-                dir_path = os.path.abspath(dir_path)
-
-            # 确保路径存在且是目录
-            if not os.path.exists(dir_path) or not os.path.isdir(dir_path):
-                return JsonResponse({"error": "目录不存在"}, status=400)
-
-            # 获取目录内容
-            items = []
-            for item in os.listdir(dir_path):
-                # 跳过隐藏目录（以.开头的目录）
-                if item.startswith("."):
-                    continue
-
-                full_path = os.path.join(dir_path, item)
-                if os.path.isdir(full_path):
-                    items.append({"name": item, "path": full_path, "type": "dir"})
-
-            # 按名称排序
-            items.sort(key=lambda x: x["name"].lower())
-
-            return JsonResponse({"current_path": dir_path, "items": items})
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
+    list_display = ("tenant", "class_identifier", "grade_type", "is_locked", "created_at")
+    list_filter = ("tenant", "grade_type", "is_locked", "created_at")
+    search_fields = ("tenant__name", "class_identifier")
+    ordering = ("-updated_at",)
+    readonly_fields = ("created_at", "updated_at")
 
 
 class RepositoryForm(forms.ModelForm):
@@ -382,167 +592,47 @@ class RepositoryForm(forms.ModelForm):
 
     class Meta:
         model = Repository
-        fields = ["url", "name", "branch"]
+        fields = ["name", "path", "description", "is_active"]
         widgets = {
             "name": forms.TextInput(
                 attrs={
                     "class": "vTextField",
                     "style": "width: 100%;",
-                    "placeholder": "输入仓库名称，如果不输入则自动从 URL 生成",
+                    "placeholder": "输入仓库名称",
                 }
             ),
-            "url": forms.TextInput(
+            "path": forms.TextInput(
                 attrs={
                     "class": "vTextField",
                     "style": "width: 100%;",
-                    "oninput": "updateRepoName(this.value)",
+                    "placeholder": "仓库路径，相对于基础目录",
+                }
+            ),
+            "description": forms.Textarea(
+                attrs={
+                    "rows": 3,
+                    "class": "vLargeTextField",
+                    "style": "width: 100%;",
+                    "placeholder": "仓库描述",
                 }
             ),
         }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # 如果是新建仓库，隐藏 branch 字段
-        if not self.instance.pk and "branch" in self.fields:
-            self.fields["branch"].widget = forms.HiddenInput()
-
-        # 如果是编辑仓库，禁用 URL 字段
-        if self.instance.pk:
-            self.fields["url"].widget.attrs["readonly"] = True
-            self.fields["url"].widget.attrs["style"] = "width: 100%; background-color: #f5f5f5;"
-            self.fields["url"].help_text = "编辑仓库时不允许修改 URL"
-
-        # 保存原始 URL，用于判断是否修改了 URL
-        if self.instance.pk:
-            self.instance._original_url = self.instance.url
-
     def clean(self):
         """验证表单数据"""
         cleaned_data = super().clean()
-        url = cleaned_data.get("url")
+        name = cleaned_data.get("name")
+        path = cleaned_data.get("path")
 
-        if url:
-            try:
-                # 验证 URL 格式
-                if url.startswith("git@"):
-                    # SSH 格式：git@host:username/repository
-                    if ":" not in url:
-                        raise ValidationError("无效的 SSH URL 格式")
-                    host, repo_path = url.split(":", 1)
-                    if not repo_path or "/" not in repo_path:
-                        raise ValidationError("无效的仓库路径")
-                else:
-                    # HTTPS 格式：https://host/username/repository
-                    parsed = urlparse(url)
-                    if not parsed.scheme or not parsed.netloc:
-                        raise ValidationError("无效的 HTTPS URL 格式")
-                    if not parsed.path or len(parsed.path.strip("/").split("/")) < 2:
-                        raise ValidationError("无效的仓库路径")
-
-                # 如果没有提供名称，从 URL 生成
-                if not cleaned_data.get("name"):
-                    cleaned_data["name"] = Repository.generate_name_from_url(url)
-
-                # 验证名称唯一性
-                name = cleaned_data.get("name")
-                if name:
-                    existing = Repository.objects.filter(name=name)
-                    if self.instance.pk:
-                        existing = existing.exclude(pk=self.instance.pk)
-                    if existing.exists():
-                        raise ValidationError("该仓库名称已存在")
-
-                # 验证 URL 唯一性
-                existing = Repository.objects.filter(url=url)
-                if self.instance.pk:
-                    existing = existing.exclude(pk=self.instance.pk)
-                if existing.exists():
-                    raise ValidationError("该仓库 URL 已存在")
-
-            except Exception as e:
-                raise ValidationError(f"URL 验证失败: {str(e)}")
+        if name and path:
+            # 验证名称唯一性（在同一租户内）
+            existing = Repository.objects.filter(name=name)
+            if self.instance.pk:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise ValidationError("该仓库名称已存在")
 
         return cleaned_data
-
-    def save(self, commit=True):
-        """保存表单数据"""
-        instance = super().save(commit=False)
-
-        # 只有在新建仓库或修改 URL 时才获取分支列表
-        if not instance.pk or instance.url != getattr(instance, "_original_url", None):
-            try:
-                config = GlobalConfig.objects.first()
-                if not config:
-                    raise ValueError("请先配置全局认证信息")
-
-                # 准备环境变量
-                env = os.environ.copy()
-                if instance.is_ssh_protocol() and config.ssh_key:
-                    # 创建临时 SSH 密钥文件
-                    ssh_key_path = os.path.join(os.path.expanduser("~"), ".ssh", "id_rsa_temp")
-                    os.makedirs(os.path.dirname(ssh_key_path), exist_ok=True)
-                    with open(ssh_key_path, "w") as f:
-                        f.write(config.ssh_key)
-                    os.chmod(ssh_key_path, 0o600)
-                    env["GIT_SSH_COMMAND"] = f"ssh -i {ssh_key_path} -o StrictHostKeyChecking=no"
-
-                # 使用 git ls-remote 获取分支列表
-                clone_url = instance.get_clone_url()
-                result = subprocess.run(
-                    ["git", "ls-remote", "--heads", clone_url],
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                )
-
-                if result.returncode == 0:
-                    # 解析分支列表
-                    branches = []
-                    for line in result.stdout.splitlines():
-                        if line.strip():
-                            # 提取分支名
-                            branch = line.split("refs/heads/")[-1]
-                            branches.append(branch)
-
-                    if not branches:
-                        raise ValueError("仓库没有可用的分支")
-
-                    # 设置分支列表
-                    instance.branches = branches
-
-                    # 设置默认分支
-                    if "main" in branches:
-                        instance.branch = "main"
-                    elif "master" in branches:
-                        instance.branch = "master"
-                    else:
-                        instance.branch = branches[0]
-                else:
-                    raise ValueError(f"获取分支列表失败：{result.stderr}")
-
-                # 清理临时文件
-                if instance.is_ssh_protocol() and config.ssh_key:
-                    try:
-                        os.remove(ssh_key_path)
-                    except Exception:
-                        pass
-
-            except Exception as e:
-                self.add_error(
-                    "url",
-                    format_html(
-                        '<div class="alert alert-danger" style="margin-top: 10px;">'
-                        "<strong>获取分支列表失败</strong><br>"
-                        "错误信息：{}"
-                        "</div>",
-                        str(e),
-                    ),
-                )
-                return instance
-
-        if commit:
-            instance.save()
-        return instance
 
     class Media:
         js = ("admin/js/repository_form.js",)
@@ -553,14 +643,16 @@ class RepositoryAdmin(admin.ModelAdmin):
     form = RepositoryForm
     list_display = (
         "name",
-        "url",
-        "get_branch",
-        "get_last_sync_time",
-        "get_sync_status",
-        "get_action_buttons",
+        "path",
+        "description",
+        "is_active",
+        "local_path_preview",
+        "created_at",
     )
-    readonly_fields = ("branch", "get_last_sync_time", "get_sync_status")
-    change_list_template = "admin/grading/repository/change_list.html"
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name", "path", "description")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at", "local_path_preview")
 
     def get_site_header(self):
         """自定义站点标题"""
@@ -659,12 +751,28 @@ class RepositoryAdmin(admin.ModelAdmin):
                 (
                     None,
                     {
-                        "fields": ("name", "url"),
-                        "description": "输入仓库的 URL，系统会自动提取仓库名称并使用默认分支。",
+                        "fields": ("name", "path", "description"),
+                        "description": "输入仓库信息，包括名称、路径和描述。",
                     },
                 ),
             )
-        return self.fieldsets  # 编辑页面显示所有字段
+        # 编辑页面：展示只读的本地路径预览
+        return (
+            (
+                None,
+                {
+                    "fields": ("name", "path", "description", "is_active", "local_path_preview"),
+                    "description": "仓库的本地路径预览基于全局基础目录与用户名自动计算。",
+                },
+            ),
+            (
+                "系统信息",
+                {
+                    "fields": ("created_at", "updated_at"),
+                    "classes": ("collapse",),
+                },
+            ),
+        )
 
     def get_last_sync_time(self, obj):
         return obj.last_sync_time if hasattr(obj, "last_sync_time") else None
@@ -714,6 +822,14 @@ class RepositoryAdmin(admin.ModelAdmin):
         )
 
     get_action_buttons.short_description = "操作"
+
+    def local_path_preview(self, obj):
+        try:
+            return obj.get_full_path()
+        except Exception:
+            return ""
+
+    local_path_preview.short_description = "本地路径预览"
 
     def clone_repository(self, request, repo_id):
         """克隆仓库"""
@@ -1263,7 +1379,223 @@ class RepositoryAdmin(admin.ModelAdmin):
 
 # 注册其他模型
 admin_site.register(Student, StudentAdmin)
-admin_site.register(Assignment, AssignmentAdmin)
 admin_site.register(Submission, SubmissionAdmin)
 admin_site.register(Repository, RepositoryAdmin)
 admin_site.register(GlobalConfig, GlobalConfigAdmin)
+
+
+class SemesterAdmin(admin.ModelAdmin):
+    """学期管理界面"""
+
+    list_display = ("name", "start_date", "end_date", "is_active", "created_at")
+    list_filter = ("is_active", "created_at")
+    search_fields = ("name",)
+    ordering = ("-start_date",)
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("name", "start_date", "end_date", "is_active", "created_at", "updated_at")
+
+    def save_model(self, request, obj, form, change):
+        """保存时确保只有一个活跃学期"""
+        if obj.is_active:
+            # 将其他学期设为非活跃
+            Semester.objects.exclude(pk=obj.pk).update(is_active=False)
+        super().save_model(request, obj, form, change)
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        """自定义编辑视图"""
+        try:
+            return super().change_view(request, object_id, form_url, extra_context)
+        except Exception as e:
+            import logging
+
+            logger = logging.getLogger(__name__)
+            logger.error(f"学期编辑页面错误: {str(e)}")
+            # 返回一个简单的错误页面
+            from django.http import HttpResponse
+
+            return HttpResponse(f"编辑页面加载失败: {str(e)}", status=500)
+
+
+class SemesterTemplateAdmin(admin.ModelAdmin):
+    """学期模板管理界面"""
+
+    list_display = (
+        "season",
+        "start_month_day",
+        "end_month_day",
+        "duration_weeks",
+        "name_pattern",
+        "is_active",
+        "created_at",
+    )
+    list_filter = ("season", "is_active", "created_at")
+    search_fields = ("name_pattern",)
+    ordering = ("season", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+    fieldsets = (
+        ("基本信息", {"fields": ("season", "name_pattern", "is_active")}),
+        (
+            "时间配置",
+            {"fields": (("start_month", "start_day"), ("end_month", "end_day"), "duration_weeks")},
+        ),
+        ("系统信息", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    def start_month_day(self, obj):
+        """显示开始月日"""
+        return f"{obj.start_month}月{obj.start_day}日"
+
+    start_month_day.short_description = "开始日期"
+
+    def end_month_day(self, obj):
+        """显示结束月日"""
+        return f"{obj.end_month}月{obj.end_day}日"
+
+    end_month_day.short_description = "结束日期"
+
+    def save_model(self, request, obj, form, change):
+        """保存前验证数据"""
+        try:
+            obj.clean()
+            super().save_model(request, obj, form, change)
+            messages.success(request, f"学期模板 '{obj}' 保存成功")
+        except ValidationError as e:
+            messages.error(request, f"保存失败: {e}")
+
+    def get_queryset(self, request):
+        """自定义查询集"""
+        return super().get_queryset(request).select_related()
+
+
+class CourseScheduleInline(admin.TabularInline):
+    """课程安排内联编辑"""
+
+    model = CourseSchedule
+    extra = 1
+    fields = ("weekday", "period", "start_week", "end_week")
+
+
+class CourseAdmin(admin.ModelAdmin):
+    """课程管理界面"""
+
+    list_display = (
+        "name",
+        "semester",
+        "teacher",
+        "class_name",
+        "location",
+        "course_type",
+        "created_at",
+    )
+    list_filter = ("semester", "teacher", "course_type", "created_at")
+    search_fields = ("name", "description", "location", "class_name")
+    ordering = ("semester", "name")
+    readonly_fields = ("created_at", "updated_at")
+    inlines = [CourseScheduleInline]
+
+    def get_queryset(self, request):
+        """只显示当前用户的课程"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(teacher=request.user)
+        return qs
+
+
+@admin.register(Class)
+class ClassAdmin(admin.ModelAdmin):
+    """班级管理界面"""
+
+    list_display = ("name", "course", "student_count", "created_at")
+    list_filter = ("course", "created_at")
+    search_fields = ("name", "course__name")
+    ordering = ("course", "name")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request):
+        """只显示当前用户的班级"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(course__teacher=request.user)
+        return qs
+
+
+class CourseScheduleAdmin(admin.ModelAdmin):
+    """课程安排管理界面"""
+
+    list_display = (
+        "course",
+        "weekday",
+        "period",
+        "start_week",
+        "end_week",
+        "get_week_schedule_text",
+    )
+    list_filter = ("weekday", "period", "course__semester")
+    search_fields = ("course__name",)
+    ordering = ("weekday", "period")
+
+    def get_week_schedule_text(self, obj):
+        return obj.get_week_schedule_text()
+
+    get_week_schedule_text.short_description = "周次安排"
+
+
+class CourseWeekScheduleAdmin(admin.ModelAdmin):
+    """课程周次安排管理界面"""
+
+    list_display = ("course_schedule", "week_number", "is_active", "created_at")
+    list_filter = ("is_active", "course_schedule__course__semester")
+    search_fields = ("course_schedule__course__name",)
+    ordering = ("course_schedule", "week_number")
+
+
+# 注册校历相关模型
+admin_site.register(Semester, SemesterAdmin)
+admin_site.register(SemesterTemplate, SemesterTemplateAdmin)
+admin_site.register(Course, CourseAdmin)
+admin_site.register(CourseSchedule, CourseScheduleAdmin)
+admin_site.register(CourseWeekSchedule, CourseWeekScheduleAdmin)
+
+
+@admin.register(Homework)
+class HomeworkAdmin(admin.ModelAdmin):
+    """作业管理界面"""
+
+    list_display = ("title", "course", "class_obj", "homework_type", "due_date", "created_at")
+    list_filter = ("course", "homework_type", "created_at")
+    search_fields = ("title", "description", "folder_name", "course__name")
+    ordering = ("course", "-created_at")
+    readonly_fields = ("created_at", "updated_at")
+
+    def get_queryset(self, request):
+        """只显示当前用户的作业"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            return qs.filter(course__teacher=request.user)
+        return qs
+
+
+@admin.register(CommentTemplate)
+class CommentTemplateAdmin(admin.ModelAdmin):
+    """评价模板管理界面"""
+
+    list_display = ("comment_text_short", "template_type", "teacher", "usage_count", "last_used_at")
+    list_filter = ("template_type", "teacher", "tenant")
+    search_fields = ("comment_text", "teacher__username")
+    ordering = ("-usage_count", "-last_used_at")
+    readonly_fields = ("usage_count", "last_used_at", "created_at")
+
+    def comment_text_short(self, obj):
+        """显示评价内容的前50个字符"""
+        return obj.comment_text[:50] + "..." if len(obj.comment_text) > 50 else obj.comment_text
+
+    comment_text_short.short_description = "评价内容"
+
+    def get_queryset(self, request):
+        """只显示当前用户的评价模板"""
+        qs = super().get_queryset(request)
+        if not request.user.is_superuser:
+            # 显示个人模板和系统模板
+            return qs.filter(teacher=request.user) | qs.filter(template_type="system")
+        return qs

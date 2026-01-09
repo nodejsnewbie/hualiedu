@@ -1,0 +1,150 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}学生作业提交{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'grading/vendor/bootstrap/bootstrap.min.css' %}">
+<link rel="stylesheet" href="{% static 'grading/vendor/bootstrap-icons/font/bootstrap-icons.css' %}">
+<link rel="stylesheet" href="{% static 'grading/css/custom.css' %}">
+<style>
+.submission-container {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.directory-item {
+    transition: all 0.3s;
+}
+
+.directory-item:hover {
+    background-color: #f8f9fa;
+}
+
+.upload-section {
+    background: #f8f9fa;
+    padding: 20px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.file-preview {
+    margin-top: 15px;
+}
+
+.progress-container {
+    margin-top: 15px;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4" id="studentSubmissionPage">
+    <div class="submission-container">
+        <!-- 页面标题 -->
+        <div class="mb-4">
+            <h2><i class="bi bi-upload"></i> 作业提交</h2>
+            <p class="text-muted">选择课程和作业目录，上传您的作业文件</p>
+        </div>
+
+        <!-- 验证错误/成功提示 -->
+        <div class="alert alert-danger alert-validation" id="validationAlert" role="alert" style="display: none;">
+            <i class="bi bi-exclamation-triangle-fill"></i>
+            <span id="validationMessage"></span>
+        </div>
+
+        <!-- 课程选择 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-book"></i> 选择课程</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="studentCourse" class="form-label">课程</label>
+                    <select class="form-select" id="studentCourse">
+                        <option value="">请选择课程</option>
+                        {% for course in courses %}
+                        <option value="{{ course.id }}">{{ course.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="help-text">
+                        <i class="bi bi-info-circle"></i> 选择您要提交作业的课程
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 作业目录列表 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-folder"></i> 作业目录</h5>
+            </div>
+            <div class="card-body">
+                <div id="assignmentDirectories">
+                    <p class="text-muted">请先选择课程</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件上传区域 -->
+        <div class="upload-section" id="uploadSection" style="display: none;">
+            <h5 class="mb-3"><i class="bi bi-cloud-upload"></i> 上传作业文件</h5>
+            
+            <input type="hidden" id="selectedDirectory">
+            
+            <div class="mb-3">
+                <label for="assignmentFile" class="form-label">选择文件</label>
+                <input type="file" 
+                       class="form-control" 
+                       id="assignmentFile"
+                       accept=".docx,.pdf,.zip,.txt,.jpg,.png">
+                <div class="help-text">
+                    <i class="bi bi-info-circle"></i> 
+                    支持的格式：docx, pdf, zip, txt, jpg, png（最大 10MB）
+                </div>
+            </div>
+
+            <div id="filePreview" class="file-preview" style="display: none;"></div>
+
+            <!-- 上传进度条 -->
+            <div class="progress-container" id="uploadProgress" style="display: none;">
+                <div class="progress">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                         id="uploadProgressBar"
+                         role="progressbar" 
+                         aria-valuenow="0" 
+                         aria-valuemin="0" 
+                         aria-valuemax="100" 
+                         style="width: 0%">0%</div>
+                </div>
+            </div>
+
+            <div class="mt-3">
+                <button type="button" class="btn btn-primary" id="uploadBtn">
+                    <i class="bi bi-upload"></i> 上传作业
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="$('#uploadSection').hide();">
+                    <i class="bi bi-x-circle"></i> 取消
+                </button>
+            </div>
+        </div>
+
+        <!-- 提示信息 -->
+        <div class="alert alert-info mt-4">
+            <h6 class="alert-heading"><i class="bi bi-lightbulb"></i> 提示</h6>
+            <ul class="mb-0">
+                <li>请确保文件名包含您的姓名，以便老师识别</li>
+                <li>如果重复上传同一作业，新文件将覆盖旧文件</li>
+                <li>上传前请检查文件内容是否正确</li>
+                <li>如果没有看到您需要的作业目录，可以点击"创建新作业"按钮</li>
+            </ul>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'grading/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'grading/vendor/bootstrap/bootstrap.bundle.min.js' %}"></script>
+<script src="{% static 'grading/js/assignment-management.js' %}"></script>
+{% endblock %}

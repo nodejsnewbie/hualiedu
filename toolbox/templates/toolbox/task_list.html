@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}任务列表 - 工具箱{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="{% url 'toolbox:index' %}">工具箱</a></li>
+                    <li class="breadcrumb-item active">任务列表</li>
+                </ol>
+            </nav>
+
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <h1>
+                    <i class="fas fa-tasks text-info"></i>
+                    任务列表
+                </h1>
+                <a href="{% url 'toolbox:ppt_to_pdf' %}" class="btn btn-primary">
+                    <i class="fas fa-plus"></i>
+                    新建任务
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">📋 所有转换任务</h5>
+                </div>
+                <div class="card-body">
+                    {% if tasks %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>任务类型</th>
+                                        <th>状态</th>
+                                        <th>进度</th>
+                                        <th>文件统计</th>
+                                        <th>创建时间</th>
+                                        <th>更新时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for task in tasks %}
+                                    <tr>
+                                        <td>
+                                            <i class="fas fa-file-pdf text-danger"></i>
+                                            {{ task.get_task_type_display }}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                                {{ task.get_status_display }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="progress" style="height: 20px;">
+                                                <div class="progress-bar" role="progressbar"
+                                                     style="width: {{ task.progress_percentage }}%"
+                                                     aria-valuenow="{{ task.progress_percentage }}"
+                                                     aria-valuemin="0" aria-valuemax="100">
+                                                    {{ task.progress_percentage }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <small>
+                                                总数: {{ task.total_files }}<br>
+                                                成功: <span class="text-success">{{ task.success_files }}</span><br>
+                                                失败: <span class="text-danger">{{ task.failed_files }}</span>
+                                            </small>
+                                        </td>
+                                        <td>{{ task.created_at|date:"Y-m-d H:i" }}</td>
+                                        <td>{{ task.updated_at|date:"Y-m-d H:i" }}</td>
+                                        <td>
+                                            <div class="btn-group" role="group">
+                                                <a href="{% url 'toolbox:task_detail' task.id %}" class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-eye"></i>
+                                                    详情
+                                                </a>
+                                                <form method="post" action="{% url 'toolbox:delete_task' task.id %}" style="display: inline;">
+                                                    {% csrf_token %}
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                            onclick="return confirm('确定要删除这个任务吗？')">
+                                                        <i class="fas fa-trash"></i>
+                                                        删除
+                                                    </button>
+                                                </form>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <div class="text-center py-5">
+                            <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
+                            <h5 class="text-muted">暂无任务记录</h5>
+                            <p class="text-muted">开始创建您的第一个转换任务吧！</p>
+                            <a href="{% url 'toolbox:ppt_to_pdf' %}" class="btn btn-primary">
+                                <i class="fas fa-plus"></i>
+                                创建任务
+                            </a>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

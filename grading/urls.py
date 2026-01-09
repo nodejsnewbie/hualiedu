@@ -1,13 +1,13 @@
 from django.urls import path
 
-from . import views
+from . import assignment_views, tenant_views, views
 from .admin import admin_site
 
 app_name = "grading"
 
 urlpatterns = [
     path("", views.index, name="index"),
-    path("grading/", views.grading_page, name="grading"),
+    path("grading/", views.grading_page, name="grading_page"),
     path("test-js/", views.test_js, name="test_js"),
     path("test-grade-switch/", views.test_grade_switch, name="test_grade_switch"),
     path("debug-grading/", views.debug_grading, name="debug_grading"),
@@ -15,8 +15,9 @@ urlpatterns = [
     path("grading-simple/", views.grading_simple, name="grading_simple"),
     path("test-grading-no-auth/", views.test_grading_no_auth, name="test_grading_no_auth"),
     path("file/<path:file_path>", views.serve_file, name="serve_file"),
-    path("admin/", admin_site.urls),
+    # path("admin/", admin_site.urls),  # 使用主应用的admin
     path("writing/get_template_list", views.get_template_list, name="get_template_list"),
+    path("get_courses_list/", views.get_courses_list_view, name="get_courses_list"),
     path("get_directory_tree/", views.get_directory_tree_view, name="get_directory_tree"),
     path("get_file_content/", views.get_file_content, name="get_file_content"),
     path("save_grade/", views.save_grade, name="save_grade"),
@@ -28,12 +29,17 @@ urlpatterns = [
     path("get_file_grade_info/", views.get_file_grade_info_api, name="get_file_grade_info"),
     path("ai_score/", views.ai_score_view, name="ai_score"),
     path("batch_ai_score/", views.batch_ai_score_view, name="batch_ai_score"),
-    # 批量登分相关路由
-    path("batch-grade/", views.batch_grade_page, name="batch_grade_page"),
+    # 成绩登分册写入功能路由
+    path("grade-registry-writer/", views.grade_registry_writer_view, name="grade_registry_writer"),
     path(
-        "batch-grade/api/",
-        views.batch_grade_registration,
-        name="batch_grade_registration",
+        "homework/<int:homework_id>/batch-grade-to-registry/",
+        views.batch_grade_to_registry,
+        name="batch_grade_to_registry",
+    ),
+    path(
+        "batch-grade/progress/<str:tracking_id>/",
+        views.batch_grade_progress,
+        name="batch_grade_progress",
     ),
     # 高级批量AI评分相关路由
     path("batch-ai-score/", views.batch_ai_score_advanced_view, name="batch_ai_score_advanced"),
@@ -44,4 +50,160 @@ urlpatterns = [
     path("grade-type-management/", views.grade_type_management_view, name="grade_type_management"),
     path("change-grade-type/", views.change_grade_type_view, name="change_grade_type"),
     path("get-grade-type-config/", views.get_grade_type_config_view, name="get_grade_type_config"),
+    # 多租户管理
+    path("super-admin/", tenant_views.super_admin_dashboard, name="super_admin_dashboard"),
+    path("super-admin/tenants/", tenant_views.tenant_management, name="tenant_management"),
+    path("super-admin/tenants/create/", tenant_views.create_tenant, name="create_tenant"),
+    path("super-admin/tenants/update/", tenant_views.update_tenant, name="update_tenant"),
+    # 租户管理员
+    path("tenant-admin/", tenant_views.tenant_admin_dashboard, name="tenant_admin_dashboard"),
+    path("tenant-admin/users/", tenant_views.tenant_user_management, name="tenant_user_management"),
+    path("tenant-admin/users/add/", tenant_views.add_user_to_tenant, name="add_user_to_tenant"),
+    path(
+        "tenant-admin/users/update/", tenant_views.update_user_profile, name="update_user_profile"
+    ),
+    path(
+        "tenant-admin/users/remove/",
+        tenant_views.remove_user_from_tenant,
+        name="remove_user_from_tenant",
+    ),
+    path(
+        "tenant-admin/config/",
+        tenant_views.tenant_config_management,
+        name="tenant_config_management",
+    ),
+    path(
+        "tenant-admin/config/update/",
+        tenant_views.update_tenant_config,
+        name="update_tenant_config",
+    ),
+    # 校历功能相关路由
+    path("calendar/", views.calendar_view, name="calendar_view"),
+    path("course-management/", views.course_management_view, name="course_management"),
+    # 课程和班级管理路由
+    path("courses/", views.course_list_view, name="course_list"),
+    path("courses/create/", views.course_create_view, name="course_create"),
+    path("classes/", views.class_list_view, name="class_list"),
+    path("classes/create/", views.class_create_view, name="class_create"),
+    path("semester-management/", views.semester_management_view, name="semester_management"),
+    path("semester-status-api/", views.semester_status_api, name="semester_status_api"),
+    path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
+    path("semester-add/", views.semester_add_view, name="semester_add"),
+    path("semester-delete/<int:semester_id>/", views.semester_delete_view, name="semester_delete"),
+    path("add-course/", views.add_course_view, name="add_course"),
+    path("delete-course/", views.delete_course_view, name="delete_course"),
+    path("add-schedule/", views.add_schedule_view, name="add_schedule"),
+    path(
+        "get-schedule-weeks/<int:schedule_id>/", views.get_schedule_weeks, name="get_schedule_weeks"
+    ),
+    path("get-schedule-data/", views.get_schedule_data, name="get_schedule_data"),
+    # ============================================================================
+    # 作业管理相关路由 (Assignment Management)
+    # ============================================================================
+    # 作业管理主界面
+    path("assignments/", assignment_views.assignment_list_view, name="assignment_list"),
+    path("assignments/create/", assignment_views.assignment_create_view, name="assignment_create"),
+    path(
+        "assignments/<int:assignment_id>/edit/",
+        assignment_views.assignment_edit_view,
+        name="assignment_edit",
+    ),
+    path(
+        "assignments/<int:assignment_id>/delete/",
+        assignment_views.assignment_delete_view,
+        name="assignment_delete",
+    ),
+    # 作业结构 API
+    path(
+        "api/assignments/structure/",
+        assignment_views.get_assignment_structure_api,
+        name="get_assignment_structure_api",
+    ),
+    path(
+        "api/assignments/file/",
+        assignment_views.get_assignment_file_api,
+        name="get_assignment_file_api",
+    ),
+    path(
+        "api/assignments/directories/",
+        assignment_views.get_assignment_directories_api,
+        name="get_assignment_directories_api",
+    ),
+    # Helper APIs
+    path("api/course-classes/", assignment_views.get_course_classes_api, name="get_course_classes"),
+    # 学生作业提交
+    path(
+        "student/submission/", assignment_views.student_submission_view, name="student_submission"
+    ),
+    path(
+        "api/student/upload/",
+        assignment_views.upload_assignment_file_api,
+        name="upload_assignment_file_api",
+    ),
+    path(
+        "api/student/create-directory/",
+        assignment_views.create_assignment_directory_api,
+        name="create_assignment_directory_api",
+    ),
+    # ============================================================================
+    # 仓库管理相关路由（已废弃，保留向后兼容）
+    # Deprecated: Use assignment routes above instead
+    # ============================================================================
+    path("repository-management/", views.repository_management_view, name="repository_management"),
+    path("add-repository/", views.add_repository_view, name="add_repository"),
+    path("update-repository/", views.update_repository_view, name="update_repository"),
+    path("delete-repository/", views.delete_repository_view, name="delete_repository"),
+    path("sync-repository/", views.sync_repository_view, name="sync_repository"),
+    path(
+        "validate-git-connection/",
+        views.validate_git_connection_view,
+        name="validate_git_connection",
+    ),
+    path(
+        "validate-directory-structure/",
+        views.validate_directory_structure_view,
+        name="validate_directory_structure",
+    ),
+    path("api/repositories/", views.get_repository_list_api, name="get_repository_list_api"),
+    # 课程和作业信息API
+    path("api/course-info/", views.get_course_info_api, name="get_course_info_api"),
+    path("api/update-course-type/", views.update_course_type_api, name="update_course_type_api"),
+    path("api/homework-list/", views.get_homework_list_api, name="get_homework_list_api"),
+    path("api/homework-info/", views.get_homework_info_api, name="get_homework_info_api"),
+    path("api/homework-type/", views.get_homework_type_api, name="get_homework_type_api"),
+    path(
+        "api/update-homework-type/", views.update_homework_type_api, name="update_homework_type_api"
+    ),
+    # 缓存管理API
+    path("api/cache/stats/", views.cache_stats_api, name="cache_stats_api"),
+    path("api/cache/clear/", views.clear_cache_api, name="clear_cache_api"),
+    # 学生作业上传功能
+    path("homework-upload/", views.homework_upload_page, name="homework_upload_page"),
+    path(
+        "api/student/homework-list/",
+        views.get_student_homework_list,
+        name="get_student_homework_list",
+    ),
+    path("api/student/upload/", views.upload_homework, name="upload_homework"),
+    path(
+        "api/student/submission-history/",
+        views.get_submission_history,
+        name="get_submission_history",
+    ),
+    path("api/student/storage-space/", views.check_storage_space, name="check_storage_space"),
+    # 评价模板API - 需求 5.2.1-5.2.12
+    path(
+        "api/comment-templates/recommended/",
+        views.get_recommended_comment_templates,
+        name="get_recommended_comment_templates",
+    ),
+    path(
+        "api/comment-templates/record-usage/",
+        views.record_comment_usage,
+        name="record_comment_usage",
+    ),
+    # 测试页面
+    path("jquery-test/", views.jquery_test, name="jquery_test"),
+    path("test-clean/", views.test_clean, name="test_clean"),
+    path("debug-simple/", views.debug_simple, name="debug_simple"),
 ]

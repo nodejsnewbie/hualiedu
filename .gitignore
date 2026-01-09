@@ -1,24 +1,129 @@
-# Python
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.pyo
-*.pyd
-*.so
-*.egg-info/
+*$py.class
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+*.sqlite3
+*.sqlite3-*
+
+# Static files (collected by collectstatic)
+/staticfiles/
+
+# Media files (user uploads)
+/media/
+
+# Environment variables
+.env
+.env.local
+.env.production
+.envrc
+
+# Virtual environments
 .venv/
 venv/
-.env
+env/
 
-# Django
-staticfiles/
-media/grades/
-media/ssh_keys/
-logs/
-*.sqlite3
+# Note: .python-version and uv.lock should be committed for reproducibility
 
-# Tools
-.mypy_cache/
-.pytest_cache/
-.coverage
-htmlcov/
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
+*.DS_Store
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# Testing
+.pytest_cache/
+.tox/
+.hypothesis/
+
+# Temporary files
+*_backup*
+*_old*
+*_temp*
+*_tmp*
+*.backup
+*.bak
+*.tmp
+
+# Debug and test templates
+templates/debug_*.html
+templates/test_*.html
+templates/*_test.html
+templates/*_debug.html
+templates/*_temp.html
+templates/*_old.html
+
+# Logs directory
+logs/*.log
+
+# SSH keys and sensitive files
+media/ssh_keys/
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+id_ecdsa*
+
+# Database backups
+*.sql
+*.dump
+db.sqlite3.backup*
+
+# Python cache
+*.pyc
+*.pyo
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# Test data directories
+testteacher*/
+*_仓库/
+test_repo*/
+
+# Hypothesis property-based testing generates random directory names
+# Ignore single-character and special character directory names at root level
+[0-9]/
+[0-9][0-9]*/
+[A-Za-z]/
+[!-~]/
+*[^A-Za-z0-9_.-]*/
+
+# Directories with control characters (buggy test artifacts)
+*[[:cntrl:]]*/
+
+# Specific test course directories
+其他课程/
+数据结构/
+算法设计/
+"Data Structures"/

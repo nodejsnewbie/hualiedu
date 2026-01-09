@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>评价缓存服务测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        button {
+            padding: 8px 15px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        textarea {
+            width: 100%;
+            min-height: 100px;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .result {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .success {
+            border-left-color: #28a745;
+            background-color: #d4edda;
+        }
+        .error {
+            border-left-color: #dc3545;
+            background-color: #f8d7da;
+        }
+    </style>
+</head>
+<body>
+    <h1>评价缓存服务测试</h1>
+    <p>此页面用于测试 CommentCacheService 的各项功能</p>
+
+    <!-- 测试1: 自动保存 -->
+    <div class="test-section">
+        <h3>测试1: 自动保存功能 (需求 5.1.1)</h3>
+        <p>在下方输入框中输入内容，2秒后会自动保存到本地存储</p>
+        <input type="text" id="filePath1" placeholder="文件路径" value="/test/file1.docx">
+        <textarea id="commentText1" placeholder="输入评价内容..."></textarea>
+        <button onclick="startAutosave()">开始自动保存</button>
+        <button onclick="stopAutosave()">停止自动保存</button>
+        <div id="result1" class="result"></div>
+    </div>
+
+    <!-- 测试2: 加载缓存 -->
+    <div class="test-section">
+        <h3>测试2: 加载缓存功能 (需求 5.1.3)</h3>
+        <input type="text" id="filePath2" placeholder="文件路径" value="/test/file1.docx">
+        <button onclick="loadCache()">加载缓存</button>
+        <div id="result2" class="result"></div>
+    </div>
+
+    <!-- 测试3: 清除缓存 -->
+    <div class="test-section">
+        <h3>测试3: 清除缓存功能 (需求 5.1.6)</h3>
+        <input type="text" id="filePath3" placeholder="文件路径" value="/test/file1.docx">
+        <button onclick="clearCache()">清除缓存</button>
+        <div id="result3" class="result"></div>
+    </div>
+
+    <!-- 测试4: 清理过期缓存 -->
+    <div class="test-section">
+        <h3>测试4: 清理过期缓存功能 (需求 5.1.7)</h3>
+        <button onclick="createExpiredCache()">创建过期缓存（模拟）</button>
+        <button onclick="cleanupExpired()">清理过期缓存</button>
+        <div id="result4" class="result"></div>
+    </div>
+
+    <!-- 测试5: 查看所有缓存 -->
+    <div class="test-section">
+        <h3>测试5: 查看所有缓存文件</h3>
+        <button onclick="viewAllCaches()">查看所有缓存</button>
+        <div id="result5" class="result"></div>
+    </div>
+
+    <!-- 加载评价缓存服务 -->
+    <script src="comment-cache-service.js"></script>
+
+    <script>
+        let cacheService = window.commentCacheService;
+        let autosaveInterval;
+
+        function log(elementId, message, type = 'info') {
+            const element = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'success' ? 'result success' : 
+                            type === 'error' ? 'result error' : 'result';
+            element.className = className;
+            element.textContent = `[${timestamp}] ${message}`;
+        }
+
+        // 测试1: 自动保存
+        function startAutosave() {
+            const filePath = document.getElementById('filePath1').value;
+            const textarea = document.getElementById('commentText1');
+            
+            if (!filePath) {
+                log('result1', '请输入文件路径', 'error');
+                return;
+            }
+
+            // 监听输入事件
+            textarea.oninput = function() {
+                const commentText = textarea.value;
+                cacheService.autosave(filePath, commentText);
+                log('result1', `正在自动保存... (2秒后生效)\n文件: ${filePath}\n内容: ${commentText}`, 'info');
+            };
+
+            log('result1', '自动保存已启动，请在输入框中输入内容', 'success');
+        }
+
+        function stopAutosave() {
+            cacheService.stopAutosave();
+            document.getElementById('commentText1').oninput = null;
+            log('result1', '自动保存已停止', 'success');
+        }
+
+        // 测试2: 加载缓存
+        function loadCache() {
+            const filePath = document.getElementById('filePath2').value;
+            
+            if (!filePath) {
+                log('result2', '请输入文件路径', 'error');
+                return;
+            }
+
+            const cacheData = cacheService.load(filePath);
+            
+            if (cacheData) {
+                const age = Math.floor((Date.now() - cacheData.timestamp) / 1000);
+                log('result2', 
+                    `缓存加载成功！\n` +
+                    `文件路径: ${cacheData.file_path}\n` +
+                    `评价内容: ${cacheData.comment}\n` +
+                    `缓存时间: ${new Date(cacheData.timestamp).toLocaleString()}\n` +
+                    `缓存年龄: ${age}秒前`,
+                    'success'
+                );
+            } else {
+                log('result2', `未找到缓存数据\n文件路径: ${filePath}`, 'error');
+            }
+        }
+
+        // 测试3: 清除缓存
+        function clearCache() {
+            const filePath = document.getElementById('filePath3').value;
+            
+            if (!filePath) {
+                log('result3', '请输入文件路径', 'error');
+                return;
+            }
+
+            cacheService.clear(filePath);
+            log('result3', `缓存已清除\n文件路径: ${filePath}`, 'success');
+        }
+
+        // 测试4: 创建过期缓存（模拟）
+        function createExpiredCache() {
+            const expiredTimestamp = Date.now() - (8 * 24 * 60 * 60 * 1000); // 8天前
+            const cacheKey = 'comment_cache_expired_test';
+            const cacheData = {
+                comment: '这是一个过期的测试评价',
+                timestamp: expiredTimestamp,
+                file_path: '/test/expired_file.docx'
+            };
+            
+            localStorage.setItem(cacheKey, JSON.stringify(cacheData));
+            log('result4', `已创建过期缓存（8天前）\n缓存键: ${cacheKey}`, 'success');
+        }
+
+        function cleanupExpired() {
+            const beforeCount = localStorage.length;
+            cacheService.cleanupExpired();
+            const afterCount = localStorage.length;
+            const cleaned = beforeCount - afterCount;
+            
+            log('result4', 
+                `清理完成\n` +
+                `清理前: ${beforeCount} 个项目\n` +
+                `清理后: ${afterCount} 个项目\n` +
+                `已删除: ${cleaned} 个过期缓存`,
+                'success'
+            );
+        }
+
+        // 测试5: 查看所有缓存
+        function viewAllCaches() {
+            const files = cacheService.getAllCachedFiles();
+            
+            if (files.length === 0) {
+                log('result5', '没有找到任何缓存文件', 'info');
+                return;
+            }
+
+            let message = `找到 ${files.length} 个缓存文件：\n\n`;
+            files.forEach((file, index) => {
+                const age = Math.floor((Date.now() - file.timestamp) / 1000);
+                message += `${index + 1}. ${file.filePath}\n`;
+                message += `   时间: ${new Date(file.timestamp).toLocaleString()} (${age}秒前)\n`;
+                message += `   内容: ${file.comment.substring(0, 50)}${file.comment.length > 50 ? '...' : ''}\n\n`;
+            });
+
+            log('result5', message, 'success');
+        }
+
+        // 页面加载时显示服务状态
+        window.onload = function() {
+            console.log('评价缓存服务测试页面已加载');
+            console.log('CommentCacheService:', cacheService);
+        };
+    </script>
+</body>
+</html>

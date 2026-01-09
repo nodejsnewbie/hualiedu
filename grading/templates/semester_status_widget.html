@@ -1,0 +1,127 @@
+{% load semester_tags %}
+
+<div class="semester-status-widget">
+    {% if dashboard %}
+        <div class="status-header">
+            <h4>📊 学期状态</h4>
+        </div>
+
+        <div class="status-content">
+            <div class="current-status">
+                <div class="status-text">{{ dashboard.current_status }}</div>
+
+                {% if dashboard.current_semester %}
+                <div class="current-semester">
+                    <span class="semester-name">{{ dashboard.current_semester }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if dashboard.is_vacation %}
+            <div class="vacation-info">
+                <span class="vacation-badge">
+                    {{ dashboard.vacation_type|vacation_icon }} {{ dashboard.vacation_type }}
+                </span>
+            </div>
+            {% endif %}
+
+            {% if dashboard.next_semester and dashboard.days_to_next %}
+            <div class="next-semester-info">
+                <div class="next-label">下一学期:</div>
+                <div class="next-details">
+                    <span class="next-name">{{ dashboard.next_semester }}</span>
+                    <span class="next-countdown">{{ dashboard.days_to_next|days_to_text }}后开始</span>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="status-error">
+            <span>⚠️ 无法获取学期状态</span>
+        </div>
+    {% endif %}
+</div>
+
+<style>
+.semester-status-widget {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.status-header h4 {
+    margin: 0 0 15px 0;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.current-status {
+    margin-bottom: 15px;
+}
+
+.status-text {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.semester-name {
+    font-size: 14px;
+    opacity: 0.9;
+    background: rgba(255, 255, 255, 0.2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.vacation-info {
+    margin-bottom: 15px;
+}
+
+.vacation-badge {
+    background: rgba(255, 193, 7, 0.2);
+    border: 1px solid rgba(255, 193, 7, 0.5);
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 14px;
+    display: inline-block;
+}
+
+.next-semester-info {
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+    padding-top: 15px;
+}
+
+.next-label {
+    font-size: 12px;
+    opacity: 0.8;
+    margin-bottom: 5px;
+}
+
+.next-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.next-name {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.next-countdown {
+    font-size: 12px;
+    opacity: 0.8;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+
+.status-error {
+    text-align: center;
+    opacity: 0.7;
+}
+</style>

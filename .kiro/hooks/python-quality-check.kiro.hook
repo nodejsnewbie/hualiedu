@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Python Quality Check",
+  "description": "Automatically runs flake8 or pylint on saved Python files, reports style and quality issues, suggests fixes for common problems, and checks for missing docstrings",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "**/*.py"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A Python file has been saved. Please:\n\n1. Run flake8 on the file to check for style violations (max line length 120 as per project config)\n2. Check for common quality issues:\n   - Missing or incomplete docstrings on classes and functions\n   - Unused imports\n   - Undefined variables\n   - Code complexity issues\n   - PEP 8 violations\n3. Report any issues found in a clear, organized format\n4. For each issue, suggest specific fixes:\n   - Show the problematic code\n   - Explain what's wrong\n   - Provide corrected code example\n5. Check if docstrings are missing and suggest appropriate docstrings following the project's documentation pattern:\n   ```python\n   def function_name(param: Type) -> ReturnType:\n       \"\"\"Brief description.\n       \n       Args:\n           param: Description\n           \n       Returns:\n           Description\n           \n       Raises:\n           ExceptionType: When this happens\n       \"\"\"\n   ```\n6. Prioritize issues by severity (errors, warnings, style issues)\n7. If the file is clean, provide a brief confirmation\n\nUse the project's code quality standards:\n- Black formatting (line length 100)\n- isort for imports (profile: black)\n- flake8 (max line length 120)\n- Type hints where appropriate\n- Comprehensive docstrings for public functions/classes"
+  }
+}
