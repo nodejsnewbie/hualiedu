@@ -1,0 +1,334 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block title %}作业成绩写入{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'grading/vendor/jstree/themes/default/style.min.css' %}">
+<style>
+    #class-directory-tree {
+        max-height: 420px;
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 4px;
+        padding: 0.75rem;
+        background-color: #fff;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-3">📥 作业成绩写入</h1>
+            <p class="text-muted">
+                选择一个班级目录，系统会自动查找其中所有形如 <code>第X次作业.xlsx</code> 的文件，
+                并根据作业次数写入 <code>成绩登分册.xlsx</code> 的对应列。
+            </p>
+            <pre class="bg-light p-3 rounded small mb-0">
+/课程/23计算机5班/
+├── 成绩登分册.xlsx
+├── 第一次作业.xlsx
+├── 第二次作业.xlsx
+└── 第三次作业.xlsx
+            </pre>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">配置参数</h5>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                {% if repositories %}
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label for="repo-select" class="form-label">选择仓库</label>
+                            <select class="form-select" id="repo-select">
+                                {% for repo in repositories %}
+                                <option value="{{ repo.id }}" {% if repo.id == form_data.selected_repo_id %}selected{% endif %}>
+                                    {{ repo.name }} ({{ repo.path }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <input type="hidden" id="selected-repo-id-input" name="selected_repo_id" value="{{ form_data.selected_repo_id }}">
+                            <small class="form-text text-muted">只展示当前用户的活跃仓库</small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="course-select" class="form-label">选择课程</label>
+                            {% if courses %}
+                            <select class="form-select" id="course-select">
+                                {% for course in courses %}
+                                <option value="{{ course }}" {% if course == form_data.selected_course %}selected{% endif %}>
+                                    {{ course }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            <input type="hidden" id="selected-course-input" name="selected_course" value="{{ form_data.selected_course }}">
+                            <small class="form-text text-muted">课程目录位于仓库的首层</small>
+                            {% else %}
+                            <div class="alert alert-warning mb-0">该仓库下没有课程目录</div>
+                            {% endif %}
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">已选择的班级目录</label>
+                            <div class="form-control-plaintext border rounded py-2 px-2 bg-light" id="selected-class-path">
+                                {% if form_data.class_directory_display %}
+                                    {{ form_data.class_directory_display }}
+                                {% else %}
+                                    未选择
+                                {% endif %}
+                            </div>
+                            <input type="hidden" name="class_directory" id="class-directory-input" value="{{ form_data.class_directory }}">
+                            <div class="form-text">请选择课程下的班级（如 23计算机5班）</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100" {% if not courses %}disabled{% endif %}>
+                            <i class="fas fa-upload me-2"></i> 开始写入
+                        </button>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">课程目录</label>
+                        <div id="class-directory-tree"
+                             data-tree-url="{{ tree_api_url }}"
+                             data-initial-class="{{ form_data.class_directory }}"></div>
+                        <small class="form-text text-muted">
+                            展开课程目录后选择班级；右侧列表仅显示目录，文件将自动处理。
+                        </small>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-warning mb-0">
+                    当前账号暂无活跃仓库，无法使用该功能。请先在仓库管理中创建并激活一个仓库。
+                </div>
+                {% endif %}
+            </form>
+        </div>
+    </div>
+
+    {% if result %}
+    <div class="card mb-4">
+        <div class="card-header">
+            <h5 class="mb-0">执行结果</h5>
+        </div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-3 mb-3">
+                    <p class="mb-1 text-muted">仓库</p>
+                    <p class="h6 text-break">{{ result.repository_name }}</p>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <p class="mb-1 text-muted">课程</p>
+                    <p class="h6 text-break">{{ result.course_name }}</p>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <p class="mb-1 text-muted">班级目录</p>
+                    <p class="h6 text-break">{{ result.class_directory }}</p>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <p class="mb-1 text-muted">成绩登分册</p>
+                    <p class="h6 text-break">{{ result.gradebook_file }}</p>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <p class="mb-1 text-muted">处理概览</p>
+                    <p class="h6">
+                        共发现 {{ result.total_files }} 个作业文件，
+                        成功 {{ result.success_count }} 个，
+                        失败 {{ result.error_count }} 个
+                    </p>
+                </div>
+            </div>
+
+            {% if result.processed %}
+            <div class="table-responsive">
+                <table class="table table-striped align-middle">
+                    <thead>
+                        <tr>
+                            <th>文件名</th>
+                            <th>作业次数</th>
+                            <th>写入列</th>
+                            <th>已更新学生</th>
+                            <th>登分册缺失</th>
+                            <th>作业缺失</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in result.processed %}
+                        <tr>
+                            <td class="text-break">{{ item.file_name }}</td>
+                            <td>第 {{ item.assignment_number }} 次</td>
+                            <td>{{ item.assignment_column_letter }}</td>
+                            <td>{{ item.updated_students }} 人</td>
+                            <td>{{ item.missing_in_gradebook|length }} 人</td>
+                            <td>{{ item.missing_in_assignment|length }} 人</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            {% if result.errors %}
+            <div class="mt-4">
+                <h6>写入失败的文件（{{ result.errors|length }}）</h6>
+                <div class="list-group">
+                    {% for item in result.errors %}
+                    <div class="list-group-item list-group-item-warning">
+                        <strong class="text-break">{{ item.file_name }}</strong>
+                        <span class="ms-2 text-muted">第 {{ item.assignment_number }} 次作业</span>
+                        <div class="small text-danger mt-1">{{ item.error }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if repositories %}
+{{ repositories|json_script:"toolbox-repos-data" }}
+<script src="{% static 'grading/vendor/jstree/jstree.min.js' %}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const repoSelect = document.getElementById('repo-select');
+        const repoInput = document.getElementById('selected-repo-id-input');
+        const courseSelect = document.getElementById('course-select');
+        const courseInput = document.getElementById('selected-course-input');
+        const classInput = document.getElementById('class-directory-input');
+        const classDisplay = document.getElementById('selected-class-path');
+        const treeContainer = $('#class-directory-tree');
+        const treeUrl = treeContainer.data('tree-url');
+        const initialClassPath = treeContainer.data('initial-class') || '';
+        const reposDataElement = document.getElementById('toolbox-repos-data');
+        const reposData = reposDataElement ? JSON.parse(reposDataElement.textContent) : [];
+
+        if (!repoSelect || !treeUrl) {
+            return;
+        }
+
+        function getRepoData(repoId) {
+            return reposData.find((repo) => repo.id === repoId);
+        }
+
+        function destroyTree() {
+            if (treeContainer.data('jstree')) {
+                treeContainer.jstree(true).destroy();
+            } else {
+                treeContainer.empty();
+            }
+        }
+
+        function populateCourses(repoId, preset) {
+            if (!courseSelect || !courseInput) {
+                return;
+            }
+            const repo = getRepoData(repoId);
+            const courseList = repo ? repo.courses : [];
+            courseSelect.innerHTML = '';
+            if (!courseList.length) {
+                courseInput.value = '';
+                classInput.value = '';
+                classDisplay.textContent = '未选择';
+                destroyTree();
+                treeContainer.html('<div class="text-muted">该仓库暂无课程目录</div>');
+                return;
+            }
+
+            courseList.forEach((course) => {
+                const option = document.createElement('option');
+                option.value = course;
+                option.textContent = course;
+                courseSelect.appendChild(option);
+            });
+
+            const targetCourse = preset && courseList.includes(preset) ? preset : courseList[0];
+            courseSelect.value = targetCourse;
+            courseInput.value = targetCourse;
+        }
+
+        function setSelectedPath(value) {
+            classInput.value = value;
+            if (!value) {
+                classDisplay.textContent = '未选择';
+            } else {
+                const prefix = courseSelect && courseSelect.value ? courseSelect.value + '/' : '';
+                classDisplay.textContent = prefix + value;
+            }
+        }
+
+        function initializeTree(preselectPath) {
+            const repoId = repoSelect.value;
+            const courseName = courseSelect ? courseSelect.value : '';
+            if (!repoId || !courseName) {
+                destroyTree();
+                treeContainer.html('<div class="text-muted">请选择有效的仓库与课程</div>');
+                return;
+            }
+
+            destroyTree();
+            treeContainer
+                .empty()
+                .jstree({
+                    core: {
+                        data: function(node, cb) {
+                            $.getJSON(treeUrl, {
+                                repo_id: repoId,
+                                course: courseName,
+                                path: node.id === '#' ? '' : node.id
+                            }).done(function(res) {
+                                cb(res.children || []);
+                            }).fail(function() {
+                                cb([]);
+                            });
+                        },
+                        themes: {
+                            responsive: false
+                        }
+                    },
+                    plugins: ['types'],
+                    types: {
+                        default: {
+                            icon: 'bi bi-folder-fill text-secondary'
+                        }
+                    }
+                })
+                .on('select_node.jstree', function(e, data) {
+                    const relPath = data.node.id || '';
+                    setSelectedPath(relPath);
+                })
+                .on('ready.jstree', function(e, data) {
+                    if (preselectPath) {
+                        data.instance.select_node(preselectPath);
+                        data.instance.open_node(preselectPath);
+                    }
+                });
+        }
+
+        repoSelect.addEventListener('change', function() {
+            repoInput.value = this.value;
+            populateCourses(this.value, '');
+            setSelectedPath('');
+            initializeTree('');
+        });
+
+        if (courseSelect) {
+            courseSelect.addEventListener('change', function() {
+                courseInput.value = this.value;
+                setSelectedPath('');
+                initializeTree('');
+            });
+        }
+
+        populateCourses(repoSelect.value, courseInput ? courseInput.value : '');
+        initializeTree(initialClassPath);
+    });
+</script>
+{% endif %}
+{% endblock %}

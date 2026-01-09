@@ -1,0 +1,22 @@
+{
+  "enabled": true,
+  "name": "Python 3.13 Environment Check",
+  "description": "Monitors Python configuration files and requirements to ensure the project is configured to run in Python 3.13 environment",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "requirements.txt",
+      "Dockerfile",
+      "docker-compose.yml",
+      ".python-version",
+      "runtime.txt",
+      "pyproject.toml",
+      "setup.py"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "The Python environment configuration files have been modified. Please verify that:\n1. All Python version specifications are set to 3.13\n2. The Dockerfile uses Python 3.13 base image\n3. Dependencies in requirements.txt are compatible with Python 3.13\n4. Any virtual environment or runtime configuration files specify Python 3.13\n5. Update any documentation that references the Python version\n\nCheck for compatibility issues and suggest any necessary updates to ensure the project runs correctly in Python 3.13 environment."
+  }
+}

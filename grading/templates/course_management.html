@@ -1,0 +1,985 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>课程管理</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .semester-info {
+            background-color: #e8f5e8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .back-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: #666;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+
+        .back-btn:hover {
+            background-color: #555;
+        }
+
+        .add-course-form {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .form-group textarea {
+            height: 80px;
+            resize: vertical;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .btn:hover {
+            background-color: #45a049;
+        }
+
+        .btn-secondary {
+            background-color: #666;
+        }
+
+        .week-selection {
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+
+        .week-checkboxes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .week-checkbox {
+            display: flex;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .week-checkbox:hover {
+            background-color: #f0f0f0;
+        }
+
+        .week-checkbox input[type="checkbox"] {
+            margin-right: 5px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        .week-checkbox.selected {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+
+        .week-checkbox input[type="checkbox"]:checked + span {
+            color: #2196f3;
+            font-weight: bold;
+        }
+
+        .schedule-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            background-color: #f9f9f9;
+        }
+
+        .schedule-info {
+            flex: 1;
+        }
+
+        .schedule-actions {
+            margin-left: 10px;
+        }
+
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        }
+
+        .btn-secondary:hover {
+            background-color: #555;
+        }
+
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+
+        .courses-list {
+            margin-top: 30px;
+        }
+
+        .course-item {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .course-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .course-name {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .course-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .course-location {
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .course-description {
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .schedule-list {
+            margin-top: 10px;
+        }
+
+        .schedule-item {
+            background-color: #e8f5e8;
+            border: 1px solid #4CAF50;
+            border-radius: 4px;
+            padding: 8px;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+
+        .add-schedule-form {
+            background-color: #f0f8ff;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="{% url 'grading:index' %}" class="back-btn">← 返回首页</a>
+
+        <h1>课程管理</h1>
+
+        {% if current_semester %}
+        <div class="semester-info">
+            <h3 style="margin-top: 0; color: #2e7d32;">{{ current_semester.name }}</h3>
+            <p style="margin-bottom: 5px;"><strong>学期时间：</strong>{{ current_semester.start_date|date:"Y年m月d日" }} - {{ current_semester.end_date|date:"Y年m月d日" }}</p>
+            <p style="margin-bottom: 0;"><strong>总周数：</strong>{{ current_semester.get_week_count }}周</p>
+        </div>
+
+        <div class="add-course-form">
+            <h3>添加新课程</h3>
+            <form id="addCourseForm">
+                <div class="form-group">
+                    <label for="courseName">课程名称 *</label>
+                    <input type="text" id="courseName" name="course_name" required>
+                </div>
+                <div class="form-group">
+                    <label for="className">班级名称</label>
+                    <input type="text" id="className" name="class_name" placeholder="如：计算机科学1班">
+                </div>
+                <div class="form-group">
+                    <label for="courseLocation">上课地点 *</label>
+                    <input type="text" id="courseLocation" name="location" required>
+                </div>
+                <div class="form-group">
+                    <label for="courseDescription">课程描述</label>
+                    <textarea id="courseDescription" name="description" placeholder="可选：课程描述信息"></textarea>
+                </div>
+                <button type="submit" class="btn">添加课程</button>
+            </form>
+        </div>
+
+        <div class="courses-list">
+            <h3>我的课程</h3>
+            {% if user_courses %}
+                {% for course in user_courses %}
+                <div class="course-item">
+                    <div class="course-header">
+                        <div class="course-name">{{ course.name }}</div>
+                        <div class="course-actions">
+                            <button class="btn btn-secondary" onclick="toggleScheduleForm({{ course.id }})">添加安排</button>
+                            <button class="btn btn-danger" onclick="deleteCourse({{ course.id }}, '{{ course.name }}')">删除课程</button>
+                        </div>
+                    </div>
+                    <div class="course-location"><strong>上课地点：</strong>{{ course.location }}</div>
+                    {% if course.class_name %}
+                    <div class="course-class"><strong>班级：</strong>{{ course.class_name }}</div>
+                    {% endif %}
+                    {% if course.description %}
+                    <div class="course-description"><strong>课程描述：</strong>{{ course.description }}</div>
+                    {% endif %}
+
+                    <div class="schedule-list">
+                        <h4>课程安排</h4>
+                        {% for schedule in course.schedules.all %}
+                        <div class="schedule-item" data-schedule-id="{{ schedule.id }}">
+                            <div class="schedule-info">
+                                {{ schedule.get_weekday_display }} {{ schedule.get_period_display }} - {{ schedule.get_week_schedule_text }}
+                            </div>
+                            <div class="schedule-actions">
+                                <button class="btn btn-small edit-schedule-btn" data-course-id="{{ course.id }}" data-schedule-id="{{ schedule.id }}" data-weekday-display="{{ schedule.get_weekday_display }}" data-weekday="{{ schedule.weekday }}" data-period="{{ schedule.period }}" data-start-week="{{ schedule.start_week }}" data-end-week="{{ schedule.end_week }}">编辑</button>
+                            </div>
+                        </div>
+                        {% empty %}
+                        <p style="color: #666;">暂无课程安排</p>
+                        {% endfor %}
+                    </div>
+
+                    <div id="scheduleForm{{ course.id }}" class="add-schedule-form">
+                        <h4>添加课程安排</h4>
+                        <form class="addScheduleForm" data-course-id="{{ course.id }}">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>星期</label>
+                                    <select name="weekday" required>
+                                        <option value="">请选择</option>
+                                        <option value="1">周一</option>
+                                        <option value="2">周二</option>
+                                        <option value="3">周三</option>
+                                        <option value="4">周四</option>
+                                        <option value="5">周五</option>
+                                        <option value="6">周六</option>
+                                        <option value="7">周日</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>时间段</label>
+                                    <select name="period" required>
+                                        <option value="">请选择</option>
+                                        <option value="1">第一大节 (8:00-9:40)</option>
+                                        <option value="2">第二大节 (10:00-11:40)</option>
+                                        <option value="3">第三大节 (14:00-15:40)</option>
+                                        <option value="4">第四大节 (16:00-17:40)</option>
+                                        <option value="5">第五大节 (19:00-20:40)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>开始周次</label>
+                                    <input type="number" name="start_week" min="1" max="{{ current_semester.get_week_count }}" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>结束周次</label>
+                                    <input type="number" name="end_week" min="1" max="{{ current_semester.get_week_count }}" required>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>周次安排</label>
+                                <div class="week-selection">
+                                    <p style="font-size: 12px; color: #666; margin-bottom: 10px;">
+                                        选择具体的上课周次，系统会根据开始-结束周次自动预选
+                                    </p>
+                                    <div class="week-checkboxes" id="weekCheckboxes{{ course.id }}">
+                                        {% with total_weeks=current_semester.get_week_count %}
+                                            {% for i in "123456789012345678901234567890"|make_list %}
+                                                {% if forloop.counter <= total_weeks %}
+                                                <label class="week-checkbox">
+                                                    <input type="checkbox" name="week_{{ forloop.counter }}" value="{{ forloop.counter }}" class="week-checkbox-input">
+                                                    第{{ forloop.counter }}周
+                                                </label>
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endwith %}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="btn-group" style="margin-top: 15px;">
+                                <button type="submit" class="btn">添加安排</button>
+                                <button type="button" class="btn btn-secondary" onclick="resetScheduleForm({{ course.id }})">重置表单</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p style="color: #666; text-align: center;">暂无课程，请先添加课程</p>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="semester-info" style="background-color: #fff3cd;">
+            <h3 style="margin-top: 0; color: #856404;">提示</h3>
+            <p style="margin-bottom: 0;">请先在管理后台设置当前学期信息</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script>
+        // 添加课程表单提交
+        document.getElementById('addCourseForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const formData = new FormData(this);
+
+            fetch('{% url "grading:add_course" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('课程添加成功！');
+                    location.reload();
+                } else {
+                    alert('添加失败：' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('添加失败，请重试');
+            });
+        });
+
+        // 添加课程安排表单提交
+        document.addEventListener('submit', function(e) {
+            if (e.target.classList.contains('addScheduleForm')) {
+                e.preventDefault();
+
+                const courseId = e.target.dataset.courseId;
+                const formData = new FormData(e.target);
+                formData.append('course_id', courseId);
+
+                // 调试：打印表单数据
+                console.log('提交的表单数据:');
+                for (let [key, value] of formData.entries()) {
+                    console.log(key + ': ' + value);
+                }
+
+                fetch('{% url "grading:add_schedule" %}', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('服务器响应:', data);
+                    if (data.status === 'success') {
+                        alert(data.message);
+
+                        // 检查是否是更新操作
+                        const scheduleId = formData.get('schedule_id');
+                        if (scheduleId) {
+                            // 这是更新操作
+                            if (data.schedule_id && data.schedule_id != scheduleId) {
+                                // 安排ID发生变化（合并后），刷新页面
+                                location.reload();
+                            } else {
+                                // 安排ID没有变化，更新显示的安排信息
+                                updateScheduleDisplay(courseId, scheduleId);
+                            }
+                        } else {
+                            // 这是新增操作，刷新页面
+                            location.reload();
+                        }
+
+                        // 重置表单
+                        e.target.reset();
+                        clearWeekSelection(courseId);
+                        // 隐藏表单
+                        document.getElementById('scheduleForm' + courseId).style.display = 'none';
+                    } else if (data.status === 'conflict') {
+                        // 处理冲突情况，显示现有安排
+                        console.log('检测到冲突，显示现有安排:', data);
+                        alert(data.message + '，正在显示现有安排信息');
+                        displayExistingSchedule(courseId, data);
+                    } else {
+                        alert('添加失败：' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('添加失败，请重试');
+                });
+            }
+        });
+
+        // 切换课程安排表单显示
+        function toggleScheduleForm(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            if (form.style.display === 'none' || form.style.display === '') {
+                form.style.display = 'block';
+                // 重置表单
+                form.querySelector('form').reset();
+                // 清除周次选择
+                clearWeekSelection(courseId);
+            } else {
+                form.style.display = 'none';
+            }
+        }
+
+        // 检查现有安排
+        function checkExistingSchedule(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            const weekday = form.querySelector('select[name="weekday"]').value;
+            const period = form.querySelector('select[name="period"]').value;
+
+            if (!weekday || !period) {
+                return; // 如果星期或时间段未选择，不检查
+            }
+
+            // 获取当前编辑的安排ID（如果有的话）
+            const currentScheduleId = form.querySelector('input[name="schedule_id"]')?.value;
+
+            // 发送请求检查是否有现有安排
+            const formData = new FormData();
+            formData.append('course_id', courseId);
+            formData.append('weekday', weekday);
+            formData.append('period', period);
+            formData.append('check_only', 'true'); // 标记为仅检查，不创建安排
+
+            fetch('{% url "grading:add_schedule" %}', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken')
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('检查现有安排响应:', data);
+                if (data.status === 'conflict') {
+                    // 检查是否是同一个安排（编辑模式下）
+                    if (currentScheduleId && data.schedule_id == currentScheduleId) {
+                        console.log('检测到当前正在编辑的安排，不进行合并显示');
+                        return;
+                    }
+
+                    // 存储现有安排信息，供后续合并使用
+                    form.dataset.existingSchedule = JSON.stringify(data);
+                    console.log('发现现有安排，已存储:', data);
+
+                    // 立即显示现有安排的周次状态
+                    displayExistingSchedule(courseId, data);
+
+                    // 显示提示信息
+                    let infoDiv = form.querySelector('.schedule-info');
+                    if (!infoDiv) {
+                        infoDiv = document.createElement('div');
+                        infoDiv.className = 'schedule-info';
+                        infoDiv.style.cssText = 'background-color: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; color: #856404;';
+
+                        // 找到表单的第一个子元素来插入提示信息
+                        const firstChild = form.querySelector('form').firstChild;
+                        form.querySelector('form').insertBefore(infoDiv, firstChild);
+                    }
+                    infoDiv.innerHTML = `<strong>提示：</strong>检测到现有安排，当前周次已显示。您可以调整周次选择，系统将自动合并您的修改。`;
+                } else {
+                    // 清除现有安排信息
+                    delete form.dataset.existingSchedule;
+
+                    // 移除提示信息
+                    const infoDiv = form.querySelector('.schedule-info');
+                    if (infoDiv) {
+                        infoDiv.remove();
+                    }
+
+                    // 清除周次选择
+                    clearWeekSelection(courseId);
+                }
+            })
+            .catch(error => {
+                console.error('检查现有安排失败:', error);
+            });
+        }
+
+        // 立即显示现有安排的周次状态
+        function displayExistingSchedule(courseId, data) {
+            const form = document.getElementById('scheduleForm' + courseId);
+
+            // 设置表单值
+            form.querySelector('select[name="weekday"]').value = data.weekday;
+            form.querySelector('select[name="period"]').value = data.period;
+            form.querySelector('input[name="start_week"]').value = data.start_week;
+            form.querySelector('input[name="end_week"]').value = data.end_week;
+
+            // 清除所有选择
+            const checkboxes = form.querySelectorAll('.week-checkbox-input');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+
+            // 根据week_status设置复选框状态
+            if (data.week_status) {
+                console.log('显示现有安排的周次状态:', data.week_status);
+                Object.entries(data.week_status).forEach(([weekNumber, isActive]) => {
+                    const checkbox = form.querySelector(`input[name="week_${weekNumber}"]`);
+                    if (checkbox) {
+                        checkbox.checked = isActive;
+                        console.log(`第${weekNumber}周复选框设置为: ${isActive}`);
+                    }
+                });
+            }
+
+            // 添加隐藏字段标识这是修改现有安排
+            let hiddenField = form.querySelector('input[name="schedule_id"]');
+            if (!hiddenField) {
+                hiddenField = document.createElement('input');
+                hiddenField.type = 'hidden';
+                hiddenField.name = 'schedule_id';
+                form.querySelector('form').appendChild(hiddenField);
+            }
+            hiddenField.value = data.schedule_id;
+
+            // 修改按钮文本
+            const submitBtn = form.querySelector('button[type="submit"]');
+            submitBtn.textContent = '合并安排';
+        }
+
+        // 根据开始和结束周次自动选择周次（带合并功能）
+        function updateWeekSelectionWithMerge(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            const startWeek = parseInt(form.querySelector('input[name="start_week"]').value) || 0;
+            const endWeek = parseInt(form.querySelector('input[name="end_week"]').value) || 0;
+
+            if (!startWeek || !endWeek) {
+                return; // 如果周次范围未设置，不更新
+            }
+
+            // 检查是否有现有安排需要合并
+            const existingScheduleData = form.dataset.existingSchedule;
+            if (existingScheduleData) {
+                try {
+                    const existingData = JSON.parse(existingScheduleData);
+                    console.log('合并现有安排:', existingData);
+
+                    // 获取现有安排的周次
+                    const existingWeeks = new Set();
+                    if (existingData.week_status) {
+                        Object.entries(existingData.week_status).forEach(([weekNumber, isActive]) => {
+                            if (isActive) {
+                                existingWeeks.add(parseInt(weekNumber));
+                            }
+                        });
+                    }
+
+                    // 获取新范围的周次
+                    const newWeeks = new Set();
+                    for (let week = startWeek; week <= endWeek; week++) {
+                        newWeeks.add(week);
+                    }
+
+                    // 合并周次（取并集）
+                    const mergedWeeks = new Set([...existingWeeks, ...newWeeks]);
+
+                    // 更新复选框状态
+                    const checkboxes = form.querySelectorAll('.week-checkbox-input');
+                    checkboxes.forEach((checkbox, index) => {
+                        const weekNumber = index + 1;
+                        checkbox.checked = mergedWeeks.has(weekNumber);
+                    });
+
+                    // 更新提示信息
+                    let infoDiv = form.querySelector('.schedule-info');
+                    if (infoDiv) {
+                        const existingWeekList = Array.from(existingWeeks).sort((a, b) => a - b);
+                        const newWeekList = Array.from(newWeeks).sort((a, b) => a - b);
+                        const mergedWeekList = Array.from(mergedWeeks).sort((a, b) => a - b);
+
+                        infoDiv.innerHTML = `
+                            <strong>提示：</strong>检测到现有安排，已自动合并显示。<br>
+                            <small>现有周次: ${existingWeekList.join(', ')} | 新周次: ${newWeekList.join(', ')} | 合并后: ${mergedWeekList.join(', ')}</small>
+                        `;
+                    }
+
+                } catch (error) {
+                    console.error('解析现有安排数据失败:', error);
+                    // 如果解析失败，使用普通更新
+                    updateWeekSelection(courseId);
+                }
+            } else {
+                // 没有现有安排，使用普通更新
+                updateWeekSelection(courseId);
+            }
+        }
+
+        // 根据开始和结束周次自动选择周次（原始版本）
+        function updateWeekSelection(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            const startWeek = parseInt(form.querySelector('input[name="start_week"]').value) || 0;
+            const endWeek = parseInt(form.querySelector('input[name="end_week"]').value) || 0;
+            const checkboxes = form.querySelectorAll('.week-checkbox-input');
+
+            checkboxes.forEach((checkbox, index) => {
+                const weekNumber = index + 1;
+                if (startWeek <= weekNumber && weekNumber <= endWeek) {
+                    checkbox.checked = true;
+                } else {
+                    checkbox.checked = false;
+                }
+            });
+        }
+
+        // 清除周次选择
+        function clearWeekSelection(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            const checkboxes = form.querySelectorAll('.week-checkbox-input');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+        }
+
+        // 重置课程安排表单
+        function resetScheduleForm(courseId) {
+            const form = document.getElementById('scheduleForm' + courseId);
+            form.querySelector('form').reset();
+            clearWeekSelection(courseId);
+        }
+
+        // 编辑现有安排
+        function editSchedule(courseId, scheduleId, weekdayDisplay, weekday, period, startWeek, endWeek) {
+            console.log('editSchedule called with:', {courseId, scheduleId, weekdayDisplay, weekday, period, startWeek, endWeek});
+            const form = document.getElementById('scheduleForm' + courseId);
+            console.log('Found form:', form);
+
+            // 设置表单值
+            form.querySelector('select[name="weekday"]').value = weekday;
+            form.querySelector('select[name="period"]').value = period;
+            form.querySelector('input[name="start_week"]').value = startWeek;
+            form.querySelector('input[name="end_week"]').value = endWeek;
+
+            // 添加隐藏字段
+            let hiddenField = form.querySelector('input[name="schedule_id"]');
+            if (!hiddenField) {
+                hiddenField = document.createElement('input');
+                hiddenField.type = 'hidden';
+                hiddenField.name = 'schedule_id';
+                form.querySelector('form').appendChild(hiddenField);
+            }
+            hiddenField.value = scheduleId;
+
+            // 获取现有周次安排
+            console.log('Fetching schedule weeks for schedule ID:', scheduleId);
+            fetch(`/grading/get-schedule-weeks/${scheduleId}/`, {
+                method: 'GET',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.status === 'success') {
+                    // 清除所有选择
+                    const checkboxes = form.querySelectorAll('.week-checkbox-input');
+                    checkboxes.forEach(checkbox => {
+                        checkbox.checked = false;
+                    });
+
+                    // 使用新的week_status数据来设置复选框状态
+                    if (data.week_status) {
+                        // 使用完整的周次状态信息
+                        console.log('设置周次复选框状态:', data.week_status);
+                        Object.entries(data.week_status).forEach(([weekNumber, isActive]) => {
+                            const checkbox = form.querySelector(`input[name="week_${weekNumber}"]`);
+                            if (checkbox) {
+                                checkbox.checked = isActive;
+                                console.log(`第${weekNumber}周复选框设置为: ${isActive}`);
+                            } else {
+                                console.log(`未找到第${weekNumber}周的复选框`);
+                            }
+                        });
+                    } else {
+                        // 向后兼容：使用旧的weeks数据
+                        console.log('使用向后兼容模式，活跃周次:', data.weeks);
+                        data.weeks.forEach(weekNumber => {
+                            const checkbox = form.querySelector(`input[name="week_${weekNumber}"]`);
+                            if (checkbox) {
+                                checkbox.checked = true;
+                            }
+                        });
+                    }
+
+                    // 修改按钮文本
+                    const submitBtn = form.querySelector('button[type="submit"]');
+                    submitBtn.textContent = '更新安排';
+
+                    // 显示提示信息
+                    let infoDiv = form.querySelector('.schedule-info');
+                    if (!infoDiv) {
+                        infoDiv = document.createElement('div');
+                        infoDiv.className = 'schedule-info';
+                        infoDiv.style.cssText = 'background-color: #fff3cd; padding: 10px; border-radius: 4px; margin-bottom: 15px; color: #856404;';
+
+                        // 找到表单的第一个子元素来插入提示信息
+                        const firstChild = form.querySelector('form').firstChild;
+                        form.querySelector('form').insertBefore(infoDiv, firstChild);
+                    }
+                    infoDiv.innerHTML = `<strong>提示：</strong>正在编辑 ${weekdayDisplay} 的安排，请调整周次选择后点击"更新安排"`;
+
+                    // 显示表单
+                    form.style.display = 'block';
+
+                    // 注意：不调用updateWeekSelection，因为我们已经从API获取了正确的周次状态
+                } else {
+                    console.error('API Error:', data.message);
+                    alert('获取安排信息失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Fetch Error:', error);
+                alert('获取安排信息失败: ' + error.message);
+            });
+        }
+
+
+
+
+
+        // 添加事件监听器
+        document.addEventListener('DOMContentLoaded', function() {
+            // 为所有课程添加周次选择监听器
+            const forms = document.querySelectorAll('.addScheduleForm');
+            forms.forEach(form => {
+                const courseId = form.dataset.courseId;
+                const startWeekInput = form.querySelector('input[name="start_week"]');
+                const endWeekInput = form.querySelector('input[name="end_week"]');
+                const weekdaySelect = form.querySelector('select[name="weekday"]');
+                const periodSelect = form.querySelector('select[name="period"]');
+
+                // 监听星期和时间段变化，实时检测冲突
+                weekdaySelect.addEventListener('change', () => {
+                    checkExistingSchedule(courseId);
+                });
+                periodSelect.addEventListener('change', () => {
+                    checkExistingSchedule(courseId);
+                });
+
+                // 监听周次范围变化，实时合并安排
+                startWeekInput.addEventListener('input', () => updateWeekSelectionWithMerge(courseId));
+                endWeekInput.addEventListener('input', () => updateWeekSelectionWithMerge(courseId));
+            });
+
+            // 为编辑按钮添加事件监听器
+            const editButtons = document.querySelectorAll('.edit-schedule-btn');
+            editButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const courseId = this.dataset.courseId;
+                    const scheduleId = this.dataset.scheduleId;
+                    const weekdayDisplay = this.dataset.weekdayDisplay;
+                    const weekday = this.dataset.weekday;
+                    const period = this.dataset.period;
+                    const startWeek = this.dataset.startWeek;
+                    const endWeek = this.dataset.endWeek;
+
+                    editSchedule(courseId, scheduleId, weekdayDisplay, weekday, period, startWeek, endWeek);
+                });
+            });
+        });
+
+
+
+        // 更新显示的安排信息
+        function updateScheduleDisplay(courseId, scheduleId) {
+            // 获取表单中的当前值
+            const form = document.getElementById('scheduleForm' + courseId);
+            const weekday = form.querySelector('select[name="weekday"]').value;
+            const period = form.querySelector('select[name="period"]').value;
+            const startWeek = form.querySelector('input[name="start_week"]').value;
+            const endWeek = form.querySelector('input[name="end_week"]').value;
+
+            // 获取选中的周次
+            const selectedWeeks = [];
+            const checkboxes = form.querySelectorAll('.week-checkbox-input:checked');
+            checkboxes.forEach(checkbox => {
+                selectedWeeks.push(parseInt(checkbox.value));
+            });
+
+            // 生成周次安排文本
+            let weekText = '';
+            if (selectedWeeks.length > 0) {
+                selectedWeeks.sort((a, b) => a - b);
+                weekText = `第${selectedWeeks.join(', ')}周`;
+            } else {
+                weekText = `第${startWeek}-${endWeek}周`;
+            }
+
+            // 获取星期和时间段的显示文本
+            const weekdayText = form.querySelector('select[name="weekday"] option:checked').text;
+            const periodText = form.querySelector('select[name="period"] option:checked').text;
+
+            // 更新显示的安排信息
+            const scheduleItem = document.querySelector(`[data-schedule-id="${scheduleId}"]`);
+            if (scheduleItem) {
+                const scheduleInfo = scheduleItem.querySelector('.schedule-info');
+                if (scheduleInfo) {
+                    scheduleInfo.textContent = `${weekdayText} ${periodText} - ${weekText}`;
+                }
+
+                // 更新编辑按钮的数据属性
+                const editBtn = scheduleItem.querySelector('.edit-schedule-btn');
+                if (editBtn) {
+                    editBtn.dataset.weekdayDisplay = weekdayText;
+                    editBtn.dataset.weekday = weekday;
+                    editBtn.dataset.period = period;
+                    editBtn.dataset.startWeek = startWeek;
+                    editBtn.dataset.endWeek = endWeek;
+                }
+            }
+        }
+
+        // 删除课程
+        function deleteCourse(courseId, courseName) {
+            if (!confirm(`确定要删除课程 "${courseName}" 吗？\n\n删除后将同时删除该课程的所有安排信息，此操作不可恢复。`)) {
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('course_id', courseId);
+
+            fetch('{% url "grading:delete_course" %}', {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // 显示成功消息
+                    alert(data.message);
+                    // 刷新页面以更新课程列表
+                    location.reload();
+                } else {
+                    alert('删除失败: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('删除课程失败:', error);
+                alert('删除课程失败，请稍后重试');
+            });
+        }
+
+        // 获取CSRF Token
+        function getCookie(name) {
+            let cookieValue = null;
+            if (document.cookie && document.cookie !== '') {
+                const cookies = document.cookie.split(';');
+                for (let i = 0; i < cookies.length; i++) {
+                    const cookie = cookies[i].trim();
+                    if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                        cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cookieValue;
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}超级管理员仪表板{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h4><i class="bi bi-speedometer2"></i> 超级管理员仪表板</h4>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-3">
+                            <div class="card bg-primary text-white">
+                                <div class="card-body">
+                                    <h5 class="card-title">总租户数</h5>
+                                    <h2>{{ tenants.count }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-success text-white">
+                                <div class="card-body">
+                                    <h5 class="card-title">活跃租户</h5>
+                                    <h2>{{ active_tenants }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-info text-white">
+                                <div class="card-body">
+                                    <h5 class="card-title">总用户数</h5>
+                                    <h2>{{ total_users }}</h2>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card bg-warning text-white">
+                                <div class="card-body">
+                                    <h5 class="card-title">系统状态</h5>
+                                    <h2>正常</h2>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header d-flex justify-content-between align-items-center">
+                                    <h5>租户管理</h5>
+                                    <button class="btn btn-primary" onclick="showCreateTenantModal()">
+                                        <i class="bi bi-plus-circle"></i> 创建租户
+                                    </button>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-striped">
+                                            <thead>
+                                                <tr>
+                                                    <th>租户名称</th>
+                                                    <th>描述</th>
+                                                    <th>状态</th>
+                                                    <th>创建时间</th>
+                                                    <th>操作</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% for tenant in tenants %}
+                                                <tr>
+                                                    <td>{{ tenant.name }}</td>
+                                                    <td>{{ tenant.description|truncatechars:50 }}</td>
+                                                    <td>
+                                                        {% if tenant.is_active %}
+                                                            <span class="badge bg-success">活跃</span>
+                                                        {% else %}
+                                                            <span class="badge bg-danger">停用</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>{{ tenant.created_at|date:"Y-m-d H:i" }}</td>
+                                                    <td>
+                                                        <button class="btn btn-sm btn-outline-primary" onclick="editTenant({{ tenant.id }})">
+                                                            <i class="bi bi-pencil"></i> 编辑
+                                                        </button>
+                                                        <a href="{% url 'grading:tenant_management' %}" class="btn btn-sm btn-outline-info">
+                                                            <i class="bi bi-gear"></i> 管理
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                                {% empty %}
+                                                <tr>
+                                                    <td colspan="5" class="text-center">暂无租户</td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 创建租户模态框 -->
+<div class="modal fade" id="createTenantModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">创建租户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="createTenantForm">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="tenantName" class="form-label">租户名称</label>
+                        <input type="text" class="form-control" id="tenantName" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="tenantDescription" class="form-label">描述</label>
+                        <textarea class="form-control" id="tenantDescription" name="description" rows="3"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="createTenant()">创建</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 编辑租户模态框 -->
+<div class="modal fade" id="editTenantModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">编辑租户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="editTenantForm">
+                    {% csrf_token %}
+                    <input type="hidden" id="editTenantId" name="tenant_id">
+                    <div class="mb-3">
+                        <label for="editTenantName" class="form-label">租户名称</label>
+                        <input type="text" class="form-control" id="editTenantName" name="name" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="editTenantDescription" class="form-label">描述</label>
+                        <textarea class="form-control" id="editTenantDescription" name="description" rows="3"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="editTenantActive" name="is_active" value="true">
+                            <label class="form-check-label" for="editTenantActive">
+                                激活租户
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary" onclick="updateTenant()">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showCreateTenantModal() {
+    document.getElementById('createTenantForm').reset();
+    new bootstrap.Modal(document.getElementById('createTenantModal')).show();
+}
+
+function createTenant() {
+    const form = document.getElementById('createTenantForm');
+    const formData = new FormData(form);
+
+    fetch('{% url "grading:create_tenant" %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert('租户创建成功！');
+            location.reload();
+        } else {
+            alert('创建失败：' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('请求失败，请检查网络连接');
+    });
+}
+
+function editTenant(tenantId) {
+    // 这里可以添加获取租户详情的逻辑
+    document.getElementById('editTenantId').value = tenantId;
+    new bootstrap.Modal(document.getElementById('editTenantModal')).show();
+}
+
+function updateTenant() {
+    const form = document.getElementById('editTenantForm');
+    const formData = new FormData(form);
+
+    fetch('{% url "grading:update_tenant" %}', {
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-CSRFToken': '{{ csrf_token }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert('租户更新成功！');
+            location.reload();
+        } else {
+            alert('更新失败：' + data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('请求失败，请检查网络连接');
+    });
+}
+</script>
+{% endblock %}

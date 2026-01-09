@@ -8,6 +8,18 @@ let selectedGrade = 'B';  // 设置默认评分为 B
 let gradeMode = 'letter';  // 评分方式：'letter' 或 'text'
 var currentFilePath = null;
 let pendingGrade = null;  // 待确认的评分
+let currentRepoId = null;  // 当前选择的仓库ID
+let currentCourse = null;  // 当前选择的课程
+let isLabCourse = false;  // 是否为实验课
+let isFileLocked = false;  // 当前文件是否被锁定（格式错误）
+let isLabReport = false;  // 当前文件是否为实验报告
+let hasComment = false;  // 当前文件是否有评价
+let pendingConfirmForComment = false;  // 确定按钮触发的评价流程
+let pendingDefaultLabComment = null;  // 实验报告默认评价待应用
+
+// 将关键变量暴露到window对象，供其他脚本使用
+window.currentCourse = null;
+window.currentRepoId = null;
 
 // 获取 CSRF Token
 window.getCSRFToken = function() {
@@ -37,14 +49,49 @@ function showError(message) {
   $('#file-content').html(alertHtml);
 }
 
-// 显示加载指示器
-function showLoading() {
+// 显示加载指示器（增强版）
+function showLoading(message = '请稍候', showProgress = false) {
   $('#loading').show();
+  $('#loading-message').text(message);
+  
+  if (showProgress) {
+    $('#loading-progress').show();
+    updateLoadingProgress(0);
+  } else {
+    $('#loading-progress').hide();
+  }
+}
+
+// 更新加载进度
+function updateLoadingProgress(percent) {
+  const progressBar = $('#loading-progress .progress-bar');
+  progressBar.css('width', percent + '%');
+  progressBar.attr('aria-valuenow', percent);
 }
 
 // 隐藏加载指示器
 function hideLoading() {
   $('#loading').hide();
+  $('#loading-progress').hide();
+}
+
+// 显示文件预览提示
+function showPreviewHint(message, type = 'info') {
+  const hint = $('#preview-hint');
+  hint.removeClass('alert-secondary alert-info alert-warning alert-success');
+  hint.addClass('alert-' + type);
+  $('#preview-hint-text').text(message);
+  hint.show();
+  
+  // 5秒后自动隐藏
+  setTimeout(() => {
+    hint.fadeOut();
+  }, 5000);
+}
+
+// 隐藏文件预览提示
+function hidePreviewHint() {
+  $('#preview-hint').hide();
 }
 
 // 设置评分按钮状态
@@ -96,7 +143,7 @@ window.switchGradeMode = function(mode) {
   console.log('文字评分按钮组:', $('#text-grade-buttons').length);
 
   // 验证模式参数
-  if (mode !== 'letter' && mode !== 'text') {
+  if (mode !== 'letter' && mode !== 'text' && mode !== 'percentage') {
     console.error('无效的评分模式:', mode);
     return;
   }
@@ -119,9 +166,11 @@ window.switchGradeMode = function(mode) {
   if (mode === 'letter') {
     console.log('切换到字母评分方式');
 
-    // 隐藏文字评分按钮组
+    // 隐藏其他评分按钮组
     $('#text-grade-buttons').hide();
+    $('#percentage-grade-input').hide();
     console.log('文字评分按钮组已隐藏');
+    console.log('百分制输入框已隐藏');
 
     // 显示字母评分按钮组
     $('#letter-grade-buttons').show();
@@ -130,6 +179,7 @@ window.switchGradeMode = function(mode) {
     // 验证显示状态
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
 
     // 设置默认评分
     if (!selectedGrade || !['A', 'B', 'C', 'D', 'E'].includes(selectedGrade)) {
@@ -145,9 +195,11 @@ window.switchGradeMode = function(mode) {
   } else if (mode === 'text') {
     console.log('切换到文字评分方式');
 
-    // 隐藏字母评分按钮组
+    // 隐藏其他评分按钮组
     $('#letter-grade-buttons').hide();
+    $('#percentage-grade-input').hide();
     console.log('字母评分按钮组已隐藏');
+    console.log('百分制输入框已隐藏');
 
     // 显示文字评分按钮组
     $('#text-grade-buttons').show();
@@ -156,6 +208,7 @@ window.switchGradeMode = function(mode) {
     // 验证显示状态
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
 
     // 设置默认评分
     if (!selectedGrade || !['优秀', '良好', '中等', '及格', '不及格'].includes(selectedGrade)) {
@@ -167,6 +220,42 @@ window.switchGradeMode = function(mode) {
 
     // 设置按钮状态
     setGradeButtonState(selectedGrade);
+  } else if (mode === 'percentage') {
+    console.log('切换到百分制评分方式');
+
+    // 隐藏其他评分按钮组
+    $('#letter-grade-buttons').hide();
+    $('#text-grade-buttons').hide();
+    console.log('字母评分按钮组已隐藏');
+    console.log('文字评分按钮组已隐藏');
+
+    // 显示百分制输入框
+    $('#percentage-grade-input').show();
+    console.log('百分制输入框已显示');
+
+    // 验证显示状态
+    console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
+    console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
+    console.log('百分制输入框显示状态:', $('#percentage-grade-input').is(':visible'));
+
+    // 设置默认评分或恢复之前的百分制评分
+    if (!selectedGrade || isNaN(parseFloat(selectedGrade))) {
+      console.log('设置默认百分制评分: 85');
+      selectedGrade = '85';
+      $('#percentage-input').val('85');
+    } else {
+      console.log('保持当前百分制评分:', selectedGrade);
+      $('#percentage-input').val(selectedGrade);
+    }
+    
+    // 清除可能存在的验证错误
+    $('#percentage-input').removeClass('is-invalid');
+    $('#percentage-input-error').remove();
+    
+    // 聚焦到输入框以便快速输入
+    setTimeout(function() {
+      $('#percentage-input').focus().select();
+    }, 100);
   }
 
   console.log('=== 评分方式切换完成 ===');
@@ -190,6 +279,11 @@ function checkTeacherCommentButton() {
 // 启用教师评价按钮
 function enableTeacherCommentButton() {
   console.log('Enabling teacher comment button');
+  // 检查文件是否被锁定
+  if (isFileLocked) {
+    console.log('文件已锁定，不启用教师评价按钮');
+    return;
+  }
   $('#teacher-comment-btn').prop('disabled', false);
   checkTeacherCommentButton();
 }
@@ -201,11 +295,47 @@ function disableTeacherCommentButton() {
   checkTeacherCommentButton();
 }
 
+// 切换实验报告默认评价区块显示
+function toggleLabReportDefaultComments() {
+  const container = $('#labReportDefaultComments');
+  if (!container.length) {
+    return;
+  }
+  if (isLabReport) {
+    container.show();
+  } else {
+    container.hide();
+  }
+}
+
+// 获取实验报告默认评价
+function getDefaultLabReportComment(grade) {
+  if (!grade) {
+    return '';
+  }
+  const button = $(`.default-lab-comment[data-grade="${grade}"]`);
+  const commentFromDom = button.data('comment');
+  if (commentFromDom) {
+    return commentFromDom;
+  }
+  const fallback = {
+    A: '实验内容完整，原理理解准确，步骤清晰，数据分析充分，结论可靠，报告规范。',
+    B: '实验内容基本完整，原理理解较好，步骤清楚，数据分析较为充分，结论合理，报告较规范。',
+    C: '实验内容完成一般，原理理解有欠缺，步骤描述不够清晰，数据分析不足，结论不够充分，需改进。'
+  };
+  return fallback[grade] || '';
+}
+
 // 启用AI评分按钮
 function enableAiScoreButton() {
   console.log('=== 启用AI评分按钮 ===');
   console.log('按钮元素:', $('#ai-score-btn').length);
   console.log('启用前状态:', $('#ai-score-btn').prop('disabled'));
+  // 检查文件是否被锁定
+  if (isFileLocked) {
+    console.log('文件已锁定，不启用AI评分按钮');
+    return;
+  }
   $('#ai-score-btn').prop('disabled', false);
   console.log('启用后状态:', $('#ai-score-btn').prop('disabled'));
   console.log('按钮文本:', $('#ai-score-btn').text());
@@ -280,6 +410,66 @@ window.handleGradeInfo = function(gradeInfo) {
     console.log('评分信息:', gradeInfo);
     console.log('当前评分方式:', gradeMode);
     console.log('当前评分:', selectedGrade);
+    console.log('识别为实验报告:', gradeInfo.is_lab_report);
+    window.handleGradeInfo.lastArg = gradeInfo;
+
+    // 检查文件是否被锁定
+    if (gradeInfo.locked && gradeInfo.format_valid === false) {
+        console.log('文件已被锁定且格式未修复，禁用评分功能');
+        isFileLocked = true;
+        
+        $('.grade-button').prop('disabled', true).addClass('disabled');
+        $('.grade-mode-btn').prop('disabled', true).addClass('disabled');
+        $('#add-grade-to-file').prop('disabled', true);
+        $('#cancel-grade').prop('disabled', true);
+        $('#teacher-comment-btn').prop('disabled', true);
+        $('#ai-score-btn').prop('disabled', true);
+        
+        const lockMessage = '<div id="file-lock-warning" class="alert alert-danger mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误已被锁定</strong><br>请先修复实验报告格式，再修改评分和评价。</div>';
+        $('#file-lock-warning').remove();
+        $('#file-content').prepend(lockMessage);
+        return;
+    } else if (gradeInfo.locked) {
+        console.log('文件已被锁定但格式已修复，允许教师覆盖修改');
+        isFileLocked = false;
+        const lockMessage = '<div id="file-lock-warning" class="alert alert-warning mt-3"><i class="bi bi-lock-fill"></i> <strong>此文件因格式错误被标记</strong><br>格式已修复，教师可覆盖修改评分与评价。</div>';
+        $('#file-lock-warning').remove();
+        $('#file-content').prepend(lockMessage);
+        $('.grade-button').prop('disabled', false).removeClass('disabled');
+        $('.grade-mode-btn').prop('disabled', false).removeClass('disabled');
+        $('#add-grade-to-file').prop('disabled', false);
+        $('#cancel-grade').prop('disabled', false);
+        $('#teacher-comment-btn').prop('disabled', false);
+        $('#ai-score-btn').prop('disabled', false);
+    } else {
+        // 如果文件未锁定，移除可能存在的锁定提示
+        isFileLocked = false;
+        $('#file-lock-warning').remove();
+        // 启用评分方式切换按钮
+        $('.grade-mode-btn').prop('disabled', false).removeClass('disabled');
+    }
+    
+    // 需求 4.5, 5.2: 检查是否为实验报告以及是否有评价
+    isLabReport = gradeInfo.is_lab_report || false;
+    hasComment = gradeInfo.has_comment || false;
+    console.log('文件类型检查: isLabReport=', isLabReport, ', hasComment=', hasComment);
+    
+    // 如果是实验报告且没有评价，提示填写评价但允许点击确定
+    if (isLabReport && !hasComment) {
+        console.log('实验报告缺少评价');
+        $('#add-grade-to-file').prop('disabled', false);
+        $('#lab-report-warning').remove();
+        $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+    } else {
+        // 移除警告提示（如果存在）
+        $('#lab-report-warning').remove();
+        // 恢复教师评价按钮样式
+        $('#teacher-comment-btn').removeClass('btn-warning').addClass('btn-outline-info');
+        // 如果文件未锁定，启用确定按钮
+        if (!isFileLocked) {
+            $('#add-grade-to-file').prop('disabled', false);
+        }
+    }
 
     if (gradeInfo.has_grade && gradeInfo.grade) {
         // 文件已有评分，设置按钮状态
@@ -292,12 +482,14 @@ window.handleGradeInfo = function(gradeInfo) {
         // 根据评分类型切换评分方式
         if (gradeInfo.grade_type === 'letter') {
             switchGradeMode('letter');
+            setGradeButtonState(gradeInfo.grade);
         } else if (gradeInfo.grade_type === 'text') {
             switchGradeMode('text');
+            setGradeButtonState(gradeInfo.grade);
+        } else if (gradeInfo.grade_type === 'percentage') {
+            switchGradeMode('percentage');
+            $('#percentage-input').val(gradeInfo.grade);
         }
-
-        // 设置评分按钮状态
-        setGradeButtonState(gradeInfo.grade);
 
         console.log('评分按钮状态已更新，当前评分:', selectedGrade, '评分方式:', gradeMode);
     } else {
@@ -318,6 +510,10 @@ window.handleGradeInfo = function(gradeInfo) {
                 console.log('字母评分方式，默认评分:', selectedGrade);
             } else if (gradeMode === 'text') {
                 selectedGrade = selectedGrade || '良好';
+            } else if (gradeMode === 'percentage') {
+                selectedGrade = selectedGrade || '85';
+                $('#percentage-input').val(selectedGrade);
+                console.log('百分制评分方式，默认评分:', selectedGrade);
                 console.log('文字评分方式，默认评分:', selectedGrade);
             }
         }
@@ -336,31 +532,44 @@ window.handleGradeInfo = function(gradeInfo) {
 
 // 处理文件内容显示
 window.handleFileContent = function(response) {
+    console.log('=== handleFileContent 开始 ===');
+    console.log('响应对象:', response);
+    console.log('文件内容容器元素数量:', $('#file-content').length);
+    
     if (response.status === 'success') {
         const fileContent = $('#file-content');
+        console.log('找到文件内容容器，准备清空');
         fileContent.empty();
+        console.log('文件内容容器已清空，准备显示内容，类型:', response.type);
 
         switch (response.type) {
             case 'text':
                 // 文本文件
-                fileContent.html(`<pre class="border p-3 bg-light">${response.content}</pre>`);
+                // 对HTML内容进行转义以防止XSS攻击
+                const escapedContent = $('<div>').text(response.content).html();
+                fileContent.html(`<pre class="border p-3 bg-light" style="white-space: pre-wrap; word-wrap: break-word; max-height: 600px; overflow-y: auto;">${escapedContent}</pre>`);
+                showPreviewHint('文本文件已加载，可以直接预览', 'success');
                 break;
             case 'image':
                 // 图片文件
                 fileContent.html(`<img src="${response.content}" class="img-fluid" alt="图片">`);
+                showPreviewHint('图片已加载，点击可放大查看', 'success');
                 break;
             case 'pdf':
                 // PDF 文件
                 fileContent.html(`<iframe src="${response.content}" class="w-100" style="height: 800px;"></iframe>`);
+                showPreviewHint('PDF文档已加载，可以直接预览', 'success');
                 break;
             case 'excel':
                 // Excel 文件
                 try {
                     // 直接显示后端返回的 HTML 表格
                     fileContent.html(response.content);
+                    showPreviewHint('Excel表格已转换为HTML格式显示', 'info');
                 } catch (error) {
                     console.error('Error displaying Excel content:', error);
                     fileContent.html('<div class="alert alert-danger">无法显示 Excel 内容</div>');
+                    showPreviewHint('Excel文件预览失败', 'warning');
                 }
                 break;
             case 'docx':
@@ -368,9 +577,11 @@ window.handleFileContent = function(response) {
                 try {
                     console.log('Displaying Word document content:', response.content);
                     fileContent.html(response.content);
+                    showPreviewHint('Word文档已转换为HTML格式显示', 'info');
                 } catch (error) {
                     console.error('Error displaying Word content:', error);
                     fileContent.html('<div class="alert alert-danger">无法显示 Word 文档内容</div>');
+                    showPreviewHint('Word文档预览失败', 'warning');
                 }
                 break;
             case 'binary':
@@ -381,9 +592,11 @@ window.handleFileContent = function(response) {
                         <a href="${response.content}" class="alert-link" download>点击下载文件</a>
                     </div>
                 `);
+                showPreviewHint('此文件类型不支持在线预览，请下载后查看', 'info');
                 break;
             default:
                 fileContent.html('<div class="alert alert-warning">不支持的文件类型</div>');
+                showPreviewHint('不支持的文件类型', 'warning');
         }
 
         // 处理评分信息
@@ -427,8 +640,17 @@ window.handleFileContent = function(response) {
 // 加载文件内容
 window.loadFile = function(path) {
     console.log('Loading file:', path);
-    showLoading();
-    currentFilePath = path;
+    
+    // 显示增强的加载指示器
+    showLoading('正在加载文件内容...', false);
+    hidePreviewHint();
+    
+    // 重置锁定状态（将在handleGradeInfo中根据实际情况更新）
+    isFileLocked = false;
+    
+    // 统一路径格式，使用正斜杠
+    const normalizedPath = path.replace(/\\/g, '/');
+    currentFilePath = normalizedPath;
 
     // 禁用教师评价按钮，直到文件加载完成
     disableTeacherCommentButton();
@@ -440,9 +662,9 @@ window.loadFile = function(path) {
     $('#add-grade-to-file').prop('disabled', true);
 
     // 获取当前文件所在目录
-    const dirPath = path.substring(0, path.lastIndexOf('/'));
+    const dirPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
     if (!dirPath) {
-        console.error('Invalid directory path');
+        console.error('Invalid directory path for:', path);
         $('#directory-file-count').text('0');
         return;
     }
@@ -518,18 +740,36 @@ window.loadFile = function(path) {
         showError('加载文件超时，请重试');
     }, 30000); // 30秒超时
 
+    // 准备请求数据
+    const requestData = {
+        path: normalizedPath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('Loading file with data:', requestData);
+
     $.ajax({
         url: '/grading/get_file_content/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: path
-        },
+        data: requestData,
         success: function(response) {
             clearTimeout(timeout);
-            console.log('File content response:', response);
+            console.log('=== 文件内容加载成功 ===');
+            console.log('响应状态:', response.status);
+            console.log('响应类型:', response.type);
+            console.log('响应内容长度:', response.content ? response.content.length : 0);
+            console.log('完整响应:', response);
+            
             handleFileContent(response);
 
             // 启用教师评价按钮
@@ -538,8 +778,10 @@ window.loadFile = function(path) {
             // 启用AI评分按钮
             enableAiScoreButton();
 
-            // 启用确定按钮
-            $('#add-grade-to-file').prop('disabled', false);
+            // 启用确定按钮（如果文件未锁定）
+            if (!isFileLocked) {
+                $('#add-grade-to-file').prop('disabled', false);
+            }
         },
         error: function(xhr, status, error) {
             clearTimeout(timeout);
@@ -580,19 +822,46 @@ window.saveGrade = function(grade) {
     addGradeToFile(grade);
 }
 
-// 获取所有文件节点
+// 获取所有文件节点（按目录树顺序）
 window.getAllFileNodes = function() {
     const tree = $('#directory-tree').jstree(true);
-    const allNodes = tree.get_json('#', { flat: true });
-    return allNodes.filter(node => node.type === 'file');
+    const fileNodes = [];
+    
+    // 深度优先遍历树，按显示顺序收集文件节点
+    function traverseNode(nodeId) {
+        const node = tree.get_node(nodeId);
+        if (!node) return;
+        
+        // 如果是文件节点，添加到列表
+        if (node.type === 'file') {
+            fileNodes.push(node);
+            console.log('收集文件节点:', node.id, node.text);
+        }
+        
+        // 递归遍历子节点
+        if (node.children && node.children.length > 0) {
+            node.children.forEach(childId => {
+                traverseNode(childId);
+            });
+        }
+    }
+    
+    // 从根节点开始遍历
+    traverseNode('#');
+    
+    console.log('总共收集到', fileNodes.length, '个文件节点');
+    return fileNodes;
 }
 
 // 获取当前文件在文件列表中的索引
 window.getCurrentFileIndex = function() {
     const fileNodes = getAllFileNodes();
     const currentFile = $('#directory-tree').jstree('get_selected', true)[0];
+    console.log('当前选中的文件:', currentFile ? currentFile.id : 'none');
     if (!currentFile) return -1;
-    return fileNodes.findIndex(node => node.id === currentFile.id);
+    const index = fileNodes.findIndex(node => node.id === currentFile.id);
+    console.log('当前文件索引:', index);
+    return index;
 }
 
 // 导航到上一个文件
@@ -602,7 +871,17 @@ window.navigateToPrevFile = function() {
 
     if (currentIndex > 0) {
         const prevNode = fileNodes[currentIndex - 1];
+        console.log('导航到上一个文件:', prevNode.text);
+        // 保存当前评分方式状态
+        const savedGradeMode = gradeMode;
+        const savedSelectedGrade = selectedGrade;
+        console.log('保存的评分方式:', savedGradeMode, '评分:', savedSelectedGrade);
+        
+        // 选择节点会触发文件加载
         $('#directory-tree').jstree('select_node', prevNode.id);
+        
+        // 文件加载后，如果文件没有评分，恢复之前的评分方式
+        // 这会在 handleFileContent 中自动处理
     }
 }
 
@@ -613,33 +892,60 @@ window.navigateToNextFile = function() {
 
     if (currentIndex < fileNodes.length - 1) {
         const nextNode = fileNodes[currentIndex + 1];
+        console.log('导航到下一个文件:', nextNode.text);
+        // 保存当前评分方式状态
+        const savedGradeMode = gradeMode;
+        const savedSelectedGrade = selectedGrade;
+        console.log('保存的评分方式:', savedGradeMode, '评分:', savedSelectedGrade);
+        
+        // 选择节点会触发文件加载
         $('#directory-tree').jstree('select_node', nextNode.id);
+        
+        // 文件加载后，如果文件没有评分，恢复之前的评分方式
+        // 这会在 handleFileContent 中自动处理
     }
 }
 
-// 更新导航按钮状态
+// 更新导航按钮状态和文件位置显示
 window.updateNavigationButtons = function() {
     const fileNodes = getAllFileNodes();
     const currentIndex = getCurrentFileIndex();
+    const totalFiles = fileNodes.length;
 
+    // 更新按钮禁用状态
     $('#prev-file').prop('disabled', currentIndex <= 0);
-    $('#next-file').prop('disabled', currentIndex >= fileNodes.length - 1);
+    $('#next-file').prop('disabled', currentIndex >= totalFiles - 1);
+    
+    // 更新文件位置显示（如"3/10"）
+    if (currentIndex >= 0 && totalFiles > 0) {
+        $('#current-file-index').text(currentIndex + 1);  // 显示从1开始的索引
+        $('#total-files').text(totalFiles);
+    } else {
+        $('#current-file-index').text('0');
+        $('#total-files').text('0');
+    }
+    
+    console.log('导航状态已更新 - 当前文件:', currentIndex + 1, '/', totalFiles);
 }
 
-// 在文件选择时更新导航按钮状态
-$('#directory-tree').on('select_node.jstree', function(e, data) {
-    if (data.node.type === 'file') {
-        updateNavigationButtons();
-    }
-});
+// 注意：文件选择时的导航按钮更新已在 initTree() 函数中的 jstree 初始化时处理
+// 这里不需要重复绑定事件
 
 // 修改addGradeToFile函数，在评分后自动导航到下一个文件
 window.addGradeToFile = function(grade) {
-    console.log('Adding grade to file:', grade);
-    console.log('Current file path:', currentFilePath);
+    console.log('=== 添加评分到文件 ===');
+    console.log('评分:', grade);
+    console.log('评分方式:', gradeMode);
+    console.log('当前文件路径:', currentFilePath);
 
     if (!currentFilePath) {
         showError('请先选择要评分的文件');
+        return;
+    }
+
+    if (isLabReport) {
+        $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+        $('#teacherCommentModal').modal('show');
         return;
     }
 
@@ -649,22 +955,48 @@ window.addGradeToFile = function(grade) {
     }
 
     showLoading();
+    
+    // 准备请求数据
+    const requestData = {
+        path: currentFilePath,
+        grade: grade,
+        grade_type: gradeMode  // 添加评分方式参数
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('请求数据:', requestData);
+    console.log('后端将自动判断作业类型');
+    
     $.ajax({
         url: '/grading/add_grade_to_file/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: currentFilePath,
-            grade: grade
-        },
+        data: requestData,
         success: function(response) {
             console.log('Grade added successfully:', response);
             if (response.status === 'success') {
+                // 检查是否有警告信息
+                let alertClass = 'alert-success';
+                let alertMessage = '评分已成功保存';
+                
+                if (response.data && response.data.warning) {
+                    alertClass = 'alert-warning';
+                    alertMessage = response.data.warning;
+                    console.warn('Warning:', response.data.warning);
+                }
+                
                 const alertHtml = `
-                    <div class="alert alert-success alert-dismissible fade show" role="alert">
-                        评分已添加到文件末尾
+                    <div class="alert ${alertClass} alert-dismissible fade show" role="alert">
+                        ${alertMessage}
                         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
                     </div>
                 `;
@@ -676,26 +1008,64 @@ window.addGradeToFile = function(grade) {
                 console.log('Current file index:', currentIndex);
                 console.log('Total files:', fileNodes.length);
 
+                const tree = $('#directory-tree').jstree(true);
+                if (tree) {
+                    const node = tree.get_node(currentFilePath);
+                    if (node && node.data) {
+                        node.data.has_updates = false;
+                        tree.redraw_node(node);
+                        if (typeof window.addHomeworkUpdateBadges === 'function') {
+                            window.addHomeworkUpdateBadges();
+                        }
+                    }
+                }
+
                 // 自动导航到下一个文件
                 if (currentIndex < fileNodes.length - 1) {
                     const nextNode = fileNodes[currentIndex + 1];
-                    console.log('Navigating to next file:', nextNode.id);
+                    console.log('当前索引:', currentIndex);
+                    console.log('下一个文件节点:', nextNode.id, nextNode.text);
+                    console.log('下一个文件路径:', nextNode.data ? nextNode.data.path : 'undefined');
+                    
                     // 使用 jstree 的 select_node 方法选中下一个文件
+                    // 这会触发 select_node 事件，自动调用 loadFile
                     $('#directory-tree').jstree('select_node', nextNode.id);
-                    // 加载下一个文件的内容
-                    loadFile(nextNode.id);
                 } else {
                     console.log('Last file reached, reloading current file');
                     // 如果是最后一个文件，重新加载当前文件以显示新添加的评分
                     loadFile(currentFilePath);
                 }
             } else {
+                if (response.message && response.message.includes('实验报告必须添加评价')) {
+                    pendingConfirmForComment = true;
+                    $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+                    $('#teacherCommentModal').modal('show');
+                    return;
+                }
                 showError(response.message);
             }
         },
         error: function(xhr, status, error) {
             console.error('Error adding grade to file:', error);
-            showError('添加评分到文件失败：' + error);
+            console.error('XHR response:', xhr.responseJSON);
+            
+            // 处理特定的错误情况
+            let errorMessage = '添加评分失败';
+            if (xhr.responseJSON && xhr.responseJSON.message) {
+                errorMessage = xhr.responseJSON.message;
+                
+                // 如果是实验报告缺少评价的错误，显示特殊提示
+                if (errorMessage.includes('实验报告必须添加评价')) {
+                    pendingConfirmForComment = true;
+                    $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+                    $('#teacherCommentModal').modal('show');
+                    return;
+                }
+            } else {
+                errorMessage += '：' + error;
+            }
+            
+            showError(errorMessage);
         },
         complete: function() {
             hideLoading();
@@ -711,15 +1081,29 @@ window.cancelGrade = function() {
     }
 
     showLoading();
+    
+    // 准备请求数据
+    const requestData = {
+        path: currentFilePath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('撤销评分请求数据:', requestData);
+    
     $.ajax({
         url: '/grading/remove_grade/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            path: currentFilePath
-        },
+        data: requestData,
         success: function(response) {
             if (response.status === 'success') {
                 // 恢复之前的评分状态
@@ -761,13 +1145,40 @@ window.initTree = function() {
     const initialData = Array.isArray(window.initialTreeData) ? window.initialTreeData : [];
     console.log('Processed initial data:', initialData);
 
+    // 确保jQuery可用
+    if (typeof jQuery === 'undefined') {
+        console.error('jQuery 未加载，无法初始化文件树');
+        return;
+    }
+    const $ = jQuery;
+    
+    // 首先检查目录树容器是否存在
+    const $treeContainer = $('#directory-tree');
+    if ($treeContainer.length === 0) {
+        console.error('目录树容器 #directory-tree 未找到');
+        return;
+    }
+    
     // 销毁现有的树（如果存在）
-    if ($('#directory-tree').jstree(true)) {
-        $('#directory-tree').jstree(true).destroy();
+    if ($treeContainer.jstree(true)) {
+        try {
+            $treeContainer.jstree(true).destroy();
+        } catch (e) {
+            console.error('销毁现有树时出错:', e);
+        }
     }
 
+    // 清空目录树容器，确保没有残留内容影响初始化
+    $treeContainer.empty();
+    
+    // 如果没有数据，不初始化 jstree，只显示提示信息
+    if (initialData.length === 0) {
+        $treeContainer.html('<p class="text-muted">请选择仓库和课程</p>');
+        return;
+    }
+    
     // 显示加载状态
-    $('#directory-tree').html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
+    $treeContainer.html('<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">加载中...</span></div></div>');
 
     // 配置 jstree
     const treeConfig = {
@@ -799,6 +1210,11 @@ window.initTree = function() {
         'plugins': ['types', 'wholerow', 'state', 'contextmenu'],
         'contextmenu': {
             'items': function(node) {
+                // 安全检查：确保 node 存在且有效
+                if (!node || !node.id) {
+                    return {};
+                }
+                
                 var items = {};
                 if (node.type === 'folder') {
                     items.batchAiScore = {
@@ -826,18 +1242,38 @@ window.initTree = function() {
     };
 
     // 初始化 jstree
-    $('#directory-tree').jstree(treeConfig).on('ready.jstree', function() {
-        console.log('Tree initialized');
-        // 树初始化完成后，如果有初始选中的节点，加载其内容
-        const selectedNodes = $('#directory-tree').jstree('get_selected');
-        if (selectedNodes.length > 0) {
-            const node = $('#directory-tree').jstree('get_node', selectedNodes[0]);
-            if (node && node.type === 'file') {
-                loadFile(node.id);
-            }
-        }
-    }).on('select_node.jstree', function(e, data) {
-        // 确保只处理文件节点
+    try {
+        $('#directory-tree').jstree(treeConfig)
+            .on('ready.jstree', function() {
+                console.log('Tree initialized');
+                
+                // 为作业文件夹添加类型标签
+                if (typeof window.addHomeworkTypeLabels === 'function') {
+                    window.addHomeworkTypeLabels();
+                }
+                if (typeof window.addHomeworkUpdateBadges === 'function') {
+                    window.addHomeworkUpdateBadges();
+                }
+                
+                // 树初始化完成后，如果有初始选中的节点，加载其内容
+                const selectedNodes = $('#directory-tree').jstree('get_selected');
+                if (selectedNodes.length > 0) {
+                    const node = $('#directory-tree').jstree('get_node', selectedNodes[0]);
+                    if (node && node.type === 'file') {
+                        loadFile(node.id);
+                    }
+                }
+            })
+            .on('open_node.jstree', function() {
+                if (typeof window.addHomeworkTypeLabels === 'function') {
+                    window.addHomeworkTypeLabels();
+                }
+                if (typeof window.addHomeworkUpdateBadges === 'function') {
+                    window.addHomeworkUpdateBadges();
+                }
+            })
+            .on('select_node.jstree', function(e, data) {
+        // 处理文件节点
         if (data.node.type === 'file') {
             // 取消其他节点的选中状态
             const selectedNodes = $('#directory-tree').jstree('get_selected');
@@ -849,210 +1285,28 @@ window.initTree = function() {
 
             // 加载文件内容
             loadFile(data.node.id);
-            // 更新导航按钮状态
+            // 更新导航按钮状态和文件位置显示
             updateNavigationButtons();
+            
+            // 禁用批量登分按钮（选中的是文件，不是文件夹）
+            $('#batch-grade-btn').prop('disabled', true)
+                .attr('title', '请先选择作业文件夹（非文件）')
+                .html('<i class="bi bi-tasks"></i> 批量登分');
+            currentHomeworkFolder = null;
+            currentHomeworkId = null;
+        } else if (data.node.type === 'folder') {
+            // 处理文件夹节点 - 更新批量登分按钮
+            updateBatchGradeButton(data.node.id, data.node.id);
         }
     });
-}
-
-// 新增：处理批量AI评分
-function handleBatchAiScore(path) {
-    if (!confirm(`确定要对目录 "${path}" 下的所有作业进行批量AI评分吗？\n这个过程可能需要一些时间。`)) {
-        return;
+    } catch (error) {
+        console.error('初始化 jstree 时出错:', error);
+        $('#directory-tree').html('<div class="alert alert-warning">目录树初始化失败，请刷新页面重试</div>');
     }
-
-    console.log('开始批量AI评分，目录路径:', path);
-    showLoading();
-
-    $.ajax({
-        url: '/grading/batch_ai_score/',
-        method: 'POST',
-        headers: {
-            'X-CSRFToken': getCSRFToken()
-        },
-        data: {
-            path: path
-        },
-        success: function(response) {
-            if (response.status === 'success') {
-                // 构建结果显示的HTML
-                let resultsHtml = '<ul class="list-group">';
-                response.results.forEach(function(result) {
-                    if (result.success) {
-                        resultsHtml += `<li class="list-group-item list-group-item-success">${result.file}: 成功 (分数: ${result.score}, 等级: ${result.grade})</li>`;
-                    } else {
-                        resultsHtml += `<li class="list-group-item list-group-item-danger">${result.file}: 失败 (${result.error})</li>`;
-                    }
-                });
-                resultsHtml += '</ul>';
-
-                // 使用一个模态框来显示详细结果
-                $('#batch-score-results-body').html(resultsHtml);
-                $('#batch-score-summary').text(response.message);
-                $('#batchScoreResultModal').modal('show');
-
-                // 刷新文件树以更新状态
-                $('#directory-tree').jstree(true).refresh();
-
-            } else {
-                showError('批量AI评分失败: ' + response.message);
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('批量AI评分请求失败:', error);
-            let errorMessage = '批量AI评分请求失败';
-            if (xhr.responseJSON && xhr.responseJSON.message) {
-                errorMessage = xhr.responseJSON.message;
-            } else if (xhr.status === 400) {
-                errorMessage = '请求参数错误';
-            } else if (xhr.status === 500) {
-                errorMessage = '服务器内部错误';
-            }
-            showError(errorMessage);
-        },
-        complete: function() {
-            hideLoading();
-        }
-    });
 }
 
-// 显示AI评分提示模态框
-function showAiScoreAlertModal(message, filePath) {
-    console.log('显示AI评分提示模态框:', message, filePath);
-
-    // 设置提示信息
-    $('#aiScoreAlertMessage').text(message);
-
-    // 加载文件内容
-    loadFileContentForModal(filePath);
-
-    // 加载评分信息
-    loadGradeInfoForModal(filePath);
-
-    // 显示模态框
-    $('#aiScoreAlertModal').modal('show');
-}
-
-// 为模态框加载文件内容
-function loadFileContentForModal(filePath) {
-    if (!filePath) {
-        $('#fileContentPreview').html('<div class="text-danger">文件路径无效</div>');
-        return;
-    }
-
-    $('#fileContentPreview').html('<div class="text-muted">正在加载文件内容...</div>');
-
-    $.ajax({
-        url: '/grading/get_file_content/',
-        method: 'GET',
-        data: {
-            file_path: filePath
-        },
-        success: function(response) {
-            if (response.success) {
-                let content = response.content || '文件内容为空';
-                // 限制显示长度，避免模态框过大
-                if (content.length > 2000) {
-                    content = content.substring(0, 2000) + '\n\n... (内容过长，已截断)';
-                }
-                $('#fileContentPreview').html('<pre style="white-space: pre-wrap; word-wrap: break-word;">' +
-                    content.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
-            } else {
-                $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + (response.message || '未知错误') + '</div>');
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('加载文件内容失败:', error);
-            $('#fileContentPreview').html('<div class="text-danger">加载文件内容失败: ' + error + '</div>');
-        }
-    });
-}
-
-// 为模态框加载评分信息
-function loadGradeInfoForModal(filePath) {
-    if (!filePath) {
-        $('#gradeInfoPreview').html('<div class="text-danger">文件路径无效</div>');
-        return;
-    }
-
-    $('#gradeInfoPreview').html('<div class="text-muted">正在检查评分信息...</div>');
-
-    // 使用专门的API来获取评分信息
-    $.ajax({
-        url: '/grading/get_file_grade_info/',
-        method: 'GET',
-        data: {
-            file_path: filePath
-        },
-        success: function(response) {
-            if (response.status === 'success') {
-                let gradeInfo = formatGradeInfoForModal(response.grade_info, response.content_preview, response.content_length);
-                $('#gradeInfoPreview').html(gradeInfo);
-            } else {
-                $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + (response.message || '未知错误') + '</div>');
-            }
-        },
-        error: function(xhr, status, error) {
-            console.error('检查评分信息失败:', error);
-            $('#gradeInfoPreview').html('<div class="text-danger">检查评分信息失败: ' + error + '</div>');
-        }
-    });
-}
-
-// 格式化评分信息用于模态框显示
-function formatGradeInfoForModal(gradeInfo, contentPreview, contentLength) {
-    let html = '<div class="mb-2"><strong>评分信息分析：</strong></div>';
-
-    // 显示评分状态
-    if (gradeInfo.has_grade) {
-        html += '<div class="alert alert-warning mb-2">';
-        html += '<i class="bi bi-exclamation-triangle"></i> <strong>已发现评分！</strong>';
-        html += '</div>';
-
-        // 显示具体评分信息
-        html += '<div class="card mb-2">';
-        html += '<div class="card-body p-2">';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>评分：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-primary">' + gradeInfo.grade + '</span></div>';
-        html += '</div>';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>评分类型：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-info">' + (gradeInfo.grade_type || '未知') + '</span></div>';
-        html += '</div>';
-        html += '<div class="row">';
-        html += '<div class="col-6"><strong>位置：</strong></div>';
-        html += '<div class="col-6"><span class="badge bg-secondary">' + (gradeInfo.in_table ? '表格中' : '段落中') + '</span></div>';
-        html += '</div>';
-        html += '</div>';
-        html += '</div>';
-
-        // 显示AI评分状态
-        html += '<div class="alert alert-danger mb-2">';
-        html += '<i class="bi bi-robot"></i> <strong>AI评分已禁用</strong><br>';
-        html += '该文件已有评分，无法进行AI评分。如需重新评分，请先删除现有评分。';
-        html += '</div>';
-    } else {
-        html += '<div class="alert alert-success mb-2">';
-        html += '<i class="bi bi-check-circle"></i> <strong>未发现评分</strong><br>';
-        html += '该文件可以进行AI评分。';
-        html += '</div>';
-    }
-
-    // 显示文件基本信息
-    html += '<hr><div class="small text-muted">';
-    html += '<div><strong>文件大小：</strong>' + (contentLength || 0) + ' 字符</div>';
-    html += '<div><strong>内容预览：</strong></div>';
-    html += '<div style="max-height: 100px; overflow-y: auto; font-size: 0.8em; background-color: #fff; padding: 5px; border: 1px solid #dee2e6;">';
-    html += contentPreview.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    html += '</div></div>';
-
-    return html;
-}
-
-// 页面加载完成后初始化树
-$(document).ready(function() {
-    console.log('=== 页面加载开始 ===');
+// 页面加载完成后初始化
+document.addEventListener('DOMContentLoaded', function() {
     console.log('Document ready, initializing tree...');
 
     // 基本检查
@@ -1068,6 +1322,16 @@ $(document).ready(function() {
 
     // 确保AI评分按钮初始状态为禁用
     disableAiScoreButton();
+
+    // 初始化批量登分按钮为禁用状态
+    console.log('=== 初始化批量登分按钮 ===');
+    console.log('按钮元素数量:', $('#batch-grade-btn').length);
+    console.log('初始disabled状态:', $('#batch-grade-btn').prop('disabled'));
+    $('#batch-grade-btn').prop('disabled', true)
+        .attr('title', '请先选择作业文件夹（非文件）')
+        .html('<i class="bi bi-tasks"></i> 批量登分');
+    console.log('设置后disabled状态:', $('#batch-grade-btn').prop('disabled'));
+    console.log('按钮文本:', $('#batch-grade-btn').text());
 
     // 设置初始树数据
     if (window.initialTreeData) {
@@ -1136,22 +1400,135 @@ $(document).ready(function() {
     console.log('字母评分按钮组显示状态:', $('#letter-grade-buttons').is(':visible'));
     console.log('文字评分按钮组显示状态:', $('#text-grade-buttons').is(':visible'));
 
-    // 绑定评分按钮点击事件
-    $(document).on('click', '.grade-button', function() {
+    // 绑定评分按钮点击事件（使用事件委托，避免重复绑定）
+    $(document).off('click', '.grade-button').on('click', '.grade-button', function() {
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
+        
         const grade = $(this).data('grade');
-        console.log('Grade button clicked:', grade);
-        saveGrade(grade);
+        console.log('评分按钮被点击:', grade);
+        
+        // 更新按钮状态
+        $('.grade-button').removeClass('active');
+        $(this).addClass('active');
+        selectedGrade = grade;
+        
+        if (isLabReport) {
+            const defaultComment = getDefaultLabReportComment(grade);
+            pendingDefaultLabComment = defaultComment ? { grade: grade, comment: defaultComment } : null;
+            pendingConfirmForComment = true;
+            $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+            $('#teacherCommentModal').modal('show');
+            return;
+        }
+
+        // 立即保存评分并转到下一个文件
+        addGradeToFile(grade);
     });
 
-    // 绑定确定按钮点击事件
-    $(document).on('click', '#add-grade-to-file', function() {
-        console.log('Confirm button clicked, using selected grade:', selectedGrade);
-        // 使用当前选中的评分
-        addGradeToFile(selectedGrade);
+    // 绑定百分制输入框变化事件
+    $(document).off('input', '#percentage-input').on('input', '#percentage-input', function() {
+        const value = $(this).val();
+        console.log('百分制输入框值变化:', value);
+        
+        // 移除之前的错误提示
+        $(this).removeClass('is-invalid');
+        $('#percentage-input-error').remove();
+        
+        // 验证输入值
+        if (value !== '') {
+            const numValue = parseFloat(value);
+            if (isNaN(numValue)) {
+                // 非数字输入
+                $(this).addClass('is-invalid');
+                $(this).after('<div id="percentage-input-error" class="invalid-feedback">请输入有效的数字</div>');
+            } else if (numValue < 0 || numValue > 100) {
+                // 超出范围
+                $(this).addClass('is-invalid');
+                $(this).after('<div id="percentage-input-error" class="invalid-feedback">分数必须在0-100之间</div>');
+            } else {
+                // 有效输入
+                selectedGrade = value;
+                console.log('百分制评分已更新:', selectedGrade);
+            }
+        }
+    });
+
+    // 绑定确定按钮点击事件（使用事件委托，避免重复绑定）
+    $(document).off('click', '#add-grade-to-file').on('click', '#add-grade-to-file', function() {
+        console.log('确定按钮被点击，当前选中评分:', selectedGrade);
+        
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
+        
+        if (!currentFilePath) {
+            showError('请先选择要评分的文件');
+            return;
+        }
+
+        if (isLabReport) {
+            pendingConfirmForComment = true;
+            $('#teacher-comment-btn').addClass('btn-warning').removeClass('btn-outline-info');
+            $('#teacherCommentModal').modal('show');
+            return;
+        }
+
+        // 如果是百分制模式，从输入框获取评分并验证
+        let gradeToSubmit = selectedGrade;
+        if (gradeMode === 'percentage') {
+            const percentageValue = $('#percentage-input').val();
+            if (!percentageValue || percentageValue === '') {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">请输入百分制评分（0-100）</div>');
+                return;
+            }
+            const numValue = parseFloat(percentageValue);
+            if (isNaN(numValue)) {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">请输入有效的数字</div>');
+                return;
+            }
+            if (numValue < 0 || numValue > 100) {
+                $('#percentage-input').addClass('is-invalid');
+                $('#percentage-input-error').remove();
+                $('#percentage-input').after('<div id="percentage-input-error" class="invalid-feedback d-block">分数必须在0-100之间</div>');
+                return;
+            }
+            // 验证通过，移除错误提示
+            $('#percentage-input').removeClass('is-invalid');
+            $('#percentage-input-error').remove();
+            
+            gradeToSubmit = percentageValue;
+            selectedGrade = percentageValue;  // 更新全局变量
+        }
+
+        if (!gradeToSubmit) {
+            showError('请先选择评分');
+            return;
+        }
+
+        // 保存评分并转到下一个文件
+        addGradeToFile(gradeToSubmit);
     });
 
     // 绑定撤销按钮点击事件
     $(document).on('click', '#cancel-grade', function() {
+        // 检查文件是否被锁定
+        if (isFileLocked) {
+            console.log('文件已锁定，不允许撤销评分');
+            showError('此文件因格式错误已被锁定，不允许修改评分');
+            return;
+        }
         cancelGrade();
     });
 
@@ -1179,6 +1556,34 @@ $(document).ready(function() {
     $(document).on('click', '#saveTeacherComment', function() {
         console.log('保存教师评价按钮被点击');
         saveTeacherComment();
+    });
+
+    // 需求 5.1.1: 绑定评价输入框的自动保存功能（每2秒自动保存）
+    $(document).on('input', '#teacherCommentText', function() {
+        const commentText = $(this).val();
+        if (currentFilePath && window.commentCacheService) {
+            window.commentCacheService.autosave(currentFilePath, commentText);
+        }
+    });
+
+    // 实验报告默认评价按钮
+    $(document).on('click', '.default-lab-comment', function() {
+        if (!isLabReport) {
+            return;
+        }
+        const grade = $(this).data('grade');
+        const comment = $(this).data('comment');
+        if (!comment) {
+            return;
+        }
+
+        if (grade) {
+            switchGradeMode('letter');
+            setGradeButtonState(grade);
+        }
+
+        $('#teacherCommentText').val(comment).trigger('input').focus();
+        console.log('已应用实验报告默认评价:', grade);
     });
 
     // 新增：绑定AI评分按钮点击事件
@@ -1212,6 +1617,17 @@ $(document).ready(function() {
                 if (response.status === 'success') {
                     // 使用一个模态框或者alert来显示结果
                     alert(`AI评分完成！\n\n分数: ${response.score}\n等级: ${response.grade}\n\n评语:\n${response.comment}`);
+                    const tree = $('#directory-tree').jstree(true);
+                    if (tree && currentFilePath) {
+                        const node = tree.get_node(currentFilePath);
+                        if (node && node.data) {
+                            node.data.has_updates = false;
+                            tree.redraw_node(node);
+                            if (typeof window.addHomeworkUpdateBadges === 'function') {
+                                window.addHomeworkUpdateBadges();
+                            }
+                        }
+                    }
                     // 刷新文件内容以显示新的评分和评语
                     loadFile(currentFilePath);
                 } else {
@@ -1236,18 +1652,24 @@ $(document).ready(function() {
                 showError(errorMessage);
             },
             complete: function() {
-                // 恢复按钮状态
-                $('#ai-score-btn').prop('disabled', false).html('<i class="bi bi-robot"></i> AI评分');
+                // 恢复按钮状态（如果文件未锁定）
+                if (!isFileLocked) {
+                    $('#ai-score-btn').prop('disabled', false).html('<i class="bi bi-robot"></i> AI评分');
+                } else {
+                    $('#ai-score-btn').prop('disabled', true).html('<i class="bi bi-robot"></i> AI评分');
+                }
                 hideLoading();
             }
         });
     });
 
-    // 模态框显示时自动加载评价内容
+    // 模态框显示时自动加载评价内容和历史记录
     $('#teacherCommentModal').on('show.bs.modal', function() {
         console.log('=== 教师评价模态框显示 ===');
         console.log('当前文件路径:', currentFilePath);
         console.log('输入框元素:', $('#teacherCommentText').length);
+
+        toggleLabReportDefaultComments();
 
         if (currentFilePath) {
             console.log('开始加载评价内容...');
@@ -1256,6 +1678,21 @@ $(document).ready(function() {
         } else {
             console.log('没有当前文件路径，清空输入框');
             $('#teacherCommentText').val('');
+        }
+        
+        // 需求 5.2.3: 加载推荐评价模板
+        loadCommentTemplates();
+        
+        // 渲染历史评价
+        CommentHistory.renderHistory('commentHistoryContainer');
+    });
+
+    // 需求 5.1.2: 模态框关闭时停止自动保存
+    $('#teacherCommentModal').on('hide.bs.modal', function() {
+        console.log('=== 教师评价模态框关闭 ===');
+        if (window.commentCacheService) {
+            window.commentCacheService.stopAutosave();
+            console.log('自动保存已停止');
         }
     });
 
@@ -1287,12 +1724,25 @@ window.loadTeacherComment = function(filePath) {
         return;
     }
 
+    // 准备请求数据
+    const requestData = {
+        file_path: filePath
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('获取教师评价请求数据:', requestData);
+
     $.ajax({
         url: '/grading/get_teacher_comment/',
         method: 'GET',
-        data: {
-            file_path: filePath
-        },
+        data: requestData,
         success: function(response) {
             console.log('=== 获取教师评价响应 ===');
             console.log('响应内容:', response);
@@ -1302,20 +1752,66 @@ window.loadTeacherComment = function(filePath) {
 
             if (response.success) {
                 console.log('获取评价成功，准备更新显示');
-                const commentText = response.comment || '';
-                console.log('评价文本:', commentText);
-                console.log('输入框元素存在:', $('#teacherCommentText').length > 0);
-
-                // 将评价内容载入到输入框中，方便直接修改
-                $('#teacherCommentText').val(commentText);
+                const savedComment = response.comment || '';
+                console.log('已保存的评价文本:', savedComment);
+                
+                // 需求 5.1.3, 5.1.4: 检查是否有缓存的评价
+                const cachedData = window.commentCacheService ? window.commentCacheService.load(filePath) : null;
+                
+                if (cachedData && cachedData.comment) {
+                    console.log('找到缓存的评价:', cachedData.comment);
+                    
+                    // 需求 5.1.4: 如果缓存的评价与已保存的评价不同，提示用户是否恢复
+                    if (cachedData.comment !== savedComment && savedComment !== '暂无评价') {
+                        const restoreCache = confirm(
+                            '检测到未保存的评价内容，是否恢复？\n\n' +
+                            '缓存的评价：\n' + cachedData.comment.substring(0, 100) + 
+                            (cachedData.comment.length > 100 ? '...' : '') +
+                            '\n\n已保存的评价：\n' + savedComment.substring(0, 100) +
+                            (savedComment.length > 100 ? '...' : '')
+                        );
+                        
+                        if (restoreCache) {
+                            // 需求 5.1.5: 恢复缓存内容
+                            $('#teacherCommentText').val(cachedData.comment);
+                            console.log('已恢复缓存的评价内容');
+                        } else {
+                            // 用户选择不恢复，使用已保存的评价
+                            $('#teacherCommentText').val(savedComment);
+                            // 清除缓存
+                            if (window.commentCacheService) {
+                                window.commentCacheService.clear(filePath);
+                            }
+                        }
+                    } else if (savedComment === '暂无评价' || !savedComment) {
+                        // 如果文件中没有评价，直接使用缓存
+                        $('#teacherCommentText').val(cachedData.comment);
+                        console.log('文件中无评价，使用缓存内容');
+                    } else {
+                        // 缓存与已保存内容相同，使用已保存的
+                        $('#teacherCommentText').val(savedComment);
+                    }
+                } else {
+                    // 没有缓存，使用已保存的评价
+                    $('#teacherCommentText').val(savedComment);
+                    console.log('没有缓存，使用已保存的评价');
+                }
 
                 console.log('评价内容已载入到输入框');
                 console.log('输入框当前值:', $('#teacherCommentText').val());
 
                 // 如果评价内容为空或"暂无评价"，显示提示信息
-                if (!commentText || commentText === '暂无评价') {
+                const currentValue = $('#teacherCommentText').val();
+                if (!currentValue || currentValue === '暂无评价') {
                     console.log('文件中没有找到评价内容，显示提示信息');
                     $('#teacherCommentText').attr('placeholder', '文件中没有找到评价内容，请在此输入新的评价...');
+                }
+
+                if (pendingDefaultLabComment && (!currentValue || currentValue === '暂无评价')) {
+                    $('#teacherCommentText')
+                        .val(pendingDefaultLabComment.comment)
+                        .trigger('input');
+                    pendingDefaultLabComment = null;
                 }
             } else {
                 console.error('获取评价失败:', response.message);
@@ -1331,6 +1827,96 @@ window.loadTeacherComment = function(filePath) {
     });
 }
 
+// 评价历史管理（缓存评分和评价的组合）
+window.CommentHistory = {
+    storageKey: 'teacher_grade_comment_history',
+    maxItems: 10,  // 增加到10条
+    
+    // 获取历史记录
+    getHistory: function() {
+        try {
+            const history = localStorage.getItem(this.storageKey);
+            return history ? JSON.parse(history) : [];
+        } catch (e) {
+            console.error('读取评价历史失败:', e);
+            return [];
+        }
+    },
+    
+    // 添加评分和评价到历史
+    addGradeComment: function(grade, comment) {
+        if (!comment || !comment.trim()) return;
+        
+        // 如果没有提供评分，使用当前选中的评分
+        if (!grade) {
+            grade = selectedGrade || 'B';
+        }
+        
+        let history = this.getHistory();
+        
+        // 创建记录对象
+        const record = {
+            grade: grade,
+            comment: comment.trim(),
+            timestamp: new Date().getTime()
+        };
+        
+        // 移除重复的评价（相同评价内容）
+        history = history.filter(item => item.comment !== comment.trim());
+        
+        // 添加到开头
+        history.unshift(record);
+        
+        // 只保留最近的记录
+        history = history.slice(0, this.maxItems);
+        
+        try {
+            localStorage.setItem(this.storageKey, JSON.stringify(history));
+            console.log('评分和评价已添加到历史:', grade, comment);
+        } catch (e) {
+            console.error('保存评价历史失败:', e);
+        }
+    },
+    
+    // 渲染历史评价按钮
+    renderHistory: function(containerId) {
+        const history = this.getHistory();
+        const container = $(`#${containerId}`);
+        
+        if (!container.length) {
+            console.error('历史评价容器不存在:', containerId);
+            return;
+        }
+        
+        container.empty();
+        
+        if (history.length === 0) {
+            container.html('<small class="text-muted">暂无历史评价</small>');
+            return;
+        }
+        
+        container.append('<small class="text-muted d-block mb-2">最近使用的评价（点击快速填入评价和评分）：</small>');
+        
+        history.forEach((record, index) => {
+            const displayText = record.comment.length > 30 ? record.comment.substring(0, 30) + '...' : record.comment;
+            const btn = $('<button>')
+                .addClass('btn btn-sm btn-outline-secondary me-2 mb-2')
+                .attr('type', 'button')
+                .html(`<span class="badge bg-primary me-1">${record.grade}</span>${displayText}`)
+                .attr('title', `评分: ${record.grade}\n评价: ${record.comment}`)
+                .on('click', function() {
+                    // 填入评价
+                    $('#teacherCommentText').val(record.comment);
+                    // 设置评分（按评论对应的评分打分）
+                    selectedGrade = record.grade;
+                    setGradeButtonState(record.grade);
+                    console.log('已填入历史记录 - 评分:', record.grade, '评价:', record.comment);
+                });
+            container.append(btn);
+        });
+    }
+};
+
 window.saveTeacherComment = function() {
     const comment = $('#teacherCommentText').val().trim();
     console.log('保存教师评价，内容:', comment);
@@ -1345,16 +1931,37 @@ window.saveTeacherComment = function() {
         return;
     }
 
+    // 如果没有选择评分，使用默认评分
+    if (!selectedGrade) {
+        selectedGrade = gradeMode === 'letter' ? 'B' : '良好';
+        setGradeButtonState(selectedGrade);
+        console.log('未选择评分，使用默认评分:', selectedGrade);
+    }
+
+    // 准备请求数据
+    const requestData = {
+        file_path: currentFilePath,
+        comment: comment,
+        grade: selectedGrade  // 添加评分到请求中
+    };
+    
+    // 如果有当前仓库ID和课程，添加到请求中
+    if (currentRepoId) {
+        requestData.repo_id = currentRepoId;
+    }
+    if (currentCourse) {
+        requestData.course = currentCourse;
+    }
+    
+    console.log('保存教师评价请求数据:', requestData);
+
     $.ajax({
         url: '/grading/save_teacher_comment/',
         method: 'POST',
         headers: {
             'X-CSRFToken': getCSRFToken()
         },
-        data: {
-            file_path: currentFilePath,
-            comment: comment
-        },
+        data: requestData,
         success: function(response) {
             console.log('=== 保存教师评价响应 ===');
             console.log('响应内容:', response);
@@ -1363,6 +1970,29 @@ window.saveTeacherComment = function() {
 
             if (response.success) {
                 console.log('保存成功，准备刷新评价显示');
+                
+                // 需求 5.1.6: 评价成功保存后，清除该文件对应的评价缓存
+                if (window.commentCacheService) {
+                    window.commentCacheService.clear(currentFilePath);
+                    console.log('评价缓存已清除');
+                }
+                
+                // 需求 5.2.1: 记录评价使用次数
+                recordCommentUsage(comment);
+                
+                // 添加到历史记录（包含评分和评价）
+                CommentHistory.addGradeComment(selectedGrade, comment);
+                
+                // 更新全局状态：现在文件有评价了
+                hasComment = true;
+                
+                // 如果是实验报告，移除警告并启用确定按钮
+                if (isLabReport) {
+                    $('#lab-report-warning').remove();
+                    if (!isFileLocked) {
+                        $('#add-grade-to-file').prop('disabled', false);
+                    }
+                }
 
                 // 延迟一点时间再加载评价，确保文件写入完成
                 setTimeout(function() {
@@ -1375,6 +2005,25 @@ window.saveTeacherComment = function() {
                 }, 500);
 
                 $('#teacherCommentModal').modal('hide');
+                
+                if (pendingConfirmForComment) {
+                    pendingConfirmForComment = false;
+                } else {
+                    // 自动跳转到下一个文件
+                    navigateToNextFile();
+                }
+
+                const tree = $('#directory-tree').jstree(true);
+                if (tree && currentFilePath) {
+                    const node = tree.get_node(currentFilePath);
+                    if (node && node.data) {
+                        node.data.has_updates = false;
+                        tree.redraw_node(node);
+                        if (typeof window.addHomeworkUpdateBadges === 'function') {
+                            window.addHomeworkUpdateBadges();
+                        }
+                    }
+                }
             } else {
                 console.error('保存失败:', response.message);
                 alert('保存失败: ' + response.message);
@@ -1385,6 +2034,1069 @@ window.saveTeacherComment = function() {
             console.error('XHR状态:', xhr.status);
             console.error('XHR响应:', xhr.responseText);
             alert('保存失败，请重试');
+        }
+    });
+}
+
+
+// 为作业文件夹添加类型标签
+function addHomeworkTypeLabels() {
+    const tree = $('#directory-tree').jstree(true);
+    if (!tree) return;
+    
+    // 获取所有根节点（作业文件夹）
+    const rootNodes = tree.get_node('#').children;
+    
+    rootNodes.forEach(nodeId => {
+        const node = tree.get_node(nodeId);
+        if (node && node.type === 'folder' && node.data) {
+            const homeworkType = node.data.homework_type;
+            const homeworkTypeDisplay = node.data.homework_type_display;
+            
+            if (homeworkType && homeworkTypeDisplay) {
+                // 获取节点的DOM元素
+                const nodeElement = $('#' + nodeId.replace(/[^a-zA-Z0-9]/g, '\\$&') + '_anchor');
+                
+                if (nodeElement.length > 0) {
+                    // 添加类型标签
+                    const badgeClass = homeworkType === 'lab_report' ? 'bg-info' : 'bg-secondary';
+                    const badge = `<span class="badge ${badgeClass} ms-2 homework-type-badge" 
+                                        data-node-id="${nodeId}" 
+                                        data-homework-type="${homeworkType}"
+                                        style="font-size: 0.7em; cursor: pointer;"
+                                        title="点击修改作业类型">
+                                        ${homeworkTypeDisplay}
+                                   </span>`;
+                    
+                    // 检查是否已经添加过标签
+                    if (nodeElement.find('.homework-type-badge').length === 0) {
+                        nodeElement.append(badge);
+                    }
+                }
+            }
+        }
+    });
+    
+    // 绑定点击事件
+    $(document).off('click', '.homework-type-badge').on('click', '.homework-type-badge', function(e) {
+        e.stopPropagation();
+        const nodeId = $(this).data('node-id');
+        const currentType = $(this).data('homework-type');
+        showHomeworkTypeModal(nodeId, currentType);
+    });
+}
+
+// 显示作业类型修改模态框
+function showHomeworkTypeModal(nodeId, currentType) {
+    const tree = $('#directory-tree').jstree(true);
+    const node = tree.get_node(nodeId);
+    
+    if (!node) return;
+    
+    // 创建模态框HTML
+    const modalHtml = `
+        <div class="modal fade" id="homeworkTypeModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">修改作业类型</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p><strong>作业文件夹：</strong>${node.text}</p>
+                        <div class="mb-3">
+                            <label class="form-label">作业类型</label>
+                            <select class="form-select" id="homeworkTypeSelect">
+                                <option value="normal" ${currentType === 'normal' ? 'selected' : ''}>普通作业</option>
+                                <option value="lab_report" ${currentType === 'lab_report' ? 'selected' : ''}>实验报告</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" id="saveHomeworkType">保存</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#homeworkTypeModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('homeworkTypeModal'));
+    modal.show();
+    
+    // 绑定保存按钮事件
+    $('#saveHomeworkType').off('click').on('click', function() {
+        const newType = $('#homeworkTypeSelect').val();
+        updateHomeworkType(nodeId, node.text, newType, modal);
+    });
+}
+
+// 更新作业类型
+function updateHomeworkType(nodeId, folderName, homeworkType, modal) {
+    if (!currentCourse) {
+        alert('请先选择课程');
+        return;
+    }
+    
+    console.log('更新作业类型:', {
+        course: currentCourse,
+        folder: folderName,
+        type: homeworkType
+    });
+    
+    $.ajax({
+        url: '/grading/api/update-homework-type/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            course_name: currentCourse,
+            folder_name: folderName,
+            homework_type: homeworkType
+        },
+        success: function(response) {
+            if (response.success) {
+                console.log('作业类型已更新:', response);
+                
+                // 更新节点数据
+                const tree = $('#directory-tree').jstree(true);
+                const node = tree.get_node(nodeId);
+                if (node) {
+                    node.data.homework_type = response.homework.homework_type;
+                    node.data.homework_type_display = response.homework.homework_type_display;
+                }
+                
+                // 关闭模态框
+                modal.hide();
+                
+                // 重新渲染标签
+                setTimeout(() => {
+                    addHomeworkTypeLabels();
+                }, 300);
+                
+                // 显示成功提示
+                alert('作业类型已更新为：' + response.homework.homework_type_display);
+            } else {
+                alert('更新失败：' + response.message);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('更新作业类型失败:', error);
+            alert('更新失败，请重试');
+        }
+    });
+}
+
+// ==================== 批量登分功能 ====================
+
+// 全局变量：当前选中的作业文件夹
+let currentHomeworkFolder = null;
+let currentHomeworkId = null;
+let currentHomeworkRelativePath = null;
+let batchGradeProgressPollInterval = null;
+let batchGradeButtonResetTimeout = null;
+let batchGradeTrackingId = null;
+
+function ensureBatchGradeButtonDefaults() {
+    const $btn = $('#batch-grade-btn');
+    if ($btn.length && !$btn.data('base-class')) {
+        $btn.data('base-class', $btn.attr('class'));
+    }
+    return $btn;
+}
+
+function resetBatchGradeButtonAppearance() {
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn.length) {
+        return $btn;
+    }
+    const baseClass = $btn.data('base-class');
+    if (baseClass) {
+        $btn.attr('class', baseClass);
+    }
+    return $btn;
+}
+
+function getBatchGradeButtonLabel(folderNameOverride) {
+    const folderName = typeof folderNameOverride === 'string' ? folderNameOverride : currentHomeworkFolder;
+    if (folderName) {
+        return `<i class="bi bi-tasks"></i> 批量登分 (${folderName})`;
+    }
+    return '<i class="bi bi-tasks"></i> 批量登分';
+}
+
+function renderBatchGradeButtonLabel(folderNameOverride) {
+    const $btn = resetBatchGradeButtonAppearance();
+    if (!$btn || !$btn.length) {
+        return;
+    }
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    $btn.html(getBatchGradeButtonLabel(folderNameOverride));
+}
+
+function showBatchGradeProcessingState() {
+    console.log('=== showBatchGradeProcessingState 被调用 ===');
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        console.error('按钮元素不存在');
+        return;
+    }
+    console.log('按钮当前状态 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+    
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    $btn.prop('disabled', true)
+        .html('<i class="bi bi-hourglass-split"></i> 正在批量登分...');
+    
+    console.log('按钮已设置为处理中 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+}
+
+function showBatchGradeResultState(isSuccess, customText, autoRestore) {
+    console.log('=== showBatchGradeResultState 被调用 ===');
+    console.log('isSuccess:', isSuccess);
+    console.log('customText:', customText);
+    console.log('autoRestore:', autoRestore);
+    
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        console.error('按钮元素不存在');
+        return;
+    }
+    
+    console.log('按钮当前状态 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+    
+    const icon = isSuccess ? 'bi-check-circle' : 'bi-info-circle';
+    const text = customText || (isSuccess ? '批量登分成功' : '查看提示');
+    
+    console.log('准备设置按钮 - icon:', icon, 'text:', text);
+    
+    resetBatchGradeButtonAppearance();
+    const statusClass = isSuccess ? 'btn-success' : 'btn-warning';
+    $btn.addClass(statusClass)
+        .prop('disabled', false)  // 允许用户继续操作
+        .html(`<i class="bi ${icon}"></i> ${text}`);
+    
+    console.log('按钮已更新 - disabled:', $btn.prop('disabled'), 'html:', $btn.html());
+
+    // 清除之前的定时器
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    
+    // 如果设置了自动恢复，则在指定时间后恢复按钮状态
+    if (autoRestore !== false) {
+        batchGradeButtonResetTimeout = setTimeout(() => {
+            resetBatchGradeButtonAppearance();
+            renderBatchGradeButtonLabel();
+            // 根据是否有选中的作业来决定按钮状态
+            const shouldEnable = currentHomeworkId && currentCourse;
+            $btn.prop('disabled', !shouldEnable);
+            if (shouldEnable) {
+                $btn.attr('title', `对作业"${currentHomeworkFolder}"进行批量登分`);
+            } else {
+                $btn.attr('title', '请先选择作业文件夹（非文件）');
+            }
+        }, 10000);  // 10秒后恢复，给用户足够时间查看结果
+    }
+}
+
+// 手动恢复按钮状态（当用户关闭模态框时调用）
+function restoreBatchGradeButtonState() {
+    if (batchGradeButtonResetTimeout) {
+        clearTimeout(batchGradeButtonResetTimeout);
+        batchGradeButtonResetTimeout = null;
+    }
+    
+    const $btn = ensureBatchGradeButtonDefaults();
+    if (!$btn || !$btn.length) {
+        return;
+    }
+    
+    resetBatchGradeButtonAppearance();
+    renderBatchGradeButtonLabel();
+    
+    const shouldEnable = currentHomeworkId && currentCourse;
+    $btn.prop('disabled', !shouldEnable);
+    if (shouldEnable) {
+        $btn.attr('title', `对作业"${currentHomeworkFolder}"进行批量登分`);
+    } else {
+        $btn.attr('title', '请先选择作业文件夹（非文件）');
+    }
+}
+
+function startBatchGradeProgress(trackingId) {
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    const $bar = $('#batch-grade-progress-bar');
+    const $text = $('#batch-grade-progress-text');
+    batchGradeTrackingId = trackingId;
+    $wrapper.stop(true, true).fadeIn(150);
+    $bar.removeClass('bg-success bg-danger')
+        .addClass('bg-info progress-bar-striped progress-bar-animated')
+        .css('width', '0%')
+        .attr('aria-valuenow', 0)
+        .text('准备中...');
+    $text.removeClass('text-success text-danger')
+        .addClass('text-muted')
+        .html('<i class="bi bi-hourglass-split"></i> 正在准备批量登分...');
+    // 暂时禁用进度轮询（后端未实现）
+    // startBatchGradeProgressPolling(trackingId);
+}
+
+function completeBatchGradeProgress(isSuccess, message) {
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    stopBatchGradeProgressPolling();
+    // 使用传入的message，如果没有则使用默认值
+    const finalMessage = message || (isSuccess ? '批量登分完成' : '批量登分失败');
+    const $text = $('#batch-grade-progress-text');
+    const $bar = $('#batch-grade-progress-bar');
+    const statusClass = isSuccess ? 'text-success' : 'text-warning';
+    const barClass = isSuccess ? 'bg-success' : 'bg-warning';
+    const icon = isSuccess ? 'bi-check-circle' : 'bi-info-circle';
+    
+    console.log('completeBatchGradeProgress - isSuccess:', isSuccess, 'message:', finalMessage);
+
+    $bar.removeClass('bg-info progress-bar-animated progress-bar-striped bg-success bg-danger')
+        .addClass(barClass)
+        .css('width', '100%')
+        .attr('aria-valuenow', 100)
+        .text(finalMessage);
+    $text.removeClass('text-muted text-success text-danger')
+        .addClass(statusClass)
+        .html(`<i class="bi ${icon}"></i> ${finalMessage}`);
+
+    setTimeout(() => {
+        $wrapper.fadeOut(200);
+    }, 2000);
+}
+
+function startBatchGradeProgressPolling(trackingId) {
+    if (!trackingId) {
+        return;
+    }
+    stopBatchGradeProgressPolling();
+    fetchBatchGradeProgress(trackingId);
+    batchGradeProgressPollInterval = setInterval(() => {
+        fetchBatchGradeProgress(trackingId);
+    }, 1500);
+}
+
+function stopBatchGradeProgressPolling() {
+    if (batchGradeProgressPollInterval) {
+        clearInterval(batchGradeProgressPollInterval);
+        batchGradeProgressPollInterval = null;
+    }
+}
+
+function fetchBatchGradeProgress(trackingId) {
+    if (!trackingId) {
+        return;
+    }
+    $.ajax({
+        url: `/grading/batch-grade/progress/${trackingId}/`,
+        method: 'GET',
+        success: function(response) {
+            if (response.success && response.data) {
+                renderBatchGradeProgressState(response.data);
+            }
+        },
+        error: function(xhr) {
+            if (xhr.status === 403) {
+                stopBatchGradeProgressPolling();
+            }
+        }
+    });
+}
+
+function renderBatchGradeProgressState(progress) {
+    if (!progress || progress.tracking_id !== batchGradeTrackingId) {
+        return;
+    }
+    const $wrapper = $('#batch-grade-progress-wrapper');
+    if (!$wrapper.length) {
+        return;
+    }
+    const $bar = $('#batch-grade-progress-bar');
+    const $text = $('#batch-grade-progress-text');
+    const total = progress.total || 0;
+    const processed = progress.processed || 0;
+    const success = progress.success || 0;
+    const failed = progress.failed || 0;
+    const skipped = progress.skipped || 0;
+    const percent = total > 0 ? Math.round((processed / total) * 100) : (progress.status === 'success' ? 100 : 5);
+    const summaryText = total
+        ? `已处理 ${processed}/${total} · 成功 ${success} · 失败 ${failed} · 跳过 ${skipped}`
+        : (progress.message || '正在批量登分...');
+
+    $wrapper.show();
+    $bar.attr('aria-valuenow', percent).css('width', `${percent}%`).text(summaryText);
+
+    let statusClass = 'text-muted';
+    let barStateClass = 'bg-info';
+    let icon = 'bi-hourglass-split';
+    let isFinal = false;
+
+    if (progress.status === 'success') {
+        statusClass = 'text-success';
+        barStateClass = 'bg-success';
+        icon = 'bi-check-circle';
+        isFinal = true;
+    } else if (progress.status === 'error') {
+        statusClass = 'text-danger';
+        barStateClass = 'bg-danger';
+        icon = 'bi-exclamation-triangle';
+        isFinal = true;
+    }
+
+    $bar.removeClass('bg-info bg-success bg-danger');
+    if (isFinal) {
+        $bar.removeClass('progress-bar-animated progress-bar-striped').addClass(barStateClass);
+    } else {
+        $bar.addClass('progress-bar-animated progress-bar-striped').addClass(barStateClass);
+    }
+
+    $text.removeClass('text-muted text-success text-danger')
+        .addClass(statusClass)
+        .html(`<i class="bi ${icon}"></i> ${progress.message || '正在批量登分...'}`);
+
+    if (isFinal) {
+        stopBatchGradeProgressPolling();
+        setTimeout(() => {
+            $wrapper.fadeOut(250);
+        }, 2000);
+    }
+}
+
+// 批量登分按钮点击事件
+$(document).on('click', '#batch-grade-btn', function() {
+    console.log('批量登分按钮被点击');
+    
+    if (!currentHomeworkFolder || !currentHomeworkId) {
+        alert('请先选择一个作业文件夹');
+        return;
+    }
+    
+    if (!currentCourse) {
+        alert('请先选择课程');
+        return;
+    }
+    
+    // 直接执行，不显示确认对话框
+    console.log('开始批量登分，作业:', currentHomeworkFolder);
+    
+    // 显示加载状态
+    const trackingId = window.crypto?.randomUUID ? window.crypto.randomUUID() : `batch-${Date.now()}`;
+    showBatchGradeProcessingState();
+    startBatchGradeProgress(trackingId);
+    
+    // 调用批量登分API
+    $.ajax({
+        url: `/grading/homework/${currentHomeworkId}/batch-grade-to-registry/`,
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken()
+        },
+        data: {
+            relative_path: currentHomeworkRelativePath || '',
+            tracking_id: trackingId
+        },
+        success: function(response) {
+            console.log('=== 批量登分响应 ===');
+            console.log('完整响应:', response);
+            console.log('response.success:', response.success);
+            console.log('response.data:', response.data);
+            
+            // 更智能的判断：如果有data字段，就认为是成功的（即使success=false）
+            if (response.data || response.success) {
+                // 兼容不同的数据结构
+                const data = response.data || response;
+                const summary = data.summary || data.statistics || {};
+                
+                // 如果summary为空，尝试从其他字段获取
+                if (!summary.total && response.data.statistics) {
+                    summary.total = response.data.statistics.total || 0;
+                    summary.success = response.data.statistics.success || 0;
+                    summary.failed = response.data.statistics.failed || 0;
+                    summary.skipped = response.data.statistics.skipped || 0;
+                }
+                
+                console.log('统计数据:', summary);
+                renderBatchGradeProgressState({
+                    tracking_id: trackingId,
+                    status: 'success',
+                    total: summary.total,
+                    processed: summary.total,
+                    success: summary.success,
+                    failed: summary.failed,
+                    skipped: summary.skipped,
+                    message: '批量登分完成'
+                });
+                completeBatchGradeProgress(true, '批量登分完成');
+                showBatchGradeResultState(true, '批量登分成功', false);  // 不自动恢复，等用户关闭模态框
+                
+                const details = data.details || {};
+                console.log('详细信息:', details);
+                
+                // 使用模态框显示结果
+                showBatchGradeResultModal(data);
+            } else {
+                // 提取详细的错误信息
+                let errorMessage = response.message || response.error || '未知错误';
+                
+                // 如果有更详细的错误信息，使用它
+                if (response.data && response.data.error_message) {
+                    errorMessage = response.data.error_message;
+                }
+                
+                console.log('批量登分失败 - 错误信息:', errorMessage);
+                console.log('完整错误数据:', response);
+                
+                renderBatchGradeProgressState({
+                    tracking_id: trackingId,
+                    status: 'error',
+                    total: 0,
+                    processed: 0,
+                    success: 0,
+                    failed: 0,
+                    skipped: 0,
+                    message: errorMessage
+                });
+                completeBatchGradeProgress(false, errorMessage);
+                showBatchGradeResultState(false, '查看提示', false);  // 改为"查看提示"，更友好
+                
+                // 使用错误模态框显示详细错误信息
+                showBatchGradeErrorModal({
+                    title: '批量登分失败',
+                    message: errorMessage,
+                    details: response.data || response,
+                    homework_name: currentHomeworkFolder,
+                    course_name: currentCourse
+                });
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('批量登分失败:', error);
+            console.error('XHR状态:', xhr.status);
+            console.error('XHR响应:', xhr.responseText);
+            
+            let errorMsg = '批量登分请求失败';
+            let errorDetails = {};
+            
+            if (xhr.responseJSON) {
+                errorMsg = xhr.responseJSON.message || xhr.responseJSON.error || errorMsg;
+                errorDetails = xhr.responseJSON;
+            } else if (xhr.responseText) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    errorMsg = response.message || response.error || errorMsg;
+                    errorDetails = response;
+                } catch (e) {
+                    errorMsg += '：' + xhr.responseText.substring(0, 200);
+                }
+            }
+            
+            // 根据HTTP状态码提供更具体的错误信息
+            if (xhr.status === 404) {
+                errorMsg = '未找到批量登分接口或作业不存在';
+            } else if (xhr.status === 403) {
+                errorMsg = '没有权限执行批量登分操作';
+            } else if (xhr.status === 500) {
+                errorMsg = '服务器内部错误：' + errorMsg;
+            } else if (xhr.status === 0) {
+                errorMsg = '网络连接失败，请检查网络连接';
+            }
+            
+            renderBatchGradeProgressState({
+                tracking_id: trackingId,
+                status: 'error',
+                total: 0,
+                processed: 0,
+                success: 0,
+                failed: 0,
+                skipped: 0,
+                message: errorMsg
+            });
+            completeBatchGradeProgress(false, errorMsg);
+            showBatchGradeResultState(false, '查看提示', false);
+            
+            // 使用错误模态框显示详细错误信息
+            showBatchGradeErrorModal({
+                title: '批量登分失败',
+                message: errorMsg,
+                details: errorDetails,
+                homework_name: currentHomeworkFolder,
+                course_name: currentCourse,
+                http_status: xhr.status,
+                http_status_text: xhr.statusText
+            });
+        }
+    });
+});
+
+// 当选择作业文件夹时，更新批量登分按钮状态
+function updateBatchGradeButton(folderPath, folderId) {
+    console.log('=== 更新批量登分按钮状态 ===');
+    console.log('文件夹路径:', folderPath);
+    console.log('文件夹ID:', folderId);
+    console.log('当前课程:', currentCourse);
+    
+    if (!folderPath || !currentCourse) {
+        console.log('条件不满足，禁用按钮');
+        currentHomeworkFolder = null;
+        currentHomeworkId = null;
+        currentHomeworkRelativePath = null;
+        $('#batch-grade-btn').prop('disabled', true)
+            .attr('title', '请先选择作业文件夹（非文件）');
+        renderBatchGradeButtonLabel();
+        console.log('按钮已禁用，文本已重置');
+        return;
+    }
+    
+    // 从路径中提取作业文件夹名称
+    const pathParts = folderPath.split('/');
+    const folderName = pathParts[pathParts.length - 1];
+    
+    console.log('路径分割结果:', pathParts);
+    console.log('提取的文件夹名称:', folderName);
+    console.log('当前课程名称:', currentCourse);
+    
+    // 查询作业信息
+    $.ajax({
+        url: '/grading/api/homework-info/',
+        method: 'GET',
+        data: {
+            course_name: currentCourse,
+            homework_folder: folderName
+        },
+        success: function(response) {
+            if (response.success && response.homework) {
+                currentHomeworkFolder = folderName;
+                currentHomeworkId = response.homework.id;
+
+                let relativePath = folderPath;
+                if (currentCourse) {
+                    const coursePrefix = `${currentCourse}/`;
+                    if (!folderPath.startsWith(coursePrefix)) {
+                        relativePath = `${currentCourse}/${folderPath}`;
+                    }
+                }
+                currentHomeworkRelativePath = relativePath;
+
+                $('#batch-grade-btn').prop('disabled', false)
+                    .attr('title', `对作业"${folderName}"进行批量登分`);
+                console.log('准备调用 renderBatchGradeButtonLabel');
+                renderBatchGradeButtonLabel(folderName);
+                console.log('作业信息已加载:', response.homework);
+                console.log('按钮最终状态:', $('#batch-grade-btn').html());
+            } else {
+                currentHomeworkFolder = null;
+                currentHomeworkId = null;
+                currentHomeworkRelativePath = null;
+                $('#batch-grade-btn').prop('disabled', true)
+                    .attr('title', '该文件夹不是有效的作业文件夹');
+                renderBatchGradeButtonLabel();
+                console.log('未找到作业信息');
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('查询作业信息失败:', error);
+            currentHomeworkFolder = null;
+            currentHomeworkId = null;
+            currentHomeworkRelativePath = null;
+            $('#batch-grade-btn').prop('disabled', true)
+                .attr('title', '查询作业信息失败');
+            renderBatchGradeButtonLabel();
+        }
+    });
+}
+
+// 注意：select_node.jstree 事件已在 initTree() 函数中的 jstree 初始化时绑定
+// 这里不需要重复绑定
+
+// 显示批量登分错误模态框
+function showBatchGradeErrorModal(errorData) {
+    const modalHtml = `
+        <div class="modal fade" id="batchGradeErrorModal" tabindex="-1" aria-labelledby="batchGradeErrorModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header bg-light">
+                        <h5 class="modal-title" id="batchGradeErrorModalLabel">
+                            <i class="bi bi-info-circle text-primary"></i>
+                            批量登分提示
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        ${errorData.homework_name ? `
+                        <div class="mb-3">
+                            <h6>作业信息</h6>
+                            <table class="table table-sm table-borderless">
+                                <tr>
+                                    <td class="text-muted" style="width: 80px;">作业：</td>
+                                    <td><strong>${errorData.homework_name}</strong></td>
+                                </tr>
+                                ${errorData.course_name ? `
+                                <tr>
+                                    <td class="text-muted">课程：</td>
+                                    <td>${errorData.course_name}</td>
+                                </tr>
+                                ` : ''}
+                            </table>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="alert alert-warning bg-light border-warning">
+                            <h6 class="alert-heading mb-2">
+                                <i class="bi bi-info-circle"></i> 提示信息
+                            </h6>
+                            <p class="mb-0">${errorData.message}</p>
+                        </div>
+                        
+                        ${errorData.http_status ? `
+                        <div class="mb-0">
+                            <small class="text-muted">
+                                错误代码: ${errorData.http_status}
+                            </small>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="card border-primary" style="display: none;">
+                            <div class="card-body">
+                                <h6 class="card-title text-primary">
+                                    <i class="bi bi-lightbulb"></i> 解决方法（已隐藏）
+                                </h6>
+                                <ul class="mb-0">
+                                    ${errorData.message.includes('未找到作业目录') ? `
+                                        <li>检查数据库中是否有对应的作业记录</li>
+                                        <li>使用命令导入作业：<code>conda run -n py313 python manage.py import_homeworks &lt;仓库路径&gt; &lt;课程名称&gt;</code></li>
+                                        <li>或在Django Admin中手动创建作业</li>
+                                    ` : errorData.message.includes('未找到活跃的仓库') ? `
+                                        <li>在Django Admin中创建并激活仓库</li>
+                                        <li>检查仓库的 is_active 字段是否为 True</li>
+                                    ` : errorData.message.includes('未找到班级目录') ? `
+                                        <li>检查文件夹结构是否正确</li>
+                                        <li>确保班级目录存在</li>
+                                    ` : errorData.message.includes('没有权限') || errorData.http_status === 403 ? `
+                                        <li>确认您是该课程的教师</li>
+                                        <li>检查用户权限设置</li>
+                                    ` : errorData.http_status === 404 ? `
+                                        <li>检查作业ID是否正确</li>
+                                        <li>确认作业记录存在于数据库中</li>
+                                    ` : errorData.http_status === 500 ? `
+                                        <li>查看服务器日志获取详细错误信息</li>
+                                        <li>检查 logs/app.log 文件</li>
+                                        <li>联系系统管理员</li>
+                                    ` : errorData.http_status === 0 ? `
+                                        <li>检查网络连接</li>
+                                        <li>确认服务器正在运行</li>
+                                        <li>检查防火墙设置</li>
+                                    ` : `
+                                        <li>查看浏览器控制台获取详细错误信息</li>
+                                        <li>查看服务器日志：logs/app.log</li>
+                                        <li>使用诊断脚本：<code>conda run -n py313 python scripts/diagnose_batch_grade.py &lt;课程名称&gt; &lt;作业文件夹名称&gt;</code></li>
+                                        <li>参考文档：docs/BATCH_GRADE_SETUP.md</li>
+                                    `}
+                                </ul>
+                            </div>
+                        </div>
+                        
+                        ${errorData.details && Object.keys(errorData.details).length > 0 ? `
+                        <div class="mt-3">
+                            <details>
+                                <summary class="text-muted" style="cursor: pointer;">
+                                    <i class="bi bi-code-square"></i> 查看详细错误信息（技术人员）
+                                </summary>
+                                <pre class="mt-2 p-2 bg-light border rounded" style="font-size: 0.85em; max-height: 300px; overflow-y: auto;">${JSON.stringify(errorData.details, null, 2)}</pre>
+                            </details>
+                        </div>
+                        ` : ''}
+                    </div>
+                    <div class="modal-footer">
+                        <small class="text-muted me-auto">
+                            <i class="bi bi-question-circle"></i> 如需帮助，请查看文档或联系管理员
+                        </small>
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                            <i class="bi bi-check-lg"></i> 知道了
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#batchGradeErrorModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('batchGradeErrorModal'));
+    modal.show();
+    
+    // 模态框关闭后移除并恢复按钮状态
+    $('#batchGradeErrorModal').on('hidden.bs.modal', function() {
+        $(this).remove();
+        // 恢复按钮状态
+        restoreBatchGradeButtonState();
+    });
+}
+
+// 显示批量登分结果模态框
+function showBatchGradeResultModal(data) {
+    console.log('=== showBatchGradeResultModal 被调用 ===');
+    console.log('数据:', data);
+    
+    // 数据验证和默认值
+    const summary = data.summary || data.statistics || {
+        total: 0,
+        success: 0,
+        failed: 0,
+        skipped: 0
+    };
+    const details = data.details || {
+        processed_files: [],
+        failed_files: [],
+        skipped_files: []
+    };
+    
+    console.log('处理后的summary:', summary);
+    console.log('处理后的details:', details);
+    
+    // 判断是否有真正的错误（失败），跳过不算错误
+    const hasErrors = summary.failed > 0;
+    
+    console.log('=== 模态框显示逻辑 ===');
+    console.log('failed:', summary.failed);
+    console.log('hasErrors:', hasErrors);
+    console.log('将显示:', hasErrors ? '错误列表' : '成功信息');
+    
+    // 创建模态框HTML
+    const modalHtml = `
+        <div class="modal fade" id="batchGradeResultModal" tabindex="-1" aria-labelledby="batchGradeResultModalLabel" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header ${hasErrors ? 'bg-warning' : 'bg-success'} text-white">
+                        <h5 class="modal-title" id="batchGradeResultModalLabel">
+                            <i class="bi ${hasErrors ? 'bi-exclamation-triangle' : 'bi-check-circle'}"></i>
+                            ${hasErrors ? '批量登分完成（有错误）' : '批量登分完成'}
+                        </h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        ${!hasErrors ? `
+                        <!-- 完全成功时：只显示成功信息 -->
+                        <div class="text-center py-4">
+                            <div class="mb-4">
+                                <i class="bi bi-check-circle-fill text-success" style="font-size: 4rem;"></i>
+                            </div>
+                            <h4 class="mb-3">批量登分成功</h4>
+                            <p class="text-muted">
+                                已成功处理 <strong class="text-success">${summary.success}</strong> 个文件
+                                ${summary.skipped > 0 ? `，跳过 ${summary.skipped} 个` : ''}
+                            </p>
+                        </div>
+                        ` : `
+                        <!-- 有错误时：只显示错误列表 -->
+                        <div class="alert alert-danger">
+                            <h6 class="mb-3">
+                                <i class="bi bi-x-circle"></i> 以下文件处理失败
+                            </h6>
+                            <ul class="mb-0">
+                                ${details.failed_files.map(file => {
+                                    const fileName = file.student_name || file.file_name || file.file || '未知文件';
+                                    const errorMsg = file.error_message || file.error || file.message || '未知错误';
+                                    return `
+                                    <li class="mb-2">
+                                        <strong>${fileName}</strong><br>
+                                        <small class="text-muted">${errorMsg}</small>
+                                    </li>
+                                    `;
+                                }).join('')}
+                            </ul>
+                        </div>
+                        <p class="text-muted small mb-0">
+                            成功处理 ${summary.success} 个文件，失败 ${summary.failed} 个
+                        </p>
+                        `}
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+                            <i class="bi bi-check-lg"></i> 确定
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // 移除旧的模态框
+    $('#batchGradeResultModal').remove();
+    
+    // 添加新的模态框
+    $('body').append(modalHtml);
+    
+    // 显示模态框
+    const modal = new bootstrap.Modal(document.getElementById('batchGradeResultModal'));
+    modal.show();
+    
+    // 模态框关闭后移除并恢复按钮状态
+    $('#batchGradeResultModal').on('hidden.bs.modal', function() {
+        $(this).remove();
+        // 恢复按钮状态
+        restoreBatchGradeButtonState();
+    });
+}
+
+
+// ============================================================================
+// 评价模板功能 - 需求 5.2.1-5.2.12
+// ============================================================================
+
+/**
+ * 需求 5.2.3: 加载推荐评价模板
+ * 
+ * 推荐逻辑：
+ * 1. 先获取个人常用评价（最多5个）
+ * 2. 如果个人评价不足5个，用系统评价补充
+ * 3. 总共返回最多5个模板
+ */
+function loadCommentTemplates() {
+    console.log('=== 加载推荐评价模板 ===');
+    
+    $.ajax({
+        url: '/grading/api/comment-templates/recommended/',
+        method: 'GET',
+        success: function(response) {
+            console.log('评价模板加载成功:', response);
+            
+            if (response.success && response.templates && response.templates.length > 0) {
+                renderCommentTemplates(response.templates);
+            } else {
+                console.log('没有可用的评价模板');
+                // 隐藏模板容器
+                $('#commentTemplatesContainer').hide();
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('加载评价模板失败:', error);
+            console.error('响应状态:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            // 隐藏模板容器
+            $('#commentTemplatesContainer').hide();
+        }
+    });
+}
+
+/**
+ * 需求 5.2.4-5.2.9: 渲染评价模板列表
+ * 
+ * @param {Array} templates - 评价模板数组
+ */
+function renderCommentTemplates(templates) {
+    console.log('=== 渲染评价模板 ===');
+    console.log('模板数量:', templates.length);
+    
+    const container = $('#commentTemplatesList');
+    container.empty();
+    
+    templates.forEach(function(template, index) {
+        // 需求 5.2.7: 先显示个人评价模板，再显示系统评价模板
+        const badgeClass = template.template_type === 'personal' ? 'bg-primary' : 'bg-secondary';
+        const badgeText = template.template_type_display;
+        
+        // 截断过长的评价内容
+        const displayText = template.comment_text.length > 50 
+            ? template.comment_text.substring(0, 50) + '...' 
+            : template.comment_text;
+        
+        const templateButton = $('<button>')
+            .addClass('btn btn-sm btn-outline-secondary position-relative')
+            .attr('type', 'button')
+            .attr('data-template-id', template.id)
+            .attr('data-comment-text', template.comment_text)
+            .attr('title', template.comment_text) // 完整内容作为提示
+            .html(`
+                <span class="badge ${badgeClass} position-absolute top-0 start-0 translate-middle" 
+                      style="font-size: 0.6rem; padding: 0.2rem 0.4rem;">
+                    ${badgeText}
+                </span>
+                ${displayText}
+                <span class="badge bg-info ms-1" style="font-size: 0.7rem;">
+                    ${template.usage_count}次
+                </span>
+            `);
+        
+        // 需求 5.2.5: 点击模板填充评价内容
+        templateButton.on('click', function() {
+            const commentText = $(this).attr('data-comment-text');
+            $('#teacherCommentText').val(commentText);
+            console.log('已填充评价模板:', commentText.substring(0, 50) + '...');
+            
+            // 触发输入事件，启动自动保存
+            $('#teacherCommentText').trigger('input');
+        });
+        
+        container.append(templateButton);
+    });
+    
+    // 显示模板容器
+    $('#commentTemplatesContainer').show();
+    
+    console.log('评价模板渲染完成');
+}
+
+/**
+ * 需求 5.2.1: 记录评价使用次数
+ * 
+ * 当教师保存评价时调用此方法，统计评价使用次数。
+ * 
+ * @param {string} commentText - 评价内容
+ */
+function recordCommentUsage(commentText) {
+    console.log('=== 记录评价使用次数 ===');
+    console.log('评价内容:', commentText.substring(0, 50) + '...');
+    
+    $.ajax({
+        url: '/grading/api/comment-templates/record-usage/',
+        method: 'POST',
+        headers: {
+            'X-CSRFToken': getCSRFToken(),
+            'Content-Type': 'application/json'
+        },
+        data: JSON.stringify({
+            comment_text: commentText
+        }),
+        success: function(response) {
+            console.log('评价使用记录成功:', response);
+            if (response.success) {
+                console.log('使用次数:', response.template.usage_count);
+            }
+        },
+        error: function(xhr, status, error) {
+            console.error('记录评价使用失败:', error);
+            console.error('响应状态:', xhr.status);
+            console.error('响应内容:', xhr.responseText);
+            // 记录失败不影响主流程，只记录日志
         }
     });
 }

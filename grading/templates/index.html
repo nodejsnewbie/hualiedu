@@ -31,19 +31,42 @@
             justify-content: center;
             gap: 20px;
             margin-bottom: 30px;
+            flex-wrap: wrap;
         }
 
         .menu-item {
-            padding: 10px 20px;
+            padding: 12px 24px;
             background-color: #4CAF50;
             color: white;
             text-decoration: none;
-            border-radius: 4px;
-            transition: background-color 0.3s;
+            border-radius: 6px;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 500;
         }
 
         .menu-item:hover {
             background-color: #45a049;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .menu-item.secondary {
+            background-color: #2196F3;
+        }
+
+        .menu-item.secondary:hover {
+            background-color: #1976D2;
+        }
+
+        .menu-item.warning {
+            background-color: #FF9800;
+        }
+
+        .menu-item.warning:hover {
+            background-color: #F57C00;
         }
 
         .features {
@@ -74,10 +97,88 @@
     <div class="container">
         <h1>作业评分系统</h1>
         <div class="menu">
-            <a href="{% url 'grading:grading' %}" class="menu-item">开始评分</a>
+            {% if user.is_authenticated %}
+                <a href="{% url 'grading:grading_page' %}" class="menu-item">
+                    📝 开始评分
+                </a>
+                <a href="{% url 'grading:repository_management' %}" class="menu-item secondary">
+                    📁 仓库管理
+                </a>
+                <a href="{% url 'grading:calendar_view' %}" class="menu-item warning">
+                    📅 校历管理
+                </a>
+                {% if user.is_staff %}
+                <a href="{% url 'grading:batch_ai_score_page' %}" class="menu-item">
+                    🤖 批量AI评分
+                </a>
+                {% endif %}
+            {% else %}
+                <a href="{% url 'admin:login' %}" class="menu-item">
+                    🔐 登录系统
+                </a>
+            {% endif %}
+            <a href="{% url 'grading:calendar_view' %}" class="menu-item">校历课程表</a>
+            <a href="{% url 'grading:course_management' %}" class="menu-item">课程管理</a>
+            <a href="{% url 'toolbox:index' %}" class="menu-item">工具箱</a>
+            {% if user.is_staff or user.is_superuser %}
+            <a href="{% url 'grading:semester_management' %}" class="menu-item">学期管理</a>
+            {% endif %}
             <a href="{% url 'admin:index' %}" class="menu-item">管理后台</a>
         </div>
+        {% if user.is_authenticated %}
+        <!-- 学期状态面板 -->
+        {% load semester_tags %}
+        <div class="semester-status-section" style="margin-bottom: 30px;">
+            {% semester_status_widget %}
+        </div>
+
+        <!-- 用户信息面板 -->
+        <div class="user-info" style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <!-- 学期时间线 -->
+            <div style="grid-column: span 2;">
+                {% semester_timeline_widget %}
+            </div>
+
+            <!-- 课程信息 -->
+            {% if current_semester %}
+            <div class="info-card" style="background-color: #e8f5e8; padding: 15px; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #2e7d32;">📚 课程信息</h3>
+                <p style="margin-bottom: 5px;"><strong>当前学期：</strong>{{ current_semester.name }}</p>
+                <p style="margin-bottom: 5px;"><strong>时间：</strong>{{ current_semester.start_date|date:"m月d日" }} - {{ current_semester.end_date|date:"m月d日" }}</p>
+                <p style="margin-bottom: 5px;"><strong>周次：</strong>第{{ current_week }}周</p>
+                <p style="margin-bottom: 0;"><strong>我的课程：</strong>{{ user_courses.count }}门</p>
+            </div>
+            {% else %}
+            <div class="info-card" style="background-color: #fff3cd; padding: 15px; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #856404;">📚 课程信息</h3>
+                <p style="margin-bottom: 0;">请先设置当前学期信息</p>
+            </div>
+            {% endif %}
+
+            <!-- 仓库信息 -->
+            <div class="info-card" style="background-color: #e3f2fd; padding: 15px; border-radius: 8px;">
+                <h3 style="margin-top: 0; color: #1565c0;">📁 我的仓库</h3>
+                <p style="margin-bottom: 5px;"><strong>总数：</strong>{{ repository_stats.total }}个</p>
+                <p style="margin-bottom: 5px;"><strong>Git仓库：</strong>{{ repository_stats.git_repos }}个</p>
+                <p style="margin-bottom: 5px;"><strong>本地目录：</strong>{{ repository_stats.local_repos }}个</p>
+                {% if repository_stats.total == 0 %}
+                <p style="margin-bottom: 0; color: #666;">
+                    <a href="{% url 'grading:repository_management' %}" style="color: #1565c0;">点击添加仓库</a>
+                </p>
+                {% else %}
+                <p style="margin-bottom: 0;">
+                    <a href="{% url 'grading:repository_management' %}" style="color: #1565c0;">管理仓库</a>
+                </p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
         <div class="features">
+            <div class="feature">
+                <h3>校历管理</h3>
+                <p>管理学期信息，设置课程安排和查看课程表</p>
+            </div>
             <div class="feature">
                 <h3>作业管理</h3>
                 <p>创建和管理作业，设置截止日期和评分标准</p>

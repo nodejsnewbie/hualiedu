@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "name": "Pip Package Update Checker",
+  "description": "Monitors requirements.txt for changes and checks if any pip packages are outdated, suggesting available updates",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      "requirements.txt"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Check the requirements.txt file and identify any outdated pip packages. For each package listed, check if there are newer versions available on PyPI. Provide a summary of:\n1. Which packages are outdated\n2. Current version vs latest available version\n3. Any security advisories or important updates\n4. Suggested update commands (e.g., pip install --upgrade package==version)\n\nFormat the response in a clear, actionable way that helps the developer understand which packages should be updated and why."
+  }
+}

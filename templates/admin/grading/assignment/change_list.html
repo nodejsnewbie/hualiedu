@@ -1,0 +1,108 @@
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block object-tools-items %}
+    <li>
+        <a href="{% url 'admin:grading_assignment_add' %}" class="addlink">
+            {% blocktranslate with cl.opts.verbose_name as name %}Add {{ name }}{% endblocktranslate %}
+        </a>
+    </li>
+{% endblock %}
+
+{% block content %}
+    {{ block.super }}
+{% endblock %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <style>
+        /* 美化表格 */
+        #result_list {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        #result_list thead th {
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+            padding: 10px;
+            font-weight: bold;
+        }
+
+        #result_list tbody td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+
+        #result_list tbody tr:hover {
+            background: #f9f9f9;
+        }
+
+        /* 美化存储类型显示 */
+        .storage-type-git {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .storage-type-filesystem {
+            color: #17a2b8;
+            font-weight: bold;
+        }
+
+        /* 美化操作按钮 */
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .action-buttons .button {
+            margin-right: 5px;
+            background: #79aec8;
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 0.9em;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .action-buttons .button:hover {
+            background: #609ab6;
+        }
+        .delete-button {
+            background: #dc3545 !important;
+        }
+        .delete-button:hover {
+            background: #c82333 !important;
+        }
+
+        /* 美化表单字段 */
+        .form-row {
+            margin-bottom: 15px;
+        }
+        .form-row label {
+            display: block;
+            margin-bottom: 5px;
+            color: #666;
+        }
+        .form-row input[type="text"],
+        .form-row select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .form-row input[type="text"]:focus,
+        .form-row select:focus {
+            border-color: #79aec8;
+            outline: none;
+        }
+
+        /* 错误信息样式 */
+        .error {
+            color: #dc3545;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+    </style>
+{% endblock %}

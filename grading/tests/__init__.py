@@ -1,1 +1,1 @@
-# Django tests package for grading app
+# 测试包初始化

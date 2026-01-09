@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block title %}工具箱{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">🛠️ 工具箱</h1>
+            <p class="text-muted">提供各种实用的文件处理工具</p>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-file-pdf text-danger"></i>
+                        PPT转PDF
+                    </h5>
+                    <p class="card-text">将目录下的所有PPT文件批量转换为PDF格式</p>
+                    <a href="{% url 'toolbox:ppt_to_pdf' %}" class="btn btn-primary">
+                        开始转换
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-tasks text-info"></i>
+                        任务管理
+                    </h5>
+                    <p class="card-text">查看和管理所有转换任务</p>
+                    <a href="{% url 'toolbox:task_list' %}" class="btn btn-info">
+                        查看任务
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h5 class="card-title">
+                        <i class="fas fa-file-excel text-success"></i>
+                        作业成绩写入
+                    </h5>
+                    <p class="card-text">选择班级目录，自动批量将“第X次作业.xlsx”写入成绩登分册</p>
+                    <a href="{% url 'toolbox:assignment_grade_import' %}" class="btn btn-success">
+                        立即写入
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row mt-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="mb-0">📋 最近任务</h5>
+                </div>
+                <div class="card-body">
+                    {% if tasks %}
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>任务类型</th>
+                                        <th>状态</th>
+                                        <th>进度</th>
+                                        <th>创建时间</th>
+                                        <th>操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for task in tasks %}
+                                    <tr>
+                                        <td>{{ task.get_task_type_display }}</td>
+                                        <td>
+                                            <span class="badge badge-{% if task.status == 'completed' %}success{% elif task.status == 'failed' %}danger{% elif task.status == 'processing' %}warning{% else %}secondary{% endif %}">
+                                                {{ task.get_status_display }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="progress" style="height: 20px;">
+                                                <div class="progress-bar" role="progressbar"
+                                                     style="width: {{ task.progress_percentage }}%"
+                                                     aria-valuenow="{{ task.progress_percentage }}"
+                                                     aria-valuemin="0" aria-valuemax="100">
+                                                    {{ task.progress_percentage }}%
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>{{ task.created_at|date:"Y-m-d H:i" }}</td>
+                                        <td>
+                                            <a href="{% url 'toolbox:task_detail' task.id %}" class="btn btn-sm btn-outline-primary">
+                                                查看详情
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    {% else %}
+                        <p class="text-muted text-center">暂无任务记录</p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

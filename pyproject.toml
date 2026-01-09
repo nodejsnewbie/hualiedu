@@ -1,36 +1,146 @@
+[project]
+name = "huali-edu"
+version = "1.0.0"
+description = "Multi-tenant educational platform for assignment management and grading"
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "HualiEdu Team"}
+]
+keywords = ["django", "education", "grading", "multi-tenant"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Django :: 4.2",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    # Core Django framework
+    "django==4.2.20",
+    "djangorestframework==3.16.0",
+    "django-cors-headers==4.7.0",
+    
+    # Django extensions
+    "django-jazzmin==3.0.1",
+    "django-crispy-forms==2.5",
+    "crispy-bootstrap5==2025.6",
+    
+    # Document processing
+    "python-docx==1.2.0",
+    "mammoth==1.11.0",
+    "openpyxl==3.1.5",
+    "pandas==2.3.3",
+    
+    # Git operations
+    "gitpython==3.1.45",
+    
+    # Volcengine SDK
+    "volcengine==1.0.206",
+    "volcengine-python-sdk==4.0.33",
+    
+    # Environment configuration
+    "python-dotenv==1.2.1",
+    "django-redis==6.0.0",
+    "mysqlclient==2.2.7",
+    
+    # Base dependencies
+    "requests==2.32.5",
+    "beautifulsoup4==4.14.2",
+    "lxml==6.0.2",
+    "numpy==2.3.4",
+    
+    # Production server
+    "gunicorn==23.0.0",
+    
+    # Testing
+    "hypothesis==6.122.3",
+    
+    # Cryptography
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Code quality
+    "black>=24.0.0",
+    "isort>=5.13.0",
+    "flake8>=7.0.0",
+    "pre-commit>=3.6.0",
+    
+    # Testing
+    "pytest>=8.0.0",
+    "pytest-django>=4.8.0",
+    "pytest-cov>=4.1.0",
+    
+    # Development tools
+    "ipython>=8.20.0",
+    "django-debug-toolbar>=4.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["grading", "toolbox", "hualiEdu"]
+
 [tool.black]
 line-length = 100
 target-version = ["py313"]
-include = '\\.pyi?$'
-exclude = '''
+include = '\.pyi?$'
+extend-exclude = '''
 /(
-  \.git
+    \.git
   | \.venv
-  | env
-  | venv
-  | build
-  | dist
+  | \.hypothesis
+  | __pycache__
   | migrations
-  | static
   | staticfiles
-  | media
-  | docs/vendor
 )/
 '''
 
 [tool.isort]
 profile = "black"
 line_length = 100
-multi_line_output = 3
-include_trailing_comma = true
-force_grid_wrap = 0
-use_parentheses = true
-ensure_newline_before_comments = true
-known_first_party = ["grading", "hualiEdu"]
-skip = ["migrations", "static", "staticfiles", "media"]
+skip_gitignore = true
+known_first_party = ["grading", "toolbox", "hualiEdu"]
+skip = ["migrations", ".venv", "staticfiles"]
 
-[tool.flake8]
-max-line-length = 120
-select = ["E9", "F63", "F7", "F82"]
-extend-ignore = ["E203", "W503", "E501"]
-exclude = ["migrations", "static", "staticfiles", "media", "docs"]
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "hualiEdu.settings"
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+testpaths = ["grading/tests", "toolbox/tests", "tests"]
+addopts = [
+    "--verbose",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=grading",
+    "--cov=toolbox",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+
+[tool.coverage.run]
+source = ["grading", "toolbox"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+    "*/staticfiles/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
