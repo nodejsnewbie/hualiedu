@@ -10,6 +10,7 @@ urlpatterns = [
     path("", index, name="home"),
     path("admin/", admin.site.urls),
     path("grading/", include("grading.urls")),
+    path("toolbox/", include("toolbox.urls")),
 ]
 
 if settings.DEBUG:

@@ -11,7 +11,7 @@ class GradingConfig(AppConfig):
     verbose_name = "作业评分系统"
 
     def ready(self):
-        if os.environ.get("RUN_STARTUP_SYNC") == "0":
+        if os.environ.get("RUN_STARTUP_SYNC") != "1":
             return
 
         if "runserver" in sys.argv and os.environ.get("RUN_MAIN") != "true":

@@ -204,6 +204,12 @@
     background-color: #e9ecef;
 }
 
+.has-update-star > .jstree-anchor::after {
+    content: "*";
+    color: #f0ad4e;
+    margin-left: 0.25rem;
+}
+
 /* 表格样式 */
 .table {
     margin-bottom: 0;

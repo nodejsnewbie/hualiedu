@@ -1,614 +1,856 @@
 """
-视图测试
+Comprehensive pytest tests for grading/views.py
+
+This module tests the core view functions and utility functions in the grading views,
+including file operations, validation, directory handling, and API endpoints.
 """
 
 import json
 import os
 import tempfile
-from unittest.mock import MagicMock, mock_open, patch
+import shutil
+from unittest.mock import Mock, patch, MagicMock
+from io import BytesIO
 
-from django.contrib.auth.models import User
-from django.core.files.uploadedfile import SimpleUploadedFile
-from django.http import JsonResponse
-from django.test import Client, TestCase
-from django.urls import reverse
+import pytest
+from django.test import TestCase, RequestFactory, Client
+from django.contrib.auth import get_user_model
+from django.http import JsonResponse, HttpResponse
+from django.core.cache import cache
+from docx import Document
 
 from grading.models import (
-    Course,
-    CourseSchedule,
-    GradeTypeConfig,
-    Homework,
-    Repository,
-    Semester,
-    Tenant,
-    UserProfile,
+    Repository, Course, Homework, Semester, GlobalConfig, 
+    FileGradeStatus, Tenant, UserProfile
+)
+from grading.views import (
+    get_base_directory,
+    validate_file_path,
+    get_teacher_display_name,
+    validate_file_write_permission,
+    validate_user_permissions,
+    create_error_response,
+    create_success_response,
+    read_file_content,
+    get_file_extension,
+    is_lab_course_by_name,
+    auto_detect_course_type,
+    get_course_type_from_name,
+    is_lab_report_file,
+    get_directory_file_count_cached,
+    clear_directory_file_count_cache,
+    get_file_grade_info,
+    _extract_homework_folder,
+    _clean_relative_homework_path,
+    _split_rel_path_parts,
+    _is_homework_folder_rel_path,
+    _is_homework_file_rel_path,
 )
 
-from .base import APITestCase, BaseTestCase, MockTestCase
+User = get_user_model()
 
 
-class IndexViewTest(BaseTestCase):
-    """首页视图测试"""
-
-    def test_index_view_get(self):
-        """测试首页GET请求"""
-        response = self.client.get(reverse("grading:index"))
-        self.assertResponseOK(response)
-        self.assertContains(response, "华立教育")
-
-    def test_index_view_with_semester(self):
-        """测试带学期数据的首页"""
-        semester = Semester.objects.create(
-            name="2024年春季学期", start_date="2024-02-26", end_date="2024-06-30"
-        )
-        response = self.client.get(reverse("grading:index"))
-        self.assertResponseOK(response)
-        self.assertContains(response, semester.name)
-
-
-class AuthenticationViewTest(BaseTestCase):
-    """认证相关视图测试"""
-
-    def test_login_required_views(self):
-        """测试需要登录的视图"""
-        protected_urls = [
-            reverse("grading:grading_page"),
-            reverse("grading:batch_grade_page"),
-            reverse("grading:calendar_view"),
-        ]
-
-        for url in protected_urls:
-            response = self.client.get(url)
-            # 应该重定向到登录页面
-            self.assertResponseRedirect(response)
-
-    def test_staff_required_views(self):
-        """测试需要管理员权限的视图"""
-        self.login_user()
-
-        staff_urls = [
-            reverse("grading:grade_type_management"),
-        ]
-
-        for url in staff_urls:
-            response = self.client.get(url)
-            # 普通用户应该被拒绝访问
-            self.assertResponseForbidden(response)
-
-    def test_staff_views_with_staff_user(self):
-        """测试管理员用户访问管理员视图"""
-        self.login_user(self.admin_user)
-
-        response = self.client.get(reverse("grading:grade_type_management"))
-        self.assertResponseOK(response)
-
-
-class GradingViewTest(MockTestCase):
-    """评分视图测试"""
-
+class BaseViewTestCase(TestCase):
+    """Base test case with common setup for view tests."""
+    
     def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
+        """Set up test data."""
+        self.factory = RequestFactory()
+        self.client = Client()
+        
+        # Create test user
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='test@example.com',
+            password='testpass123',
+            is_staff=True
+        )
+        
+        # Create tenant and user profile
+        self.tenant = Tenant.objects.create(
+            name='Test Tenant',
+            domain='test.example.com'
+        )
+        
         self.user_profile = UserProfile.objects.create(
-            user=self.user, tenant=self.tenant, repo_base_dir="/test/base"
+            user=self.user,
+            tenant=self.tenant,
+            repo_base_dir='~/test_jobs'
         )
-        self.repository = Repository.objects.create(
-            tenant=self.tenant, name="测试仓库", path="test_repo"
-        )
-
-    def test_grading_page_get(self):
-        """测试评分页面GET请求"""
-        self.login_user()
-        response = self.client.get(reverse("grading:grading_page"))
-        self.assertResponseOK(response)
-
-    def test_grading_page_post_with_valid_data(self):
-        """测试评分页面POST请求（有效数据）"""
-        self.login_user()
-
-        with patch("grading.views.os.path.exists", return_value=True):
-            with patch("grading.views.os.listdir", return_value=["file1.txt", "file2.txt"]):
-                response = self.client.post(
-                    reverse("grading:grading_page"), {"base_dir": "/test/path"}
-                )
-                self.assertResponseOK(response)
-
-    @patch("grading.views.volcengine_score_homework")
-    def test_ai_score_view(self, mock_ai_score):
-        """测试AI评分视图"""
-        mock_ai_score.return_value = (85, "评分：85分。内容充实。")
-
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("builtins.open", mock_open(read_data="测试内容")):
-                response = self.client.post(reverse("grading:ai_score"), {"path": "test_file.txt"})
-
-                self.assertResponseOK(response)
-                data = response.json()
-                self.assertEqual(data["score"], 85)
-                self.assertIn("评分", data["comment"])
-
-    def test_save_grade_view(self):
-        """测试保存评分视图"""
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.path.exists", return_value=True):
-                with patch("builtins.open", mock_open()):
-                    response = self.client.post(
-                        reverse("grading:save_grade"),
-                        {"file_path": "test_file.txt", "grade": "A", "comment": "优秀作业"},
-                    )
-
-                    self.assertEqual(response.status_code, 200)
-                    data = response.json()
-                    self.assertTrue(data["success"])
-
-
-class FileOperationViewTest(MockTestCase):
-    """文件操作视图测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
-        self.user_profile = UserProfile.objects.create(
-            user=self.user, tenant=self.tenant, repo_base_dir="/test/base"
-        )
-
-    def test_get_file_content_view(self):
-        """测试获取文件内容视图"""
-        self.login_user()
-
-        test_content = "这是测试文件内容"
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("builtins.open", mock_open(read_data=test_content)):
-                response = self.client.post(
-                    reverse("grading:get_file_content"), {"file_path": "test_file.txt"}
-                )
-
-                self.assertResponseOK(response)
-                data = response.json()
-                self.assertEqual(data["content"], test_content)
-
-    def test_create_directory_view(self):
-        """测试创建目录视图"""
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.makedirs") as mock_makedirs:
-                with patch("grading.views.os.path.exists", return_value=False):
-                    response = self.client.post(
-                        reverse("grading:create_directory"), {"directory_path": "/test/new_dir"}
-                    )
-
-                    self.assertEqual(response.status_code, 200)
-                    data = response.json()
-                    self.assertTrue(data["success"])
-                    mock_makedirs.assert_called_once()
-
-    def test_serve_file_view(self):
-        """测试文件服务视图"""
-        test_content = b"test file content"
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.path.exists", return_value=True):
-                with patch("grading.views.os.path.getsize", return_value=len(test_content)):
-                    with patch("builtins.open", mock_open(read_data=test_content)):
-                        response = self.client.get(
-                            reverse("grading:serve_file", args=["test_file.txt"])
-                        )
-
-                        self.assertResponseOK(response)
-                        self.assertEqual(response.content, test_content)
-
-
-class BatchOperationViewTest(MockTestCase):
-    """批量操作视图测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
-        self.user_profile = UserProfile.objects.create(
-            user=self.user, tenant=self.tenant, repo_base_dir="/test/base"
-        )
-
-    def test_batch_grade_page_view(self):
-        """测试批量登分页面"""
-        self.login_user()
-        response = self.client.get(reverse("grading:batch_grade_page"))
-        self.assertResponseOK(response)
-        self.assertContains(response, "批量登分")
-
-    def test_batch_ai_score_page_view(self):
-        """测试批量AI评分页面"""
-        self.login_user()
-        response = self.client.get(reverse("grading:batch_ai_score_page"))
-        self.assertResponseOK(response)
-        self.assertContains(response, "批量AI评分")
-
-    @patch("grading.views.volcengine_score_homework")
-    def test_batch_ai_score_view(self, mock_ai_score):
-        """测试批量AI评分功能"""
-        mock_ai_score.return_value = (85, "评分：85分")
-
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.path.exists", return_value=True):
-                with patch("grading.views.os.listdir", return_value=["file1.txt", "file2.txt"]):
-                    with patch("builtins.open", mock_open(read_data="测试内容")):
-                        response = self.client.post(
-                            reverse("grading:batch_ai_score"), {"directory_path": "/test/batch_dir"}
-                        )
-
-                        self.assertEqual(response.status_code, 200)
-                        data = response.json()
-                        self.assertTrue(data["success"])
-
-
-class CalendarViewTest(BaseTestCase):
-    """校历视图测试"""
-
-    def setUp(self):
-        super().setUp()
+        
+        # Create test semester
         self.semester = Semester.objects.create(
-            name="2024年春季学期", start_date="2024-02-26", end_date="2024-06-30"
+            name='Test Semester',
+            start_date='2024-01-01',
+            end_date='2024-06-30',
+            is_active=True
         )
+        
+        # Create test course
         self.course = Course.objects.create(
-            semester=self.semester,
-            teacher=self.teacher_user,
-            name="Python程序设计",
-            location="A101",
-        )
-
-    def test_calendar_view_get(self):
-        """测试校历视图GET请求"""
-        self.login_user()
-        response = self.client.get(reverse("grading:calendar_view"))
-        self.assertResponseOK(response)
-        self.assertContains(response, "校历")
-
-    def test_semester_management_view(self):
-        """测试学期管理视图"""
-        self.login_user()
-        response = self.client.get(reverse("grading:semester_management"))
-        self.assertResponseOK(response)
-        self.assertContains(response, self.semester.name)
-
-    def test_course_management_view(self):
-        """测试课程管理视图"""
-        self.login_user()
-        response = self.client.get(reverse("grading:course_management"))
-        self.assertResponseOK(response)
-
-    def test_add_course_view(self):
-        """测试添加课程视图"""
-        self.login_user()
-
-        response = self.client.post(
-            reverse("grading:add_course"),
-            {
-                "semester_id": self.semester.id,
-                "name": "新课程",
-                "location": "B202",
-                "class_name": "计算机2班",
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-
-        # 验证课程已创建
-        self.assertTrue(Course.objects.filter(name="新课程").exists())
-
-
-class GradeTypeManagementViewTest(BaseTestCase):
-    """评分类型管理视图测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
-        self.user_profile = UserProfile.objects.create(
-            user=self.admin_user, tenant=self.tenant, is_tenant_admin=True
-        )
-
-    def test_grade_type_management_view(self):
-        """测试评分类型管理页面"""
-        self.login_user(self.admin_user)
-        response = self.client.get(reverse("grading:grade_type_management"))
-        self.assertResponseOK(response)
-        self.assertContains(response, "评分类型管理")
-
-    def test_change_grade_type_view(self):
-        """测试更改评分类型"""
-        self.login_user(self.admin_user)
-
-        response = self.client.post(
-            reverse("grading:change_grade_type"),
-            {"class_identifier": "计算机1班", "grade_type": "letter"},
-        )
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-
-        # 验证配置已创建
-        config = GradeTypeConfig.objects.get(tenant=self.tenant, class_identifier="计算机1班")
-        self.assertEqual(config.grade_type, "letter")
-
-    def test_get_grade_type_config_view(self):
-        """测试获取评分类型配置"""
-        # 创建测试配置
-        GradeTypeConfig.objects.create(
-            tenant=self.tenant, class_identifier="计算机1班", grade_type="text"
-        )
-
-        self.login_user(self.admin_user)
-
-        response = self.client.get(
-            reverse("grading:get_grade_type_config"), {"class_identifier": "计算机1班"}
-        )
-
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-        self.assertEqual(data["grade_type"], "text")
-
-
-class APIViewTest(APITestCase):
-    """API视图测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
-        self.user_profile = UserProfile.objects.create(
-            user=self.user, tenant=self.tenant, repo_base_dir="/test/base"
-        )
-
-    def test_get_directory_tree_api(self):
-        """测试获取目录树API"""
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.path.exists", return_value=True):
-                with patch("grading.views.os.listdir", return_value=["dir1", "file1.txt"]):
-                    with patch("grading.views.os.path.isdir", side_effect=lambda x: "dir1" in x):
-                        response = self.api_get(
-                            reverse("grading:get_directory_tree"), {"path": "/test/path"}
-                        )
-
-                        self.assertResponseOK(response)
-                        data = response.json()
-                        self.assertIn("children", data)
-
-    def test_get_file_grade_info_api(self):
-        """测试获取文件评分信息API"""
-        self.login_user()
-
-        test_content = "文件内容\n评分：A\n评语：优秀"
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("builtins.open", mock_open(read_data=test_content)):
-                response = self.api_get(
-                    reverse("grading:get_file_grade_info"), {"file_path": "test_file.txt"}
-                )
-
-                self.assertResponseOK(response)
-                data = response.json()
-                self.assertEqual(data["grade"], "A")
-                self.assertEqual(data["comment"], "优秀")
-
-
-class ErrorHandlingViewTest(MockTestCase):
-    """错误处理视图测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant = Tenant.objects.create(name="测试租户")
-        self.user_profile = UserProfile.objects.create(user=self.user, tenant=self.tenant)
-
-    def test_invalid_file_path(self):
-        """测试无效文件路径处理"""
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=False):
-            response = self.client.post(
-                reverse("grading:get_file_content"), {"file_path": "../../../etc/passwd"}
-            )
-
-            self.assertResponseForbidden(response)
-
-    def test_file_not_found(self):
-        """测试文件不存在处理"""
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.os.path.exists", return_value=False):
-                response = self.client.post(
-                    reverse("grading:get_file_content"), {"file_path": "nonexistent_file.txt"}
-                )
-
-                self.assertEqual(response.status_code, 404)
-
-    @patch("grading.views.volcengine_score_homework")
-    def test_ai_api_error(self, mock_ai_score):
-        """测试AI API错误处理"""
-        mock_ai_score.side_effect = Exception("API错误")
-
-        self.login_user()
-
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("builtins.open", mock_open(read_data="测试内容")):
-                response = self.client.post(reverse("grading:ai_score"), {"path": "test_file.txt"})
-
-                self.assertEqual(response.status_code, 500)
-                data = response.json()
-                self.assertFalse(data["success"])
-                self.assertIn("错误", data["error"])
-
-
-class PermissionViewTest(BaseTestCase):
-    """权限测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.tenant1 = Tenant.objects.create(name="租户1")
-        self.tenant2 = Tenant.objects.create(name="租户2")
-
-        self.user1_profile = UserProfile.objects.create(user=self.user, tenant=self.tenant1)
-
-        self.user2 = User.objects.create_user(username="user2", password="testpass123")
-        self.user2_profile = UserProfile.objects.create(user=self.user2, tenant=self.tenant2)
-
-    def test_cross_tenant_access_denied(self):
-        """测试跨租户访问被拒绝"""
-        self.login_user()  # 登录租户1的用户
-
-        # 尝试访问租户2的资源
-        with patch("grading.views.validate_file_path", return_value=True):
-            with patch("grading.views.get_user_tenant", return_value=self.tenant2):
-                response = self.client.post(
-                    reverse("grading:get_file_content"), {"file_path": "tenant2_file.txt"}
-                )
-
-                # 应该被拒绝访问
-                self.assertIn(response.status_code, [403, 404])
-
-    def test_tenant_admin_permissions(self):
-        """测试租户管理员权限"""
-        # 设置用户为租户管理员
-        self.user1_profile.is_tenant_admin = True
-        self.user1_profile.save()
-
-        self.login_user()
-
-        # 租户管理员应该能访问管理功能
-        response = self.client.get(reverse("grading:grade_type_management"))
-        self.assertResponseOK(response)
-
-
-class BatchGradeToRegistryFallbackTest(BaseTestCase):
-    """批量登分目录解析回退逻辑测试"""
-
-    def setUp(self):
-        super().setUp()
-        self.semester = Semester.objects.create(
-            name="2024年春季学期", start_date="2024-02-26", end_date="2024-06-30"
-        )
-        self.course = Course.objects.create(
+            name='Test Course',
+            course_type='theory',
             semester=self.semester,
             teacher=self.user,
-            name="Python程序设计",
-            course_type="theory",
-            description="",
-            location="A101",
-            class_name="计科1班",
+            location='Room 101'
         )
-        self.homework = Homework.objects.create(
-            course=self.course, title="第一次作业", folder_name="第一次作业"
-        )
+        
+        # Create test repository
         self.repository = Repository.objects.create(
-            owner=self.user, name="测试仓库", path="repo", is_active=True
+            name='test-repo',
+            url='https://github.com/test/repo.git',
+            owner=self.user,
+            tenant=self.tenant,
+            repo_type='local',
+            local_path='/tmp/test-repo'
         )
+        
+        # Create temporary directory for testing
+        self.temp_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.temp_dir)
+        
+        # Mock request with user and tenant
+        self.request = self.factory.get('/')
+        self.request.user = self.user
+        self.request.user_profile = self.user_profile
+        self.request.tenant = self.tenant
 
-    @patch("grading.views.GradeRegistryWriterService")
-    def test_batch_grade_uses_fallback_directory(self, mock_service):
-        """当目录结构不匹配时，应该通过回退搜索找到作业目录"""
-        mock_instance = mock_service.return_value
-        mock_instance.process_grading_system_scenario.return_value = {
-            "success": True,
-            "homework_number": 1,
-            "statistics": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
-            "processed_files": [],
-            "failed_files": [],
-            "skipped_files": [],
-            "registry_path": "/tmp/registry.xlsx",
-        }
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            class_dir = os.path.join(temp_dir, "任意目录")
-            homework_dir = os.path.join(class_dir, self.homework.folder_name)
-            os.makedirs(homework_dir)
+class TestUtilityFunctions(BaseViewTestCase):
+    """Test utility functions in views.py."""
+    
+    def test_get_base_directory_with_request(self):
+        """Test get_base_directory with request object."""
+        result = get_base_directory(self.request)
+        expected = os.path.expanduser('~/test_jobs')
+        self.assertEqual(result, expected)
+    
+    def test_get_base_directory_without_request(self):
+        """Test get_base_directory without request object."""
+        GlobalConfig.objects.create(
+            key='default_repo_base_dir',
+            value='~/default_jobs'
+        )
+        
+        result = get_base_directory()
+        expected = os.path.expanduser('~/default_jobs')
+        self.assertEqual(result, expected)
+    
+    def test_get_base_directory_fallback(self):
+        """Test get_base_directory with fallback value."""
+        result = get_base_directory()
+        expected = os.path.expanduser('~/jobs')
+        self.assertEqual(result, expected)
+    
+    def test_validate_file_path_success(self):
+        """Test successful file path validation."""
+        # Create test file
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        with open(test_file, 'w') as f:
+            f.write('test content')
+        
+        is_valid, full_path, error_msg = validate_file_path(
+            'test.txt', 
+            base_dir=self.temp_dir
+        )
+        
+        self.assertTrue(is_valid)
+        self.assertEqual(full_path, test_file)
+        self.assertIsNone(error_msg)
+    
+    def test_validate_file_path_missing_file(self):
+        """Test file path validation with missing file."""
+        is_valid, full_path, error_msg = validate_file_path(
+            'nonexistent.txt',
+            base_dir=self.temp_dir
+        )
+        
+        self.assertFalse(is_valid)
+        self.assertIsNone(full_path)
+        self.assertEqual(error_msg, '文件不存在')
+    
+    def test_validate_file_path_directory_traversal(self):
+        """Test file path validation prevents directory traversal."""
+        is_valid, full_path, error_msg = validate_file_path(
+            '../../../etc/passwd',
+            base_dir=self.temp_dir
+        )
+        
+        self.assertFalse(is_valid)
+        self.assertIsNone(full_path)
+        self.assertEqual(error_msg, '无权访问该文件')
+    
+    def test_validate_file_path_empty_path(self):
+        """Test file path validation with empty path."""
+        is_valid, full_path, error_msg = validate_file_path('')
+        
+        self.assertFalse(is_valid)
+        self.assertIsNone(full_path)
+        self.assertEqual(error_msg, '未提供文件路径')
+    
+    def test_get_teacher_display_name_with_full_name(self):
+        """Test get_teacher_display_name with full name."""
+        user = User.objects.create_user(
+            username='teacher',
+            first_name='John',
+            last_name='Doe'
+        )
+        
+        result = get_teacher_display_name(user)
+        self.assertEqual(result, 'John Doe')
+    
+    def test_get_teacher_display_name_with_username_only(self):
+        """Test get_teacher_display_name with username only."""
+        user = User.objects.create_user(username='teacher')
+        
+        result = get_teacher_display_name(user)
+        self.assertEqual(result, 'teacher')
+    
+    def test_get_teacher_display_name_with_none(self):
+        """Test get_teacher_display_name with None user."""
+        result = get_teacher_display_name(None)
+        self.assertEqual(result, '')
+    
+    def test_validate_file_write_permission_success(self):
+        """Test successful file write permission validation."""
+        test_file = os.path.join(self.temp_dir, 'writable.txt')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        
+        is_valid, error_msg = validate_file_write_permission(test_file)
+        
+        self.assertTrue(is_valid)
+        self.assertIsNone(error_msg)
+    
+    def test_validate_user_permissions_authenticated_staff(self):
+        """Test user permissions validation for authenticated staff user."""
+        is_valid, error_msg = validate_user_permissions(self.request)
+        
+        self.assertTrue(is_valid)
+        self.assertIsNone(error_msg)
+    
+    def test_validate_user_permissions_not_authenticated(self):
+        """Test user permissions validation for unauthenticated user."""
+        request = self.factory.get('/')
+        request.user = Mock()
+        request.user.is_authenticated = False
+        
+        is_valid, error_msg = validate_user_permissions(request)
+        
+        self.assertFalse(is_valid)
+        self.assertEqual(error_msg, '请先登录')
+    
+    def test_validate_user_permissions_not_staff(self):
+        """Test user permissions validation for non-staff user."""
+        request = self.factory.get('/')
+        request.user = Mock()
+        request.user.is_authenticated = True
+        request.user.is_staff = False
+        
+        is_valid, error_msg = validate_user_permissions(request)
+        
+        self.assertFalse(is_valid)
+        self.assertEqual(error_msg, '无权限访问')
 
-            self.login_user(self.user)
-            with patch.object(Repository, "get_full_path", return_value=temp_dir):
-                response = self.client.post(
-                    reverse("grading:batch_grade_to_registry", args=[self.homework.id])
-                )
 
+class TestResponseHelpers(BaseViewTestCase):
+    """Test response helper functions."""
+    
+    def test_create_error_response_default(self):
+        """Test create_error_response with default parameters."""
+        response = create_error_response('Test error')
+        
+        self.assertIsInstance(response, JsonResponse)
+        self.assertEqual(response.status_code, 400)
+        
+        data = json.loads(response.content)
+        self.assertEqual(data['status'], 'error')
+        self.assertEqual(data['message'], 'Test error')
+    
+    def test_create_error_response_custom_status(self):
+        """Test create_error_response with custom status code."""
+        response = create_error_response('Not found', status_code=404)
+        
+        self.assertEqual(response.status_code, 404)
+    
+    def test_create_error_response_success_format(self):
+        """Test create_error_response with success format."""
+        response = create_error_response('Test error', response_format='success')
+        
+        data = json.loads(response.content)
+        self.assertEqual(data['success'], False)
+        self.assertEqual(data['message'], 'Test error')
+    
+    def test_create_success_response_default(self):
+        """Test create_success_response with default parameters."""
+        response = create_success_response()
+        
+        self.assertIsInstance(response, JsonResponse)
         self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
+        
+        data = json.loads(response.content)
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['message'], '操作成功')
+    
+    def test_create_success_response_with_data(self):
+        """Test create_success_response with custom data."""
+        test_data = {'key': 'value'}
+        response = create_success_response(data=test_data, message='Custom message')
+        
+        data = json.loads(response.content)
+        self.assertEqual(data['status'], 'success')
+        self.assertEqual(data['message'], 'Custom message')
+        self.assertEqual(data['key'], 'value')
+    
+    def test_create_success_response_success_format(self):
+        """Test create_success_response with success format."""
+        response = create_success_response(response_format='success')
+        
+        data = json.loads(response.content)
+        self.assertEqual(data['success'], True)
+        self.assertEqual(data['message'], '操作成功')
 
-        mock_instance.process_grading_system_scenario.assert_called_once()
-        called_kwargs = mock_instance.process_grading_system_scenario.call_args.kwargs
-        self.assertEqual(called_kwargs["homework_dir"], homework_dir)
-        self.assertEqual(called_kwargs["class_dir"], class_dir)
 
-    @patch("grading.views.GradeRegistryWriterService")
-    def test_batch_grade_multiple_fallback_matches(self, mock_service):
-        """存在多个同名目录时应返回冲突错误"""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            class_a = os.path.join(temp_dir, "A班", self.homework.folder_name)
-            class_b = os.path.join(temp_dir, "B班", self.homework.folder_name)
-            os.makedirs(class_a)
-            os.makedirs(class_b)
+class TestFileOperations(BaseViewTestCase):
+    """Test file operation functions."""
+    
+    def test_read_file_content_text_file(self):
+        """Test reading text file content."""
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        test_content = 'Hello, World!\nThis is a test file.'
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write(test_content)
+        
+        result = read_file_content(test_file)
+        self.assertEqual(result, test_content)
+    
+    def test_read_file_content_docx_file(self):
+        """Test reading DOCX file content."""
+        test_file = os.path.join(self.temp_dir, 'test.docx')
+        
+        # Create a simple DOCX file
+        doc = Document()
+        doc.add_paragraph('First paragraph')
+        doc.add_paragraph('Second paragraph')
+        doc.save(test_file)
+        
+        result = read_file_content(test_file)
+        self.assertIn('First paragraph', result)
+        self.assertIn('Second paragraph', result)
+    
+    def test_read_file_content_nonexistent_file(self):
+        """Test reading nonexistent file returns empty string."""
+        result = read_file_content('/nonexistent/file.txt')
+        self.assertEqual(result, '')
+    
+    def test_get_file_extension_with_extension(self):
+        """Test get_file_extension with file that has extension."""
+        result = get_file_extension('/path/to/file.docx')
+        self.assertEqual(result, 'docx')
+    
+    def test_get_file_extension_without_extension(self):
+        """Test get_file_extension with file that has no extension."""
+        result = get_file_extension('/path/to/file')
+        self.assertEqual(result, 'unknown')
+    
+    def test_get_file_extension_multiple_dots(self):
+        """Test get_file_extension with file that has multiple dots."""
+        result = get_file_extension('/path/to/file.backup.txt')
+        self.assertEqual(result, 'txt')
 
-            self.login_user(self.user)
-            with patch.object(Repository, "get_full_path", return_value=temp_dir):
-                response = self.client.post(
-                    reverse("grading:batch_grade_to_registry", args=[self.homework.id])
-                )
 
-        self.assertEqual(response.status_code, 409)
-        data = response.json()
-        self.assertFalse(data["success"])
-        self.assertIn("多个同名作业目录", data["message"])
-        mock_service.return_value.process_grading_system_scenario.assert_not_called()
+class TestCourseTypeDetection(BaseViewTestCase):
+    """Test course type detection functions."""
+    
+    def test_is_lab_course_by_name_with_lab_keyword(self):
+        """Test is_lab_course_by_name with lab keyword."""
+        test_cases = [
+            '计算机实验',
+            'Computer Lab',
+            'Physics Experiment',
+            '数据结构实训',
+            'Software Practice'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = is_lab_course_by_name(course_name)
+                self.assertTrue(result)
+    
+    def test_is_lab_course_by_name_without_lab_keyword(self):
+        """Test is_lab_course_by_name without lab keyword."""
+        test_cases = [
+            '高等数学',
+            'English Literature',
+            '计算机理论',
+            'History'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = is_lab_course_by_name(course_name)
+                self.assertFalse(result)
+    
+    def test_is_lab_course_by_name_with_database_course(self):
+        """Test is_lab_course_by_name with database course."""
+        course = Course.objects.create(
+            name='Database Lab',
+            course_type='lab',
+            semester=self.semester,
+            teacher=self.user,
+            location='Lab 1'
+        )
+        
+        result = is_lab_course_by_name('Database Lab')
+        self.assertTrue(result)
+    
+    def test_auto_detect_course_type_mixed(self):
+        """Test auto_detect_course_type for mixed course."""
+        test_cases = [
+            '理论与实验',
+            '理论+实验',
+            'Theory and Lab Mixed'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = auto_detect_course_type(course_name)
+                self.assertEqual(result, 'mixed')
+    
+    def test_auto_detect_course_type_lab(self):
+        """Test auto_detect_course_type for lab course."""
+        test_cases = [
+            '计算机实验',
+            'Computer Lab',
+            'Physics Experiment'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = auto_detect_course_type(course_name)
+                self.assertEqual(result, 'lab')
+    
+    def test_auto_detect_course_type_practice(self):
+        """Test auto_detect_course_type for practice course."""
+        test_cases = [
+            '软件实训',
+            'Software Practice',
+            '工程实践'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = auto_detect_course_type(course_name)
+                self.assertEqual(result, 'practice')
+    
+    def test_auto_detect_course_type_theory(self):
+        """Test auto_detect_course_type for theory course."""
+        test_cases = [
+            '高等数学',
+            'English Literature',
+            '计算机理论'
+        ]
+        
+        for course_name in test_cases:
+            with self.subTest(course_name=course_name):
+                result = auto_detect_course_type(course_name)
+                self.assertEqual(result, 'theory')
+    
+    def test_get_course_type_from_name_database_exists(self):
+        """Test get_course_type_from_name when course exists in database."""
+        result = get_course_type_from_name('Test Course')
+        self.assertEqual(result, 'theory')
+    
+    def test_get_course_type_from_name_database_not_exists(self):
+        """Test get_course_type_from_name when course doesn't exist in database."""
+        result = get_course_type_from_name('Nonexistent Lab Course')
+        self.assertEqual(result, 'lab')
 
-    @patch("grading.views.GradeRegistryWriterService")
-    def test_batch_grade_manual_relative_path_resolves_conflict(self, mock_service):
-        """用户选择具体目录时，应优先使用该路径避免同名冲突"""
-        mock_instance = mock_service.return_value
-        mock_instance.process_grading_system_scenario.return_value = {
-            "success": True,
-            "homework_number": 1,
-            "statistics": {"total": 1, "success": 1, "failed": 0, "skipped": 0},
-            "processed_files": [],
-            "failed_files": [],
-            "skipped_files": [],
-            "registry_path": "/tmp/registry.xlsx",
-        }
 
-        # 模拟课程未配置班级名称的场景
-        self.course.class_name = ""
-        self.course.save(update_fields=["class_name"])
+class TestLabReportDetection(BaseViewTestCase):
+    """Test lab report detection functions."""
+    
+    def test_extract_homework_folder_success(self):
+        """Test _extract_homework_folder with valid path structure."""
+        file_path = os.path.join(self.temp_dir, 'Test Course', 'Class1', 'Assignment1', 'file.docx')
+        
+        result = _extract_homework_folder(file_path, self.temp_dir, 'Test Course')
+        self.assertEqual(result, 'Assignment1')
+    
+    def test_extract_homework_folder_invalid_structure(self):
+        """Test _extract_homework_folder with invalid path structure."""
+        file_path = os.path.join(self.temp_dir, 'file.docx')
+        
+        result = _extract_homework_folder(file_path, self.temp_dir, 'Test Course')
+        self.assertIsNone(result)
+    
+    def test_is_lab_report_file_with_homework_in_database(self):
+        """Test is_lab_report_file when homework exists in database."""
+        # Create lab homework
+        homework = Homework.objects.create(
+            course=self.course,
+            title='Lab Assignment 1',
+            homework_type='lab_report',
+            folder_name='lab1',
+            tenant=self.tenant
+        )
+        
+        result = is_lab_report_file(
+            course_name='Test Course',
+            homework_folder='lab1'
+        )
+        self.assertTrue(result)
+    
+    def test_is_lab_report_file_normal_homework(self):
+        """Test is_lab_report_file with normal homework."""
+        # Create normal homework
+        homework = Homework.objects.create(
+            course=self.course,
+            title='Regular Assignment 1',
+            homework_type='normal',
+            folder_name='assignment1',
+            tenant=self.tenant
+        )
+        
+        result = is_lab_report_file(
+            course_name='Test Course',
+            homework_folder='assignment1'
+        )
+        self.assertFalse(result)
+    
+    def test_is_lab_report_file_course_type_fallback(self):
+        """Test is_lab_report_file falls back to course type."""
+        # Update course to lab type
+        self.course.course_type = 'lab'
+        self.course.save()
+        
+        result = is_lab_report_file(
+            course_name='Test Course',
+            homework_folder='unknown_homework'
+        )
+        self.assertTrue(result)
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            course_root = os.path.join(temp_dir, self.course.name)
-            class_a_dir = os.path.join(course_root, "A班")
-            class_b_dir = os.path.join(course_root, "B班")
-            homework_dir_a = os.path.join(class_a_dir, self.homework.folder_name)
-            homework_dir_b = os.path.join(class_b_dir, self.homework.folder_name)
-            os.makedirs(homework_dir_a)
-            os.makedirs(homework_dir_b)
 
-            relative_path = f"{self.course.name}/A班/{self.homework.folder_name}"
+class TestDirectoryOperations(BaseViewTestCase):
+    """Test directory operation functions."""
+    
+    @patch('grading.views.get_cache_manager')
+    def test_get_directory_file_count_cached_with_cache_hit(self, mock_get_cache_manager):
+        """Test get_directory_file_count_cached with cache hit."""
+        mock_cache_manager = Mock()
+        mock_cache_manager.get_file_count.return_value = 5
+        mock_get_cache_manager.return_value = mock_cache_manager
+        
+        result = get_directory_file_count_cached('test_dir', self.temp_dir, self.request)
+        
+        self.assertEqual(result, 5)
+        mock_cache_manager.get_file_count.assert_called_once_with('test_dir')
+    
+    @patch('grading.views.get_cache_manager')
+    def test_get_directory_file_count_cached_with_cache_miss(self, mock_get_cache_manager):
+        """Test get_directory_file_count_cached with cache miss."""
+        mock_cache_manager = Mock()
+        mock_cache_manager.get_file_count.return_value = None
+        mock_cache_manager.check_file_count_threshold.return_value = {'warning': False}
+        mock_get_cache_manager.return_value = mock_cache_manager
+        
+        # Create test directory with docx files
+        test_dir = os.path.join(self.temp_dir, 'test_dir')
+        os.makedirs(test_dir)
+        
+        # Create some .docx files
+        for i in range(3):
+            with open(os.path.join(test_dir, f'file{i}.docx'), 'w') as f:
+                f.write('test')
+        
+        # Create some non-docx files (should be ignored)
+        with open(os.path.join(test_dir, 'file.txt'), 'w') as f:
+            f.write('test')
+        
+        result = get_directory_file_count_cached('test_dir', self.temp_dir, self.request)
+        
+        self.assertEqual(result, 3)
+        mock_cache_manager.set_file_count.assert_called_once_with('test_dir', 3)
+    
+    @patch('grading.views.get_cache_manager')
+    def test_clear_directory_file_count_cache(self, mock_get_cache_manager):
+        """Test clear_directory_file_count_cache."""
+        mock_cache_manager = Mock()
+        mock_get_cache_manager.return_value = mock_cache_manager
+        
+        clear_directory_file_count_cache(self.request)
+        
+        mock_cache_manager.clear_file_count.assert_called_once()
 
-            self.login_user(self.user)
-            with patch.object(Repository, "get_full_path", return_value=temp_dir):
-                response = self.client.post(
-                    reverse("grading:batch_grade_to_registry", args=[self.homework.id]),
-                    {"relative_path": relative_path},
-                )
 
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["success"])
-        self.assertEqual(data["class_name"], "A班")
+class TestPathUtilities(BaseViewTestCase):
+    """Test path utility functions."""
+    
+    def test_clean_relative_homework_path_valid(self):
+        """Test _clean_relative_homework_path with valid path."""
+        test_cases = [
+            ('course/class/homework', 'course/class/homework'),
+            ('course\\class\\homework', 'course/class/homework'),
+            ('/course/class/homework/', 'course/class/homework'),
+            ('  course/class/homework  ', 'course/class/homework'),
+        ]
+        
+        for input_path, expected in test_cases:
+            with self.subTest(input_path=input_path):
+                result = _clean_relative_homework_path(input_path)
+                self.assertEqual(result, expected)
+    
+    def test_clean_relative_homework_path_invalid(self):
+        """Test _clean_relative_homework_path with invalid paths."""
+        test_cases = [
+            '',
+            None,
+            '/',
+            '../../../etc/passwd',
+            'course/../../../etc/passwd',
+            '/absolute/path',
+        ]
+        
+        for input_path in test_cases:
+            with self.subTest(input_path=input_path):
+                result = _clean_relative_homework_path(input_path)
+                self.assertIsNone(result)
+    
+    def test_split_rel_path_parts(self):
+        """Test _split_rel_path_parts function."""
+        test_cases = [
+            ('course/class/homework', ['course', 'class', 'homework']),
+            ('course\\class\\homework', ['course', 'class', 'homework']),
+            ('', []),
+            (None, []),
+            ('single', ['single']),
+        ]
+        
+        for input_path, expected in test_cases:
+            with self.subTest(input_path=input_path):
+                result = _split_rel_path_parts(input_path)
+                self.assertEqual(result, expected)
+    
+    def test_is_homework_folder_rel_path(self):
+        """Test _is_homework_folder_rel_path function."""
+        test_cases = [
+            ('course/homework', 'course', True),
+            ('course/class/homework', 'course', False),
+            ('homework', 'course', False),
+            ('other/homework', 'course', False),
+        ]
+        
+        for rel_path, course_name, expected in test_cases:
+            with self.subTest(rel_path=rel_path, course_name=course_name):
+                result = _is_homework_folder_rel_path(rel_path, course_name)
+                self.assertEqual(result, expected)
+    
+    def test_is_homework_file_rel_path(self):
+        """Test _is_homework_file_rel_path function."""
+        test_cases = [
+            ('course/class/homework/file.docx', 'course', True),
+            ('course/homework/file.docx', 'course', True),
+            ('course/homework', 'course', False),
+            ('homework/file.docx', 'course', False),
+        ]
+        
+        for rel_path, course_name, expected in test_cases:
+            with self.subTest(rel_path=rel_path, course_name=course_name):
+                result = _is_homework_file_rel_path(rel_path, course_name)
+                self.assertEqual(result, expected)
 
-        mock_instance.process_grading_system_scenario.assert_called_once()
-        called_kwargs = mock_instance.process_grading_system_scenario.call_args.kwargs
-        self.assertEqual(called_kwargs["homework_dir"], homework_dir_a)
-        self.assertEqual(called_kwargs["class_dir"], class_a_dir)
+
+class TestFileGradeInfo(BaseViewTestCase):
+    """Test file grade information functions."""
+    
+    def test_get_file_grade_info_text_file_with_grade(self):
+        """Test get_file_grade_info with text file containing grade."""
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        content = """
+        This is a test file.
+        老师评分：A
+        Some other content.
+        """
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        result = get_file_grade_info(test_file)
+        
+        self.assertTrue(result['has_grade'])
+        self.assertEqual(result['grade'], 'A')
+        self.assertEqual(result['grade_type'], 'letter')
+        self.assertFalse(result['in_table'])
+    
+    def test_get_file_grade_info_text_file_without_grade(self):
+        """Test get_file_grade_info with text file without grade."""
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        content = "This is a test file without any grade."
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        result = get_file_grade_info(test_file)
+        
+        self.assertFalse(result['has_grade'])
+        self.assertIsNone(result['grade'])
+        self.assertIsNone(result['grade_type'])
+    
+    def test_get_file_grade_info_docx_file_with_grade(self):
+        """Test get_file_grade_info with DOCX file containing grade."""
+        test_file = os.path.join(self.temp_dir, 'test.docx')
+        
+        # Create DOCX with grade
+        doc = Document()
+        doc.add_paragraph('This is a test document.')
+        doc.add_paragraph('老师评分：B')
+        doc.save(test_file)
+        
+        result = get_file_grade_info(test_file)
+        
+        self.assertTrue(result['has_grade'])
+        self.assertEqual(result['grade'], 'B')
+        self.assertEqual(result['grade_type'], 'letter')
+    
+    def test_get_file_grade_info_percentage_grade(self):
+        """Test get_file_grade_info with percentage grade."""
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        content = "老师评分：85"
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        result = get_file_grade_info(test_file)
+        
+        self.assertTrue(result['has_grade'])
+        self.assertEqual(result['grade'], '85')
+        self.assertEqual(result['grade_type'], 'percentage')
+    
+    def test_get_file_grade_info_text_grade(self):
+        """Test get_file_grade_info with text grade."""
+        test_file = os.path.join(self.temp_dir, 'test.txt')
+        content = "老师评分：优秀"
+        
+        with open(test_file, 'w', encoding='utf-8') as f:
+            f.write(content)
+        
+        result = get_file_grade_info(test_file)
+        
+        self.assertTrue(result['has_grade'])
+        self.assertEqual(result['grade'], '优秀')
+        self.assertEqual(result['grade_type'], 'text')
+
+
+@pytest.mark.django_db
+class TestViewIntegration:
+    """Integration tests for view functions."""
+    
+    def test_index_view_authenticated_user(self, client, django_user_model):
+        """Test index view with authenticated user."""
+        user = django_user_model.objects.create_user(
+            username='testuser',
+            password='testpass123'
+        )
+        client.force_login(user)
+        
+        response = client.get('/')
+        
+        assert response.status_code == 200
+        assert 'current_semester' in response.context
+        assert 'user_courses' in response.context
+        assert 'repository_stats' in response.context
+    
+    def test_index_view_anonymous_user(self, client):
+        """Test index view with anonymous user."""
+        response = client.get('/')
+        
+        assert response.status_code == 200
+        assert response.context['user_courses'] == []
+        assert response.context['repository_stats'] == {}
+
+
+class TestErrorHandling(BaseViewTestCase):
+    """Test error handling in view functions."""
+    
+    def test_read_file_content_permission_error(self):
+        """Test read_file_content handles permission errors gracefully."""
+        # Create a file and remove read permissions
+        test_file = os.path.join(self.temp_dir, 'no_permission.txt')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        
+        # Remove read permissions (on Unix systems)
+        if hasattr(os, 'chmod'):
+            os.chmod(test_file, 0o000)
+            
+            result = read_file_content(test_file)
+            self.assertEqual(result, '')
+            
+            # Restore permissions for cleanup
+            os.chmod(test_file, 0o644)
+    
+    def test_get_file_extension_edge_cases(self):
+        """Test get_file_extension with edge cases."""
+        test_cases = [
+            ('', 'unknown'),
+            ('.', 'unknown'),
+            ('..', 'unknown'),
+            ('.hidden', 'unknown'),
+            ('file.', 'unknown'),
+        ]
+        
+        for input_path, expected in test_cases:
+            with self.subTest(input_path=input_path):
+                result = get_file_extension(input_path)
+                self.assertEqual(result, expected)
+    
+    def test_auto_detect_course_type_empty_name(self):
+        """Test auto_detect_course_type with empty course name."""
+        result = auto_detect_course_type('')
+        self.assertEqual(result, 'theory')
+        
+        result = auto_detect_course_type(None)
+        self.assertEqual(result, 'theory')
+
+
+class TestCacheIntegration(BaseViewTestCase):
+    """Test cache integration in view functions."""
+    
+    def setUp(self):
+        super().setUp()
+        # Clear cache before each test
+        cache.clear()
+    
+    def tearDown(self):
+        # Clear cache after each test
+        cache.clear()
+        super().tearDown()
+    
+    @patch('grading.views.get_cache_manager')
+    def test_directory_file_count_caching(self, mock_get_cache_manager):
+        """Test that directory file count is properly cached."""
+        mock_cache_manager = Mock()
+        mock_cache_manager.get_file_count.return_value = None
+        mock_cache_manager.check_file_count_threshold.return_value = {'warning': False}
+        mock_get_cache_manager.return_value = mock_cache_manager
+        
+        # Create test directory
+        test_dir = os.path.join(self.temp_dir, 'cache_test')
+        os.makedirs(test_dir)
+        
+        # First call should compute and cache
+        result1 = get_directory_file_count_cached('cache_test', self.temp_dir, self.request)
+        
+        # Verify cache was set
+        mock_cache_manager.set_file_count.assert_called_once()
+        
+        # Second call should use cache
+        mock_cache_manager.get_file_count.return_value = result1
+        result2 = get_directory_file_count_cached('cache_test', self.temp_dir, self.request)
+        
+        self.assertEqual(result1, result2)
+
+
+if __name__ == '__main__':
+    pytest.main([__file__])

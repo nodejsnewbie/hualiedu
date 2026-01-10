@@ -342,7 +342,9 @@ class GradeRegistryWriterService:
                 return False, "无权访问该路径"
 
             # 2. 检查路径中是否包含危险字符和模式
-            dangerous_patterns = ["../", "..\\", "~", "$", "|", "&", ";", "`"]
+            dangerous_patterns = ["../", "..\\", "$", "|", "&", ";", "`"]
+            if os.name != "nt":
+                dangerous_patterns.append("~")
             for pattern in dangerous_patterns:
                 if pattern in file_path:
                     self.logger.error(

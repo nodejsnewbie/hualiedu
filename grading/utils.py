@@ -98,31 +98,30 @@ class GitHandler:
             logger.error(f"获取仓库名称失败: {str(e)}")
             return os.path.basename(path)
 
+
     @staticmethod
-<<<<<<< HEAD
-    def clone_repo_remote(repo_name, target_path):
-        """Docstring."""
-=======
     def clone_repo_remote(repo_name, target_path, branch=None):
-        """克隆远程仓库"""
->>>>>>> aa3908763b6527542feba3f3d5b76f75166e31cc
+        '''Clone remote repository.'''
         try:
-            result = subprocess.run(
-                ["git", "clone", repo_name, target_path], capture_output=True, text=True
-            )
+            cmd = ["git", "clone", repo_name, target_path]
+            if branch:
+                cmd = ["git", "clone", "-b", branch, repo_name, target_path]
+            result = subprocess.run(cmd, capture_output=True, text=True)
             return result.returncode == 0
         except Exception:
             return False
 
     @staticmethod
-<<<<<<< HEAD
-    def pull_repo(repo_path):
-        """Docstring."""
-=======
     def pull_repo(repo_path, branch=None):
-        """拉取仓库更新，自动处理未提交的更改"""
->>>>>>> aa3908763b6527542feba3f3d5b76f75166e31cc
+        '''Pull updates from repository.'''
         try:
+            if branch:
+                subprocess.run(
+                    ["git", "checkout", branch],
+                    cwd=repo_path,
+                    capture_output=True,
+                    text=True,
+                )
             result = subprocess.run(["git", "pull"], cwd=repo_path, capture_output=True, text=True)
             return result.returncode == 0
         except Exception:

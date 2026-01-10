@@ -586,10 +586,11 @@ window.handleFileContent = function(response) {
                 break;
             case 'binary':
                 // 二进制文件，提供下载链接
+                const downloadName = response.filename || 'download';
                 fileContent.html(`
                     <div class="alert alert-info">
                         <i class="bi bi-download"></i>
-                        <a href="${response.content}" class="alert-link" download>点击下载文件</a>
+                        <a href="${response.content}" class="alert-link" download="${downloadName}">点击下载文件</a>
                     </div>
                 `);
                 showPreviewHint('此文件类型不支持在线预览，请下载后查看', 'info');
@@ -688,6 +689,14 @@ window.loadFile = function(path) {
         const requestData = {
             path: dirPath
         };
+        const repoId = currentRepoId || $('#repositorySelect').val();
+        const courseName = currentCourse || $('#courseSelect').val();
+        if (repoId) {
+            requestData.repo_id = repoId;
+        }
+        if (courseName) {
+            requestData.course = courseName;
+        }
         console.log('Request data:', requestData);
 
         // 获取CSRF Token
@@ -2086,55 +2095,54 @@ function addHomeworkTypeLabels() {
     });
 }
 
-// 显示作业类型修改模态框
-function showHomeworkTypeModal(nodeId, currentType) {
+// 为未评分或已变更的作业/文件添加星号标记
+function addHomeworkUpdateBadges() {
     const tree = $('#directory-tree').jstree(true);
-    const node = tree.get_node(nodeId);
-    
-    if (!node) return;
-    
-    // 创建模态框HTML
-    const modalHtml = `
-        <div class="modal fade" id="homeworkTypeModal" tabindex="-1">
-            <div class="modal-dialog">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h5 class="modal-title">修改作业类型</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body">
-                        <p><strong>作业文件夹：</strong>${node.text}</p>
-                        <div class="mb-3">
-                            <label class="form-label">作业类型</label>
-                            <select class="form-select" id="homeworkTypeSelect">
-                                <option value="normal" ${currentType === 'normal' ? 'selected' : ''}>普通作业</option>
-                                <option value="lab_report" ${currentType === 'lab_report' ? 'selected' : ''}>实验报告</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                        <button type="button" class="btn btn-primary" id="saveHomeworkType">保存</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // 移除旧的模态框
-    $('#homeworkTypeModal').remove();
-    
-    // 添加新的模态框
-    $('body').append(modalHtml);
-    
-    // 显示模态框
-    const modal = new bootstrap.Modal(document.getElementById('homeworkTypeModal'));
-    modal.show();
-    
-    // 绑定保存按钮事件
-    $('#saveHomeworkType').off('click').on('click', function() {
-        const newType = $('#homeworkTypeSelect').val();
-        updateHomeworkType(nodeId, node.text, newType, modal);
+    if (!tree) return;
+
+    const allNodes = tree.get_json('#', { flat: true });
+    const needsStar = new Set();
+    allNodes.forEach(node => {
+        const fullNode = tree.get_node(node.id);
+        const hasUpdates = (
+            (node.data && node.data.has_updates) ||
+            (fullNode && fullNode.data && fullNode.data.has_updates) ||
+            (fullNode && fullNode.original && fullNode.original.data && fullNode.original.data.has_updates)
+        );
+        if (hasUpdates) {
+            needsStar.add(node.id);
+            if (node.id && node.id.includes('/')) {
+                const parts = node.id.split('/');
+                const parentParts = parts.slice(0, -1);
+                if (parentParts.length >= 2) {
+                    needsStar.add(parentParts.join('/'));
+                }
+            }
+        }
+    });
+
+    allNodes.forEach(node => {
+        const needsAttention = needsStar.has(node.id);
+        const nodeDom = tree.get_node(node.id, true);
+        const anchorEl = document.getElementById(node.id + '_anchor');
+        if (nodeDom && nodeDom.length) {
+            nodeDom.toggleClass('has-update-star', needsAttention);
+        }
+        if (!anchorEl) {
+            return;
+        }
+        const existing = anchorEl.querySelector('.update-star');
+        if (needsAttention) {
+            if (!existing) {
+                const star = document.createElement('span');
+                star.className = 'text-warning ms-1 update-star';
+                star.title = '??????????';
+                star.textContent = '*';
+                anchorEl.appendChild(star);
+            }
+        } else if (existing) {
+            existing.remove();
+        }
     });
 }
 
@@ -2517,7 +2525,9 @@ $(document).on('click', '#batch-grade-btn', function() {
         },
         data: {
             relative_path: currentHomeworkRelativePath || '',
-            tracking_id: trackingId
+            tracking_id: trackingId,
+            repo_id: currentRepoId || $('#repositorySelect').val() || '',
+            course: currentCourse || $('#courseSelect').val() || ''
         },
         success: function(response) {
             console.log('=== 批量登分响应 ===');

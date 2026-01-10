@@ -50,7 +50,7 @@ test-file:
 
 # 开发服务器
 runserver:
-	@echo "启动开发服务器..."
+	@echo "Starting development server..."
 	@C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\dev.ps1 services
 	@C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path .\\.uv-venv\\Scripts\\python.exe) { & .\\.uv-venv\\Scripts\\python.exe manage.py runserver $(if $(PORT),$(PORT),8000) } elseif (Test-Path .\\.venv\\Scripts\\python.exe) { & .\\.venv\\Scripts\\python.exe manage.py runserver $(if $(PORT),$(PORT),8000) } else { uv run python manage.py runserver $(if $(PORT),$(PORT),8000) }"
 

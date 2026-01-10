@@ -34,7 +34,7 @@ class RepositoryService:
     def create_git_repository(
         self,
         teacher: User,
-        class_obj: Class,
+        class_obj: Optional[Class],
         name: str,
         git_url: str,
         branch: str = "main",
@@ -47,7 +47,7 @@ class RepositoryService:
 
         Args:
             teacher: 仓库所有者（教师）
-            class_obj: 关联的班级
+            class_obj: 关联的班级（可选）
             name: 仓库名称
             git_url: Git仓库URL
             branch: Git分支名称
@@ -71,9 +71,6 @@ class RepositoryService:
 
         if not teacher:
             raise ValueError("必须指定仓库所有者")
-
-        if not class_obj:
-            raise ValueError("必须指定关联的班级")
 
         # 如果没有提供租户，尝试从教师的用户配置中获取
         if not tenant and hasattr(teacher, "profile"):
@@ -114,7 +111,7 @@ class RepositoryService:
     def create_filesystem_repository(
         self,
         teacher: User,
-        class_obj: Class,
+        class_obj: Optional[Class],
         name: str,
         allocated_space_mb: int = 1024,
         description: str = "",
@@ -124,7 +121,7 @@ class RepositoryService:
 
         Args:
             teacher: 仓库所有者（教师）
-            class_obj: 关联的班级
+            class_obj: 关联的班级（可选）
             name: 仓库名称
             allocated_space_mb: 分配空间（MB）
             description: 仓库描述
@@ -142,9 +139,6 @@ class RepositoryService:
 
         if not teacher:
             raise ValueError("必须指定仓库所有者")
-
-        if not class_obj:
-            raise ValueError("必须指定关联的班级")
 
         # 如果没有提供租户，尝试从教师的用户配置中获取
         if not tenant and hasattr(teacher, "profile"):

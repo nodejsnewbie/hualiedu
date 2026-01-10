@@ -23,7 +23,17 @@ if (Test-Path $envPath) {
 function Ensure-Podman {
     $machine = $env:PODMAN_MACHINE
     if (-not $machine) { $machine = "huali-machine" }
-    podman machine start $machine | Out-Null
+    $state = $null
+    try {
+        $state = podman machine inspect $machine --format "{{.State}}" 2>$null
+    } catch {
+        $state = $null
+    }
+    if ($state -and $state.Trim().ToLower() -eq "running") {
+        Write-Host "Info: podman machine $machine already running"
+    } else {
+        podman machine start $machine | Out-Null
+    }
 
     $network = $env:PODMAN_NETWORK
     if (-not $network) { $network = "huali-net" }

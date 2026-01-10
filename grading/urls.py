@@ -8,6 +8,7 @@ app_name = "grading"
 urlpatterns = [
     path("", views.index, name="index"),
     path("grading/", views.grading_page, name="grading_page"),
+    path("grading/", views.grading_page, name="grading"),
     path("test-js/", views.test_js, name="test_js"),
     path("test-grade-switch/", views.test_grade_switch, name="test_grade_switch"),
     path("debug-grading/", views.debug_grading, name="debug_grading"),
@@ -29,6 +30,7 @@ urlpatterns = [
     path("get_file_grade_info/", views.get_file_grade_info_api, name="get_file_grade_info"),
     path("ai_score/", views.ai_score_view, name="ai_score"),
     path("batch_ai_score/", views.batch_ai_score_view, name="batch_ai_score"),
+    path("batch-grade-registration/", views.batch_grade_registration, name="batch_grade_registration"),
     # 成绩登分册写入功能路由
     path("grade-registry-writer/", views.grade_registry_writer_view, name="grade_registry_writer"),
     path(
@@ -89,6 +91,7 @@ urlpatterns = [
     path("semester-status-api/", views.semester_status_api, name="semester_status_api"),
     path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
     path("semester-add/", views.semester_add_view, name="semester_add"),
+    path("semester-add/", views.semester_add_view, name="grading_semester_add"),
     path("semester-delete/<int:semester_id>/", views.semester_delete_view, name="semester_delete"),
     path("add-course/", views.add_course_view, name="add_course"),
     path("delete-course/", views.delete_course_view, name="delete_course"),
@@ -107,6 +110,11 @@ urlpatterns = [
         "assignments/<int:assignment_id>/edit/",
         assignment_views.assignment_edit_view,
         name="assignment_edit",
+    ),
+    path(
+        "assignments/<int:assignment_id>/edit/",
+        assignment_views.assignment_edit_view,
+        name="assignment_update",
     ),
     path(
         "assignments/<int:assignment_id>/delete/",
@@ -154,6 +162,11 @@ urlpatterns = [
     path("update-repository/", views.update_repository_view, name="update_repository"),
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
     path("sync-repository/", views.sync_repository_view, name="sync_repository"),
+    path(
+        "get-repository-branches/",
+        views.get_repository_branches_view,
+        name="get_repository_branches",
+    ),
     path(
         "validate-git-connection/",
         views.validate_git_connection_view,
