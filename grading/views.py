@@ -4931,7 +4931,7 @@ def test_grading_no_auth(request):
 
 
 @login_required
-@require_http_methods(["POST"])
+@require_http_methods(["GET", "POST"])
 def batch_grade_registration(request):
     """批量登分功能"""
     try:
@@ -6630,6 +6630,43 @@ def get_grade_type_config_view(request):
     except Exception as e:
         logger.error(f"获取评分类型配置异常: {str(e)}")
         return JsonResponse({"status": "error", "message": "服务器内部错误"}, status=500)
+
+
+@login_required
+@require_http_methods(["GET"])
+@require_staff_user
+def grade_type_config_list_api(request):
+    """List grade type configs for frontend."""
+    try:
+        tenant = getattr(request, "tenant", None)
+        if request.user.is_superuser:
+            configs = (
+                GradeTypeConfig.objects.select_related("tenant", "class_obj", "class_obj__course")
+                .all()
+                .order_by("class_identifier")
+            )
+        else:
+            configs = (
+                GradeTypeConfig.objects.select_related("tenant", "class_obj", "class_obj__course")
+                .filter(tenant=tenant)
+                .order_by("class_identifier")
+            )
+
+        config_list = []
+        for config in configs:
+            config_list.append(
+                {
+                    "class_identifier": config.class_identifier,
+                    "grade_type": config.grade_type,
+                    "grade_type_display": config.get_grade_type_display(),
+                    "is_locked": config.is_locked,
+                }
+            )
+
+        return JsonResponse({"status": "success", "configs": config_list})
+    except Exception as e:
+        logger.error(f"Grade type list API failed: {str(e)}")
+        return JsonResponse({"status": "error", "message": "Failed to load configs."}, status=500)
 
 
 # 校历功能相关视图

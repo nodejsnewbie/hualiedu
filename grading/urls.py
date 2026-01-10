@@ -1,20 +1,11 @@
 from django.urls import path
 
-from . import assignment_views, tenant_views, views
+from . import api_views, assignment_views, views
 from .admin import admin_site
 
 app_name = "grading"
 
 urlpatterns = [
-    path("", views.index, name="index"),
-    path("grading/", views.grading_page, name="grading_page"),
-    path("grading/", views.grading_page, name="grading"),
-    path("test-js/", views.test_js, name="test_js"),
-    path("test-grade-switch/", views.test_grade_switch, name="test_grade_switch"),
-    path("debug-grading/", views.debug_grading, name="debug_grading"),
-    path("simple-test/", views.simple_test, name="simple_test"),
-    path("grading-simple/", views.grading_simple, name="grading_simple"),
-    path("test-grading-no-auth/", views.test_grading_no_auth, name="test_grading_no_auth"),
     path("file/<path:file_path>", views.serve_file, name="serve_file"),
     # path("admin/", admin_site.urls),  # 使用主应用的admin
     path("writing/get_template_list", views.get_template_list, name="get_template_list"),
@@ -47,52 +38,15 @@ urlpatterns = [
     path("batch-ai-score/", views.batch_ai_score_advanced_view, name="batch_ai_score_advanced"),
     path("batch-ai-score/get-classes/", views._get_class_list, name="get_class_list"),
     path("batch-ai-score/get-homework/", views._get_homework_list, name="get_homework_list"),
-    path("batch-ai-score-page/", views.batch_ai_score_page, name="batch_ai_score_page"),
     # 评分类型管理
-    path("grade-type-management/", views.grade_type_management_view, name="grade_type_management"),
     path("change-grade-type/", views.change_grade_type_view, name="change_grade_type"),
     path("get-grade-type-config/", views.get_grade_type_config_view, name="get_grade_type_config"),
+    path("api/grade-types/", views.grade_type_config_list_api, name="grade_type_config_list_api"),
     # 多租户管理
-    path("super-admin/", tenant_views.super_admin_dashboard, name="super_admin_dashboard"),
-    path("super-admin/tenants/", tenant_views.tenant_management, name="tenant_management"),
-    path("super-admin/tenants/create/", tenant_views.create_tenant, name="create_tenant"),
-    path("super-admin/tenants/update/", tenant_views.update_tenant, name="update_tenant"),
     # 租户管理员
-    path("tenant-admin/", tenant_views.tenant_admin_dashboard, name="tenant_admin_dashboard"),
-    path("tenant-admin/users/", tenant_views.tenant_user_management, name="tenant_user_management"),
-    path("tenant-admin/users/add/", tenant_views.add_user_to_tenant, name="add_user_to_tenant"),
-    path(
-        "tenant-admin/users/update/", tenant_views.update_user_profile, name="update_user_profile"
-    ),
-    path(
-        "tenant-admin/users/remove/",
-        tenant_views.remove_user_from_tenant,
-        name="remove_user_from_tenant",
-    ),
-    path(
-        "tenant-admin/config/",
-        tenant_views.tenant_config_management,
-        name="tenant_config_management",
-    ),
-    path(
-        "tenant-admin/config/update/",
-        tenant_views.update_tenant_config,
-        name="update_tenant_config",
-    ),
     # 校历功能相关路由
-    path("calendar/", views.calendar_view, name="calendar_view"),
-    path("course-management/", views.course_management_view, name="course_management"),
-    # 课程和班级管理路由
-    path("courses/", views.course_list_view, name="course_list"),
-    path("courses/create/", views.course_create_view, name="course_create"),
-    path("classes/", views.class_list_view, name="class_list"),
-    path("classes/create/", views.class_create_view, name="class_create"),
-    path("semester-management/", views.semester_management_view, name="semester_management"),
+    # 课程和班级管理路由 (API-only)
     path("semester-status-api/", views.semester_status_api, name="semester_status_api"),
-    path("semester-edit/<int:semester_id>/", views.semester_edit_view, name="semester_edit"),
-    path("semester-add/", views.semester_add_view, name="semester_add"),
-    path("semester-add/", views.semester_add_view, name="grading_semester_add"),
-    path("semester-delete/<int:semester_id>/", views.semester_delete_view, name="semester_delete"),
     path("add-course/", views.add_course_view, name="add_course"),
     path("delete-course/", views.delete_course_view, name="delete_course"),
     path("add-schedule/", views.add_schedule_view, name="add_schedule"),
@@ -103,8 +57,7 @@ urlpatterns = [
     # ============================================================================
     # 作业管理相关路由 (Assignment Management)
     # ============================================================================
-    # 作业管理主界面
-    path("assignments/", assignment_views.assignment_list_view, name="assignment_list"),
+    # 作业管理 (API-only)
     path("assignments/create/", assignment_views.assignment_create_view, name="assignment_create"),
     path(
         "assignments/<int:assignment_id>/edit/",
@@ -137,12 +90,34 @@ urlpatterns = [
         assignment_views.get_assignment_directories_api,
         name="get_assignment_directories_api",
     ),
+    path("api/assignments/", assignment_views.assignment_list_api, name="assignment_list_api"),
     # Helper APIs
     path("api/course-classes/", assignment_views.get_course_classes_api, name="get_course_classes"),
-    # 学生作业提交
+    path("api/auth/csrf/", api_views.csrf_view, name="api_csrf"),
+    path("api/auth/login/", api_views.login_api, name="api_login"),
+    path("api/auth/logout/", api_views.logout_api, name="api_logout"),
+    path("api/auth/me/", api_views.me_api, name="api_me"),
+    path("api/courses/", api_views.course_list_api, name="api_course_list"),
+    path("api/courses/create/", api_views.course_create_api, name="api_course_create"),
+    path("api/classes/", api_views.class_list_api, name="api_class_list"),
+    path("api/classes/create/", api_views.class_create_api, name="api_class_create"),
+    path("api/semesters/", api_views.semester_list_api, name="api_semester_list"),
+    path("api/semesters/create/", api_views.semester_create_api, name="api_semester_create"),
     path(
-        "student/submission/", assignment_views.student_submission_view, name="student_submission"
+        "api/semesters/<int:semester_id>/update/",
+        api_views.semester_update_api,
+        name="api_semester_update",
     ),
+    path(
+        "api/semesters/<int:semester_id>/delete/",
+        api_views.semester_delete_api,
+        name="api_semester_delete",
+    ),
+    path("api/course-management/", api_views.course_management_api, name="api_course_management"),
+    path("api/tenants/", api_views.tenant_list_api, name="api_tenant_list"),
+    path("api/tenant-dashboard/", api_views.tenant_dashboard_api, name="api_tenant_dashboard"),
+    path("api/tenant-users/", api_views.tenant_users_api, name="api_tenant_users"),
+    path("api/student/assignments/", api_views.student_assignment_list_api, name="api_student_assignments"),
     path(
         "api/student/upload/",
         assignment_views.upload_assignment_file_api,
@@ -157,7 +132,6 @@ urlpatterns = [
     # 仓库管理相关路由（已废弃，保留向后兼容）
     # Deprecated: Use assignment routes above instead
     # ============================================================================
-    path("repository-management/", views.repository_management_view, name="repository_management"),
     path("add-repository/", views.add_repository_view, name="add_repository"),
     path("update-repository/", views.update_repository_view, name="update_repository"),
     path("delete-repository/", views.delete_repository_view, name="delete_repository"),
@@ -190,8 +164,6 @@ urlpatterns = [
     # 缓存管理API
     path("api/cache/stats/", views.cache_stats_api, name="cache_stats_api"),
     path("api/cache/clear/", views.clear_cache_api, name="clear_cache_api"),
-    # 学生作业上传功能
-    path("homework-upload/", views.homework_upload_page, name="homework_upload_page"),
     path(
         "api/student/homework-list/",
         views.get_student_homework_list,
@@ -215,8 +187,4 @@ urlpatterns = [
         views.record_comment_usage,
         name="record_comment_usage",
     ),
-    # 测试页面
-    path("jquery-test/", views.jquery_test, name="jquery_test"),
-    path("test-clean/", views.test_clean, name="test_clean"),
-    path("debug-simple/", views.debug_simple, name="debug_simple"),
 ]

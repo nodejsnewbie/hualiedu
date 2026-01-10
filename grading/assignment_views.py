@@ -139,6 +139,71 @@ def assignment_list_view(request):
 
 
 @login_required
+@require_http_methods(["GET"])
+def assignment_list_api(request):
+    """Assignment list data API for React frontend."""
+    try:
+        service = AssignmentManagementService()
+
+        course_id = request.GET.get("course_id")
+        class_id = request.GET.get("class_id")
+        storage_type = request.GET.get("storage_type")
+
+        course_id = int(course_id) if course_id else None
+        class_id = int(class_id) if class_id else None
+
+        assignments = service.list_assignments(
+            teacher=request.user, course_id=course_id, class_id=class_id, storage_type=storage_type
+        )
+        courses = service.get_teacher_courses(request.user)
+        classes = service.get_teacher_classes(request.user, course_id=course_id)
+        summary = service.get_assignment_summary(request.user)
+
+        assignment_list = []
+        for assignment in assignments:
+            assignment_list.append(
+                {
+                    "id": assignment.id,
+                    "name": assignment.name,
+                    "storage_type": assignment.storage_type,
+                    "description": assignment.description,
+                    "course": {
+                        "id": assignment.course.id if assignment.course else None,
+                        "name": assignment.course.name if assignment.course else "",
+                    },
+                    "class_obj": {
+                        "id": assignment.class_obj.id if assignment.class_obj else None,
+                        "name": assignment.class_obj.name if assignment.class_obj else "",
+                    },
+                    "git_url": assignment.git_url,
+                    "git_branch": assignment.git_branch,
+                    "base_path": assignment.base_path,
+                    "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
+                    "updated_at": assignment.updated_at.isoformat() if assignment.updated_at else None,
+                }
+            )
+
+        course_list = [{"id": course.id, "name": course.name} for course in courses]
+        class_list = [{"id": cls.id, "name": cls.name} for cls in classes]
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "assignments": assignment_list,
+                "courses": course_list,
+                "classes": class_list,
+                "summary": summary,
+                "selected_course_id": course_id,
+                "selected_class_id": class_id,
+                "selected_storage_type": storage_type,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Assignment list API failed: {str(e)}", exc_info=True)
+        return JsonResponse({"status": "error", "message": "Failed to load assignments."}, status=500)
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def assignment_create_view(request):
     """创建作业配置
@@ -212,6 +277,8 @@ def assignment_create_view(request):
         - 防止重复创建（同一教师、课程、班级、名称）
     """
     if request.method == "GET":
+        return JsonResponse({"status": "error", "message": "GET not supported on this endpoint."}, status=405)
+
         # 显示创建表单
         try:
             # 获取教师的课程和班级列表
@@ -334,6 +401,8 @@ def assignment_edit_view(request, assignment_id):
         )
 
         if request.method == "GET":
+        return JsonResponse({"status": "error", "message": "GET not supported on this endpoint."}, status=405)
+
             # 显示编辑表单
             context = {
                 "assignment": assignment,
@@ -396,7 +465,7 @@ def assignment_edit_view(request, assignment_id):
         return JsonResponse({"status": "error", "message": str(e)}, status=403)
     except Exception as e:
         logger.error(f"更新作业失败: {str(e)}", exc_info=True)
-        if request.method == "GET":
+        
             messages.error(request, f"加载失败: {str(e)}")
             return redirect("grading:assignment_list")
         else:

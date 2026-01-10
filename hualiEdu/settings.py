@@ -69,7 +69,7 @@ ROOT_URLCONF = "hualiEdu.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [os.path.join(BASE_DIR, "templates")],
+        "DIRS": [],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -175,7 +175,8 @@ STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
 
 # 添加静态文件的CORS设置
 CORS_ALLOWED_ORIGINS = os.environ.get(
-    "CORS_ALLOWED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+    "CORS_ALLOWED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173",
 ).split(",")
 
 CORS_ALLOW_METHODS = [
@@ -317,5 +318,6 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = (
 CSRF_COOKIE_SECURE = os.environ.get("CSRF_COOKIE_SECURE", "False").lower() == "true"
 CSRF_COOKIE_HTTPONLY = False
 CSRF_TRUSTED_ORIGINS = os.environ.get(
-    "CSRF_TRUSTED_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000"
+    "CSRF_TRUSTED_ORIGINS",
+    "http://localhost:8000,http://127.0.0.1:8000,http://localhost:5173,http://127.0.0.1:5173",
 ).split(",")

@@ -4,10 +4,10 @@ from django.contrib import admin
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import include, path
 
-from grading.views import index
+from grading import api_views
 
 urlpatterns = [
-    path("", index, name="home"),
+    path("", api_views.health_view, name="health"),
     path("admin/", admin.site.urls),
     path("grading/", include("grading.urls")),
     path("toolbox/", include("toolbox.urls")),
