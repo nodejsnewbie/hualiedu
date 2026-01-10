@@ -38,7 +38,7 @@ export default function Grading() {
     }
 
     setup().catch((error) => {
-      console.error('Failed to initialize grading page', error)
+      console.error('初始化评分页面失败', error)
     })
 
     return () => {
@@ -53,7 +53,7 @@ export default function Grading() {
           <div className="card">
             <div className="card-header">
               <h5 className="card-title mb-0">
-                <i className="bi bi-folder2-open" /> Homework
+                <i className="bi bi-folder2-open" /> 作业
               </h5>
               <div className="mt-2">
                 <button
@@ -61,30 +61,30 @@ export default function Grading() {
                   className="btn btn-success btn-sm me-2"
                   id="batch-grade-btn"
                   disabled
-                  title="Select a folder first"
+                  title="请先选择文件夹"
                 >
-                  <i className="bi bi-tasks" /> Batch Grade
+                  <i className="bi bi-tasks" /> 批量登分
                 </button>
                 <button
                   type="button"
                   className="btn btn-warning btn-sm"
                   id="batch-ai-score-btn"
                   disabled
-                  title="Select a folder first"
+                  title="请先选择文件夹"
                 >
-                  <i className="bi bi-robot" /> Batch AI Score
+                  <i className="bi bi-robot" /> 批量AI评分
                 </button>
               </div>
               <div className="mt-2">
                 <small className="text-muted">
-                  <i className="bi bi-info-circle" /> Select a folder to enable batch actions.
+                  <i className="bi bi-info-circle" /> 请选择文件夹以启用批量操作。
                 </small>
               </div>
               <div id="batch-grade-progress-wrapper" className="mt-2" style={{ display: 'none' }}>
                 <div
                   className="progress"
                   role="progressbar"
-                  aria-label="Batch grade progress"
+                  aria-label="批量登分进度"
                   aria-valuenow="0"
                   aria-valuemin="0"
                   aria-valuemax="100"
@@ -94,19 +94,19 @@ export default function Grading() {
                     className="progress-bar progress-bar-striped progress-bar-animated"
                     style={{ width: '0%' }}
                   >
-                    Preparing...
+                    准备中...
                   </div>
                 </div>
                 <div id="batch-grade-progress-text" className="text-muted small mt-1">
-                  <i className="bi bi-hourglass-split" /> Ready
+                  <i className="bi bi-hourglass-split" /> 就绪
                 </div>
               </div>
               <div id="tree-loading" className="mt-2" style={{ display: 'none' }}>
                 <div className="d-flex align-items-center">
                   <div className="spinner-border spinner-border-sm text-primary me-2" role="status">
-                    <span className="visually-hidden">Loading...</span>
+                    <span className="visually-hidden">加载中...</span>
                   </div>
-                  <span className="text-muted small">Loading homework tree...</span>
+                  <span className="text-muted small">正在加载作业目录...</span>
                 </div>
               </div>
             </div>
@@ -119,22 +119,22 @@ export default function Grading() {
           <div className="card">
             <div className="card-header">
               <h5 className="card-title mb-0">
-                <i className="bi bi-file-earmark-text" /> File Content
+                <i className="bi bi-file-earmark-text" /> 文件内容
               </h5>
               <div className="file-count-display text-muted small">
-                <i className="bi bi-files" /> <span id="directory-file-count">0</span> files
+                <i className="bi bi-files" /> <span id="directory-file-count">0</span> 个文件
               </div>
             </div>
             <div className="card-body">
               <div id="loading" style={{ display: 'none' }}>
                 <div className="d-flex align-items-center justify-content-center py-5">
                   <div className="spinner-border text-primary me-3" role="status">
-                    <span className="visually-hidden">Loading...</span>
+                    <span className="visually-hidden">加载中...</span>
                   </div>
                   <div>
-                    <h5 className="mb-1">Loading file...</h5>
+                    <h5 className="mb-1">正在加载文件...</h5>
                     <p className="text-muted mb-0 small" id="loading-message">
-                      Please wait.
+                      请稍候。
                     </p>
                     <div
                       className="progress mt-2"
@@ -152,7 +152,7 @@ export default function Grading() {
               </div>
               <div id="file-content" className="mt-3">
                 <div className="alert alert-info">
-                  <i className="bi bi-info-circle-fill" /> Select a file on the left to start.
+                  <i className="bi bi-info-circle-fill" /> 请在左侧选择文件开始。
                 </div>
               </div>
               <div id="preview-hint" className="alert alert-secondary mt-2" style={{ display: 'none' }}>
@@ -163,42 +163,42 @@ export default function Grading() {
 
           <div className="card mt-3">
             <div className="card-header">
-              <h5 className="card-title mb-0">Grading</h5>
+              <h5 className="card-title mb-0">评分</h5>
             </div>
             <div className="card-body">
               <div className="d-flex justify-content-between mb-3">
                 <button type="button" className="btn btn-outline-secondary" id="prev-file">
-                  <i className="bi bi-arrow-left" /> Previous
+                  <i className="bi bi-arrow-left" /> 上一份
                 </button>
                 <button type="button" className="btn btn-outline-secondary" id="next-file">
-                  Next <i className="bi bi-arrow-right" />
+                  下一份 <i className="bi bi-arrow-right" />
                 </button>
               </div>
               <div className="d-flex align-items-center">
-                <div className="btn-group me-3" role="group" aria-label="Grading mode">
+                <div className="btn-group me-3" role="group" aria-label="评分模式">
                   <button
                     type="button"
                     className="btn btn-outline-secondary grade-mode-btn active"
                     data-mode="letter"
                   >
-                    Letter
+                    字母
                   </button>
                   <button type="button" className="btn btn-outline-secondary grade-mode-btn" data-mode="text">
-                    Text
+                    文字
                   </button>
                   <button
                     type="button"
                     className="btn btn-outline-secondary grade-mode-btn"
                     data-mode="percentage"
                   >
-                    Percentage
+                    百分制
                   </button>
                 </div>
 
                 <div
                   className="btn-group me-3"
                   role="group"
-                  aria-label="Letter grade options"
+                  aria-label="字母评分选项"
                   id="letter-grade-buttons"
                 >
                   <button type="button" className="btn btn-outline-primary grade-button" data-grade="A">
@@ -221,7 +221,7 @@ export default function Grading() {
                 <div
                   className="btn-group me-3"
                   role="group"
-                  aria-label="Text grade options"
+                  aria-label="文字评分选项"
                   id="text-grade-buttons"
                   style={{ display: 'none' }}
                 >
@@ -256,19 +256,19 @@ export default function Grading() {
                     step="0.5"
                     defaultValue="85"
                     placeholder="0-100"
-                    aria-label="Percentage grade"
+                    aria-label="百分制评分"
                   />
                   <span className="input-group-text">%</span>
                 </div>
 
                 <button type="button" className="btn btn-primary me-2" id="add-grade-to-file" disabled>
-                  Confirm
+                  确认
                 </button>
                 <button type="button" className="btn btn-outline-secondary" id="cancel-grade">
-                  Cancel
+                  取消
                 </button>
                 <button type="button" className="btn btn-outline-info ms-2" id="teacher-comment-btn" disabled>
-                  <i className="bi bi-chat-text" /> Comment
+                  <i className="bi bi-chat-text" /> 评语
                 </button>
                 <button
                   type="button"
@@ -277,7 +277,7 @@ export default function Grading() {
                   disabled
                   data-ai-grading-disabled="False"
                 >
-                  <i className="bi bi-robot" /> AI Score
+                  <i className="bi bi-robot" /> AI评分
                 </button>
               </div>
             </div>
@@ -296,34 +296,34 @@ export default function Grading() {
           <div className="modal-content">
             <div className="modal-header">
               <h5 className="modal-title" id="teacherCommentModalLabel">
-                Teacher Comment
+                教师评语
               </h5>
               <button type="button" className="btn-close" data-bs-dismiss="modal" aria-label="Close" />
             </div>
             <div className="modal-body">
               <div className="mb-3" id="commentTemplatesContainer" style={{ display: 'none' }}>
-                <label className="form-label">Common Comment Templates</label>
+                <label className="form-label">常用评语模板</label>
                 <div id="commentTemplatesList" className="d-flex flex-wrap gap-2" />
-                <small className="text-muted">Click a template to insert the comment.</small>
+                <small className="text-muted">点击模板插入评语。</small>
               </div>
               <div className="mb-3">
                 <label htmlFor="teacherCommentText" className="form-label">
-                  Comment
+                  评语
                 </label>
                 <textarea
                   className="form-control"
                   id="teacherCommentText"
                   rows="8"
-                  placeholder="Enter or update the comment..."
+                  placeholder="输入或更新评语..."
                 />
               </div>
             </div>
             <div className="modal-footer">
               <button type="button" className="btn btn-secondary" data-bs-dismiss="modal">
-                Cancel
+                取消
               </button>
               <button type="button" className="btn btn-primary" id="saveTeacherComment">
-                Save Comment
+                保存评语
               </button>
             </div>
           </div>

@@ -15,11 +15,11 @@ export default function BatchGrade() {
       const response = await apiFetch('/grading/batch-grade-registration/')
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to load repositories')
+        throw new Error((data && data.message) || '加载仓库失败')
       }
       setRepos(data.repositories || [])
     } catch (err) {
-      setError(err.message || 'Failed to load repositories')
+      setError(err.message || '加载仓库失败')
     } finally {
       setLoading(false)
     }
@@ -38,26 +38,26 @@ export default function BatchGrade() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setResult((data && data.message) || 'Batch grading failed')
+      setResult((data && data.message) || '批量登分失败')
       return
     }
-    setResult(data.message || 'Batch grading completed')
+    setResult(data.message || '批量登分完成')
   }
 
   return (
     <div className="card">
       <div className="card-header d-flex justify-content-between align-items-center">
-        <h4 className="mb-0">Batch Grade</h4>
+        <h4 className="mb-0">批量登分</h4>
         <button className="btn btn-outline-secondary btn-sm" type="button" onClick={loadRepos}>
-          Refresh
+          刷新
         </button>
       </div>
       <div className="card-body">
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {loading ? (
-          <div className="alert alert-info">Loading repositories...</div>
+          <div className="alert alert-info">正在加载仓库...</div>
         ) : repos.length === 0 ? (
-          <div className="alert alert-warning">No repositories found.</div>
+          <div className="alert alert-warning">暂无仓库。</div>
         ) : (
           <div className="row g-3">
             {repos.map((repo) => (
@@ -68,7 +68,7 @@ export default function BatchGrade() {
                   onClick={() => setSelected(repo.name)}
                 >
                   <div className="fw-semibold">{repo.name}</div>
-                  <div className="small">Excel files: {repo.excel_count}</div>
+                  <div className="small">Excel 文件数：{repo.excel_count}</div>
                 </button>
               </div>
             ))}
@@ -76,7 +76,7 @@ export default function BatchGrade() {
         )}
         <div className="mt-3">
           <button className="btn btn-success" type="button" onClick={startBatch} disabled={!selected}>
-            Start Batch Grade
+            开始批量登分
           </button>
         </div>
         {result ? <div className="alert alert-info mt-3">{result}</div> : null}

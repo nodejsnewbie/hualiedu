@@ -277,28 +277,9 @@ def assignment_create_view(request):
         - 防止重复创建（同一教师、课程、班级、名称）
     """
     if request.method == "GET":
-        return JsonResponse({"status": "error", "message": "GET not supported on this endpoint."}, status=405)
-
-        # 显示创建表单
-        try:
-            # 获取教师的课程和班级列表
-            tenant = request.user.profile.tenant
-            courses = Course.objects.filter(tenant=tenant).order_by("name")
-
-            classes = Class.objects.filter(tenant=tenant).order_by("name")
-
-            context = {
-                "courses": courses,
-                "classes": classes,
-                "page_title": "创建作业配置",
-            }
-
-            return render(request, "grading/assignment_create.html", context)
-
-        except Exception as e:
-            logger.error(f"加载创建作业页面失败: {str(e)}", exc_info=True)
-            messages.error(request, f"页面加载失败: {str(e)}")
-            return redirect("grading:assignment_list")
+        return JsonResponse(
+            {"status": "error", "message": "GET not supported on this endpoint."}, status=405
+        )
 
     else:  # POST
         try:
@@ -401,15 +382,9 @@ def assignment_edit_view(request, assignment_id):
         )
 
         if request.method == "GET":
-        return JsonResponse({"status": "error", "message": "GET not supported on this endpoint."}, status=405)
-
-            # 显示编辑表单
-            context = {
-                "assignment": assignment,
-                "page_title": f"编辑作业配置 - {assignment.name}",
-            }
-
-            return render(request, "grading/assignment_edit.html", context)
+            return JsonResponse(
+                {"status": "error", "message": "GET not supported on this endpoint."}, status=405
+            )
 
         else:  # POST
             service = AssignmentManagementService()
@@ -465,11 +440,7 @@ def assignment_edit_view(request, assignment_id):
         return JsonResponse({"status": "error", "message": str(e)}, status=403)
     except Exception as e:
         logger.error(f"更新作业失败: {str(e)}", exc_info=True)
-        
-            messages.error(request, f"加载失败: {str(e)}")
-            return redirect("grading:assignment_list")
-        else:
-            return JsonResponse({"status": "error", "message": f"更新失败: {str(e)}"})
+        return JsonResponse({"status": "error", "message": f"更新失败: {str(e)}"})
 
 
 @login_required

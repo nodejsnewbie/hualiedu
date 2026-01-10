@@ -20,7 +20,7 @@ export default function BatchAiScore() {
     if (response.ok && data && data.status === 'success') {
       setRepositories(data.repositories || [])
     } else {
-      setMessage((data && data.message) || 'Failed to load repositories')
+      setMessage((data && data.message) || '加载仓库失败')
     }
     setLoading(false)
   }
@@ -32,7 +32,7 @@ export default function BatchAiScore() {
     if (response.ok && data && data.status === 'success') {
       setClasses(data.classes || [])
     } else {
-      setMessage((data && data.message) || 'Failed to load classes')
+      setMessage((data && data.message) || '加载班级失败')
     }
     setLoading(false)
   }
@@ -46,7 +46,7 @@ export default function BatchAiScore() {
     if (response.ok && data && data.status === 'success') {
       setHomeworks(data.homework_list || [])
     } else {
-      setMessage((data && data.message) || 'Failed to load homework list')
+      setMessage((data && data.message) || '加载作业列表失败')
     }
     setLoading(false)
   }
@@ -72,9 +72,9 @@ export default function BatchAiScore() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setMessage((data && data.message) || 'Batch AI scoring failed')
+      setMessage((data && data.message) || '批量AI评分失败')
     } else {
-      setMessage(data.message || 'Batch AI scoring completed')
+      setMessage(data.message || '批量AI评分完成')
     }
     setLoading(false)
   }
@@ -82,13 +82,13 @@ export default function BatchAiScore() {
   return (
     <div className="card">
       <div className="card-header">
-        <h4 className="mb-0">Batch AI Score</h4>
+        <h4 className="mb-0">批量AI评分</h4>
       </div>
       <div className="card-body">
         {message ? <div className="alert alert-info">{message}</div> : null}
 
         <div className="mb-3">
-          <h6>Step 1: Select scoring scope</h6>
+          <h6>步骤 1：选择评分范围</h6>
           <div className="d-flex gap-2 flex-wrap">
             {['repository', 'class', 'homework'].map((type) => (
               <button
@@ -100,7 +100,7 @@ export default function BatchAiScore() {
                   setStep(2)
                 }}
               >
-                {type}
+                {type === 'repository' ? '仓库' : type === 'class' ? '班级' : '作业'}
               </button>
             ))}
           </div>
@@ -108,8 +108,8 @@ export default function BatchAiScore() {
 
         {step >= 2 ? (
           <div className="mb-3">
-            <h6>Step 2: Select repository</h6>
-            {loading ? <div className="text-muted">Loading...</div> : null}
+            <h6>步骤 2：选择仓库</h6>
+            {loading ? <div className="text-muted">加载中...</div> : null}
             <div className="d-flex gap-2 flex-wrap">
               {repositories.map((repo) => (
                 <button
@@ -137,7 +137,7 @@ export default function BatchAiScore() {
 
         {step >= 3 && scoringType !== 'repository' ? (
           <div className="mb-3">
-            <h6>Step 3: Select class</h6>
+            <h6>步骤 3：选择班级</h6>
             <div className="d-flex gap-2 flex-wrap">
               {classes.map((cls) => (
                 <button
@@ -162,7 +162,7 @@ export default function BatchAiScore() {
 
         {step >= 4 && scoringType === 'homework' ? (
           <div className="mb-3">
-            <h6>Step 4: Select homework</h6>
+            <h6>步骤 4：选择作业</h6>
             <div className="d-flex gap-2 flex-wrap">
               {homeworks.map((hw) => (
                 <button
@@ -188,7 +188,7 @@ export default function BatchAiScore() {
             onClick={startScoring}
             disabled={!selectedRepo || (scoringType === 'class' && !selectedClass) || (scoringType === 'homework' && !selectedHomework)}
           >
-            Start AI Scoring
+            开始评分
           </button>
         </div>
       </div>

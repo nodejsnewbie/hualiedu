@@ -29,7 +29,7 @@ export default function Login() {
       const data = await response.json().catch(() => null)
 
       if (!response.ok) {
-        setError((data && data.message) || 'Login failed')
+        setError((data && data.message) || '登录失败')
         return
       }
 
@@ -45,14 +45,14 @@ export default function Login() {
     <div className="container mt-5" style={{ maxWidth: '420px' }}>
       <div className="card shadow-sm">
         <div className="card-header">
-          <h5 className="mb-0">Sign In</h5>
+          <h5 className="mb-0">登录</h5>
         </div>
         <div className="card-body">
           {error ? <div className="alert alert-danger">{error}</div> : null}
           <form onSubmit={handleSubmit}>
             <div className="mb-3">
               <label className="form-label" htmlFor="username">
-                Username
+                用户名
               </label>
               <input
                 id="username"
@@ -64,7 +64,7 @@ export default function Login() {
             </div>
             <div className="mb-3">
               <label className="form-label" htmlFor="password">
-                Password
+                密码
               </label>
               <input
                 id="password"
@@ -76,12 +76,12 @@ export default function Login() {
               />
             </div>
             <button className="btn btn-primary w-100" type="submit" disabled={submitting}>
-              {submitting ? 'Signing in...' : 'Sign In'}
+              {submitting ? '正在登录...' : '登录'}
             </button>
           </form>
           <div className="text-center mt-3">
             <a href="/admin/login/" target="_blank" rel="noreferrer">
-              Use Django Admin Login
+              使用 Django 管理后台登录
             </a>
           </div>
         </div>

@@ -13,11 +13,11 @@ export default function GradeTypeManagement() {
       const response = await apiFetch('/grading/api/grade-types/')
       const data = await response.json().catch(() => null)
       if (!response.ok) {
-        throw new Error((data && data.message) || 'Failed to load grade types')
+        throw new Error((data && data.message) || '加载评分类型失败')
       }
       setConfigs(data.configs || [])
     } catch (err) {
-      setError(err.message || 'Failed to load grade types')
+      setError(err.message || '加载评分类型失败')
     } finally {
       setLoading(false)
     }
@@ -28,15 +28,13 @@ export default function GradeTypeManagement() {
   }, [])
 
   const changeGradeType = async (classIdentifier) => {
-    const newGradeType = window.prompt(
-      'Enter new grade type: letter, text, or numeric',
-    )
+    const newGradeType = window.prompt('请输入新评分类型：letter、text 或 numeric')
     if (!newGradeType) {
       return
     }
     if (
       !window.confirm(
-        `Change grade type for ${classIdentifier} to ${newGradeType}?`,
+        `确认将 ${classIdentifier} 的评分类型改为 ${newGradeType} 吗？`,
       )
     ) {
       return
@@ -52,38 +50,38 @@ export default function GradeTypeManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      window.alert((data && data.message) || 'Failed to update grade type')
+      window.alert((data && data.message) || '更新评分类型失败')
       return
     }
-    window.alert(data.message || 'Updated')
+    window.alert(data.message || '已更新')
     loadConfigs()
   }
 
   return (
     <div className="card">
       <div className="card-header">
-        <h4 className="mb-0">Grade Type Management</h4>
+        <h4 className="mb-0">评分类型管理</h4>
       </div>
       <div className="card-body">
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {loading ? (
-          <div className="alert alert-info">Loading...</div>
+          <div className="alert alert-info">加载中...</div>
         ) : (
           <div className="table-responsive">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Class Identifier</th>
-                  <th>Grade Type</th>
-                  <th>Status</th>
-                  <th>Action</th>
+                  <th>班级标识</th>
+                  <th>评分类型</th>
+                  <th>状态</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {configs.length === 0 ? (
                   <tr>
                     <td colSpan="4" className="text-center">
-                      No grade type configs.
+                      暂无评分类型配置。
                     </td>
                   </tr>
                 ) : (
@@ -93,15 +91,15 @@ export default function GradeTypeManagement() {
                       <td>{config.grade_type_display}</td>
                       <td>
                         {config.is_locked ? (
-                          <span className="badge bg-success">Locked</span>
+                          <span className="badge bg-success">已锁定</span>
                         ) : (
-                          <span className="badge bg-warning text-dark">Unlocked</span>
+                          <span className="badge bg-warning text-dark">未锁定</span>
                         )}
                       </td>
                       <td>
                         {config.is_locked ? (
                           <button className="btn btn-sm btn-secondary" disabled>
-                            Locked
+                            已锁定
                           </button>
                         ) : (
                           <button
@@ -109,7 +107,7 @@ export default function GradeTypeManagement() {
                             type="button"
                             onClick={() => changeGradeType(config.class_identifier)}
                           >
-                            Change
+                            修改
                           </button>
                         )}
                       </td>

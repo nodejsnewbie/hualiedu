@@ -8,7 +8,7 @@ export default function RequireAuth() {
   if (loading) {
     return (
       <div className="container mt-4">
-        <div className="alert alert-info">Loading...</div>
+        <div className="alert alert-info">正在加载...</div>
       </div>
     )
   }

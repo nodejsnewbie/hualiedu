@@ -16,12 +16,12 @@ export default function CourseList() {
       const response = await apiFetch('/grading/api/courses/')
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to load courses')
+        throw new Error((data && data.message) || '加载课程失败')
       }
       setCourses(data.courses || [])
       setSemester(data.current_semester || null)
     } catch (err) {
-      setError(err.message || 'Failed to load courses')
+      setError(err.message || '加载课程失败')
     } finally {
       setLoading(false)
     }
@@ -49,12 +49,12 @@ export default function CourseList() {
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to create course')
+        throw new Error((data && data.message) || '创建课程失败')
       }
       setForm({ name: '', course_type: '', description: '' })
       loadCourses()
     } catch (err) {
-      setError(err.message || 'Failed to create course')
+      setError(err.message || '创建课程失败')
     } finally {
       setSaving(false)
     }
@@ -65,20 +65,18 @@ export default function CourseList() {
       <div className="col-lg-4">
         <div className="card">
           <div className="card-header">
-            <h5 className="mb-0">Create Course</h5>
+            <h5 className="mb-0">创建课程</h5>
           </div>
           <div className="card-body">
             {semester ? (
-              <div className="alert alert-info">
-                Current semester: {semester.name}
-              </div>
+              <div className="alert alert-info">当前学期：{semester.name}</div>
             ) : (
-              <div className="alert alert-warning">No active semester.</div>
+              <div className="alert alert-warning">暂无激活学期。</div>
             )}
             {error ? <div className="alert alert-danger">{error}</div> : null}
             <form onSubmit={handleSubmit}>
               <div className="mb-3">
-                <label className="form-label">Course Name</label>
+                <label className="form-label">课程名称</label>
                 <input
                   className="form-control"
                   name="name"
@@ -88,7 +86,7 @@ export default function CourseList() {
                 />
               </div>
               <div className="mb-3">
-                <label className="form-label">Course Type</label>
+                <label className="form-label">课程类型</label>
                 <select
                   className="form-select"
                   name="course_type"
@@ -96,15 +94,15 @@ export default function CourseList() {
                   onChange={handleChange}
                   required
                 >
-                  <option value="">Select type</option>
-                  <option value="theory">Theory</option>
-                  <option value="lab">Lab</option>
-                  <option value="practice">Practice</option>
-                  <option value="mixed">Mixed</option>
+                  <option value="">请选择类型</option>
+                  <option value="theory">理论</option>
+                  <option value="lab">实验</option>
+                  <option value="practice">实践</option>
+                  <option value="mixed">综合</option>
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label">Description</label>
+                <label className="form-label">描述</label>
                 <textarea
                   className="form-control"
                   name="description"
@@ -114,7 +112,7 @@ export default function CourseList() {
                 />
               </div>
               <button className="btn btn-primary w-100" type="submit" disabled={saving}>
-                {saving ? 'Saving...' : 'Create Course'}
+                {saving ? '保存中...' : '创建课程'}
               </button>
             </form>
           </div>
@@ -124,15 +122,15 @@ export default function CourseList() {
       <div className="col-lg-8">
         <div className="card">
           <div className="card-header d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">Courses</h5>
+            <h5 className="mb-0">课程列表</h5>
             <button className="btn btn-outline-secondary btn-sm" type="button" onClick={loadCourses}>
-              Refresh
+              刷新
             </button>
           </div>
           <div className="card-body">
-            {loading ? <div className="alert alert-info">Loading...</div> : null}
+            {loading ? <div className="alert alert-info">加载中...</div> : null}
             {!loading && courses.length === 0 ? (
-              <div className="alert alert-secondary">No courses found.</div>
+              <div className="alert alert-secondary">暂无课程。</div>
             ) : null}
             <div className="row g-3">
               {courses.map((course) => (

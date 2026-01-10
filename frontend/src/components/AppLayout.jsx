@@ -17,7 +17,7 @@ export default function AppLayout() {
       <nav className="navbar navbar-expand-lg navbar-dark bg-dark">
         <div className="container-fluid">
           <Link className="navbar-brand" to="/">
-            Homework Grading
+            作业评分
           </Link>
           <button
             className="navbar-toggler"
@@ -34,57 +34,52 @@ export default function AppLayout() {
             <ul className="navbar-nav">
               <li className="nav-item">
                 <NavLink className="nav-link" to="/">
-                  Home
+                  首页
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/grading">
-                  Grading
+                  评分
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/course-management">
-                  Course Management
+                  课程管理
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/courses">
-                  Courses
+                  课程列表
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/classes">
-                  Classes
+                  班级列表
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/calendar">
-                  Calendar
+                  日历
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/assignments">
-                  Assignments
+                  作业管理
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/student-submission">
-                  Student Submission
+                  学生作业
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/homework-upload">
-                  Homework Upload
-                </NavLink>
-              </li>
-              <li className="nav-item">
-                <NavLink className="nav-link" to="/repositories">
-                  Repositories
+                  作业上传
                 </NavLink>
               </li>
               <li className="nav-item">
                 <NavLink className="nav-link" to="/grade-registry">
-                  Grade Registry
+                  成绩登记册
                 </NavLink>
               </li>
               <li className="nav-item dropdown">
@@ -96,47 +91,47 @@ export default function AppLayout() {
                   data-bs-toggle="dropdown"
                   aria-expanded="false"
                 >
-                  Admin
+                  管理
                 </a>
                 <ul className="dropdown-menu" aria-labelledby="adminDropdown">
                   <li>
                     <NavLink className="dropdown-item" to="/semesters">
-                      Semesters
+                      学期管理
                     </NavLink>
                   </li>
                   <li>
                     <NavLink className="dropdown-item" to="/grade-types">
-                      Grade Types
+                      评分类型
                     </NavLink>
                   </li>
                   <li>
                     <NavLink className="dropdown-item" to="/batch-ai-score">
-                      Batch AI Score
+                      批量AI评分
                     </NavLink>
                   </li>
                   <li>
                     <NavLink className="dropdown-item" to="/batch-grade">
-                      Batch Grade
+                      批量登分
                     </NavLink>
                   </li>
                   {user?.is_tenant_admin ? (
                     <li>
                       <NavLink className="dropdown-item" to="/tenant-admin">
-                        Tenant Admin
+                        租户管理
                       </NavLink>
                     </li>
                   ) : null}
                   {user?.is_tenant_admin ? (
                     <li>
                       <NavLink className="dropdown-item" to="/tenant-users">
-                        Tenant Users
+                        租户用户
                       </NavLink>
                     </li>
                   ) : null}
                   {user?.is_superuser ? (
                     <li>
                       <NavLink className="dropdown-item" to="/super-admin">
-                        Super Admin
+                        超级管理员
                       </NavLink>
                     </li>
                   ) : null}
@@ -145,7 +140,7 @@ export default function AppLayout() {
                   </li>
                   <li>
                     <a className="dropdown-item" href="/admin/" target="_blank" rel="noreferrer">
-                      Django Admin
+                      Django 管理后台
                     </a>
                   </li>
                 </ul>
@@ -161,12 +156,12 @@ export default function AppLayout() {
                   data-bs-toggle="dropdown"
                   aria-expanded="false"
                 >
-                  {user?.username || 'User'}
+                  {user?.username || '用户'}
                 </a>
                 <ul className="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown">
                   <li>
                     <button className="dropdown-item" type="button" onClick={handleLogout}>
-                      Logout
+                      退出登录
                     </button>
                   </li>
                 </ul>

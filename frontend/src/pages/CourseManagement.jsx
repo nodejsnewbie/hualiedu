@@ -2,21 +2,21 @@ import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client.js'
 
 const weekdayOptions = [
-  { value: 1, label: 'Mon' },
-  { value: 2, label: 'Tue' },
-  { value: 3, label: 'Wed' },
-  { value: 4, label: 'Thu' },
-  { value: 5, label: 'Fri' },
-  { value: 6, label: 'Sat' },
-  { value: 7, label: 'Sun' },
+  { value: 1, label: '周一' },
+  { value: 2, label: '周二' },
+  { value: 3, label: '周三' },
+  { value: 4, label: '周四' },
+  { value: 5, label: '周五' },
+  { value: 6, label: '周六' },
+  { value: 7, label: '周日' },
 ]
 
 const periodOptions = [
-  { value: 1, label: 'Period 1 (08:00-09:40)' },
-  { value: 2, label: 'Period 2 (10:00-11:40)' },
-  { value: 3, label: 'Period 3 (14:00-15:40)' },
-  { value: 4, label: 'Period 4 (16:00-17:40)' },
-  { value: 5, label: 'Period 5 (19:00-20:40)' },
+  { value: 1, label: '第1节 (08:00-09:40)' },
+  { value: 2, label: '第2节 (10:00-11:40)' },
+  { value: 3, label: '第3节 (14:00-15:40)' },
+  { value: 4, label: '第4节 (16:00-17:40)' },
+  { value: 5, label: '第5节 (19:00-20:40)' },
 ]
 
 export default function CourseManagement() {
@@ -45,7 +45,7 @@ export default function CourseManagement() {
     const response = await apiFetch('/grading/api/course-management/')
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setError((data && data.message) || 'Failed to load course management data')
+      setError((data && data.message) || '加载课程管理数据失败')
       return
     }
     setSemester(data.current_semester)
@@ -72,7 +72,7 @@ export default function CourseManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setError((data && data.message) || 'Failed to add course')
+      setError((data && data.message) || '添加课程失败')
       return
     }
     setCourseForm({ course_name: '', class_name: '', location: '', description: '' })
@@ -80,7 +80,7 @@ export default function CourseManagement() {
   }
 
   const deleteCourse = async (courseId, name) => {
-    if (!window.confirm(`Delete course "${name}"?`)) {
+    if (!window.confirm(`确定删除课程 "${name}" 吗？`)) {
       return
     }
     const response = await apiFetch('/grading/delete-course/', {
@@ -90,7 +90,7 @@ export default function CourseManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      window.alert((data && data.message) || 'Failed to delete course')
+      window.alert((data && data.message) || '删除课程失败')
       return
     }
     loadData()
@@ -163,7 +163,7 @@ export default function CourseManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setError((data && data.message) || 'Failed to save schedule')
+      setError((data && data.message) || '保存课表失败')
       return
     }
     setActiveCourseId(null)
@@ -173,27 +173,27 @@ export default function CourseManagement() {
   return (
     <div className="card">
       <div className="card-header">
-        <h4 className="mb-0">Course Management</h4>
+        <h4 className="mb-0">课程管理</h4>
       </div>
       <div className="card-body">
         {error ? <div className="alert alert-danger">{error}</div> : null}
         {semester ? (
           <div className="alert alert-info">
-            Current semester: {semester.name} ({semester.week_count} weeks)
+            当前学期：{semester.name}（{semester.week_count}周）
           </div>
         ) : (
-          <div className="alert alert-warning">No active semester configured.</div>
+          <div className="alert alert-warning">暂无激活学期。</div>
         )}
 
         <div className="border rounded p-3 mb-4">
-          <h6>Add Course</h6>
+          <h6>添加课程</h6>
           <form onSubmit={submitCourse}>
             <div className="row g-2">
               <div className="col-md-4">
                 <input
                   className="form-control"
                   name="course_name"
-                  placeholder="Course name"
+                  placeholder="课程名称"
                   value={courseForm.course_name}
                   onChange={handleCourseChange}
                   required
@@ -203,7 +203,7 @@ export default function CourseManagement() {
                 <input
                   className="form-control"
                   name="class_name"
-                  placeholder="Class name"
+                  placeholder="班级名称"
                   value={courseForm.class_name}
                   onChange={handleCourseChange}
                 />
@@ -212,7 +212,7 @@ export default function CourseManagement() {
                 <input
                   className="form-control"
                   name="location"
-                  placeholder="Location"
+                  placeholder="地点"
                   value={courseForm.location}
                   onChange={handleCourseChange}
                   required
@@ -222,7 +222,7 @@ export default function CourseManagement() {
                 <textarea
                   className="form-control"
                   name="description"
-                  placeholder="Description"
+                  placeholder="描述"
                   value={courseForm.description}
                   onChange={handleCourseChange}
                   rows="2"
@@ -230,7 +230,7 @@ export default function CourseManagement() {
               </div>
               <div className="col-12">
                 <button className="btn btn-primary" type="submit">
-                  Add Course
+                  添加课程
                 </button>
               </div>
             </div>
@@ -238,7 +238,7 @@ export default function CourseManagement() {
         </div>
 
         {courses.length === 0 ? (
-          <div className="alert alert-secondary">No courses available.</div>
+          <div className="alert alert-secondary">暂无课程。</div>
         ) : (
           courses.map((course) => (
             <div key={course.id} className="border rounded p-3 mb-3">
@@ -247,7 +247,7 @@ export default function CourseManagement() {
                   <div className="fw-semibold">{course.name}</div>
                   <div className="text-muted small">{course.location}</div>
                   {course.class_name ? (
-                    <div className="text-muted small">Class: {course.class_name}</div>
+                    <div className="text-muted small">班级：{course.class_name}</div>
                   ) : null}
                   {course.description ? (
                     <div className="text-muted small">{course.description}</div>
@@ -255,17 +255,17 @@ export default function CourseManagement() {
                 </div>
                 <div className="d-flex gap-2">
                   <button className="btn btn-outline-primary btn-sm" onClick={() => openScheduleForm(course.id)}>
-                    Add Schedule
+                    添加课表
                   </button>
                   <button className="btn btn-outline-danger btn-sm" onClick={() => deleteCourse(course.id, course.name)}>
-                    Delete
+                    删除
                   </button>
                 </div>
               </div>
               <div className="mt-3">
-                <h6>Schedules</h6>
+                <h6>课表</h6>
                 {course.schedules.length === 0 ? (
-                  <div className="text-muted small">No schedules yet.</div>
+                  <div className="text-muted small">暂无课表。</div>
                 ) : (
                   course.schedules.map((schedule) => (
                     <div key={schedule.id} className="d-flex justify-content-between align-items-center border rounded p-2 mb-2">
@@ -273,7 +273,7 @@ export default function CourseManagement() {
                         {schedule.weekday_display} {schedule.period_display} · {schedule.week_text}
                       </div>
                       <button className="btn btn-outline-secondary btn-sm" onClick={() => editSchedule(course.id, schedule)}>
-                        Edit
+                        编辑
                       </button>
                     </div>
                   ))
@@ -282,7 +282,7 @@ export default function CourseManagement() {
 
               {activeCourseId === course.id ? (
                 <div className="border rounded p-3 mt-3">
-                  <h6>{scheduleForm.schedule_id ? 'Edit Schedule' : 'Add Schedule'}</h6>
+                  <h6>{scheduleForm.schedule_id ? '编辑课表' : '添加课表'}</h6>
                   <form onSubmit={submitSchedule}>
                     <div className="row g-2">
                       <div className="col-md-4">
@@ -293,7 +293,7 @@ export default function CourseManagement() {
                           onChange={handleScheduleChange}
                           required
                         >
-                          <option value="">Weekday</option>
+                          <option value="">星期</option>
                           {weekdayOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
@@ -309,7 +309,7 @@ export default function CourseManagement() {
                           onChange={handleScheduleChange}
                           required
                         >
-                          <option value="">Period</option>
+                          <option value="">节次</option>
                           {periodOptions.map((option) => (
                             <option key={option.value} value={option.value}>
                               {option.label}
@@ -321,7 +321,7 @@ export default function CourseManagement() {
                         <input
                           className="form-control"
                           name="start_week"
-                          placeholder="Start week"
+                          placeholder="起始周"
                           value={scheduleForm.start_week}
                           onChange={handleScheduleChange}
                           required
@@ -331,7 +331,7 @@ export default function CourseManagement() {
                         <input
                           className="form-control"
                           name="end_week"
-                          placeholder="End week"
+                          placeholder="结束周"
                           value={scheduleForm.end_week}
                           onChange={handleScheduleChange}
                           required
@@ -359,10 +359,10 @@ export default function CourseManagement() {
                       ) : null}
                       <div className="col-12 d-flex gap-2">
                         <button className="btn btn-success" type="submit">
-                          {scheduleForm.schedule_id ? 'Update Schedule' : 'Save Schedule'}
+                          {scheduleForm.schedule_id ? '更新课表' : '保存课表'}
                         </button>
                         <button className="btn btn-outline-secondary" type="button" onClick={() => setActiveCourseId(null)}>
-                          Cancel
+                          取消
                         </button>
                       </div>
                     </div>

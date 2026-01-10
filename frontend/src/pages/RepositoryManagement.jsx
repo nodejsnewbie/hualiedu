@@ -30,11 +30,11 @@ export default function RepositoryManagement() {
       const response = await apiFetch('/grading/api/repositories/')
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to load repositories')
+        throw new Error((data && data.message) || '加载仓库失败')
       }
       setRepos(data.repositories || [])
     } catch (err) {
-      setError(err.message || 'Failed to load repositories')
+      setError(err.message || '加载仓库失败')
     } finally {
       setLoading(false)
     }
@@ -78,12 +78,12 @@ export default function RepositoryManagement() {
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to add repository')
+        throw new Error((data && data.message) || '新增仓库失败')
       }
       setForm(emptyForm)
       loadRepos()
     } catch (err) {
-      setError(err.message || 'Failed to add repository')
+      setError(err.message || '新增仓库失败')
     } finally {
       setSaving(false)
     }
@@ -128,19 +128,19 @@ export default function RepositoryManagement() {
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to update repository')
+        throw new Error((data && data.message) || '更新仓库失败')
       }
       setEditing(null)
       loadRepos()
     } catch (err) {
-      setError(err.message || 'Failed to update repository')
+      setError(err.message || '更新仓库失败')
     } finally {
       setSaving(false)
     }
   }
 
   const handleDelete = async (repo) => {
-    if (!window.confirm(`Delete repository "${repo.name}"?`)) {
+    if (!window.confirm(`确定删除仓库 "${repo.name}" 吗？`)) {
       return
     }
     const response = await apiFetch('/grading/delete-repository/', {
@@ -150,7 +150,7 @@ export default function RepositoryManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      window.alert((data && data.message) || 'Failed to delete repository')
+      window.alert((data && data.message) || '删除仓库失败')
       return
     }
     loadRepos()
@@ -163,7 +163,7 @@ export default function RepositoryManagement() {
       body: new URLSearchParams({ repository_id: repo.id }),
     })
     const data = await response.json().catch(() => null)
-    window.alert((data && data.message) || 'Sync finished')
+    window.alert((data && data.message) || '同步完成')
     loadRepos()
   }
 
@@ -174,7 +174,7 @@ export default function RepositoryManagement() {
       body: new URLSearchParams({ repository_id: repo.id }),
     })
     const data = await response.json().catch(() => null)
-    window.alert((data && data.message) || 'Validation finished')
+    window.alert((data && data.message) || '校验完成')
   }
 
   return (
@@ -182,14 +182,14 @@ export default function RepositoryManagement() {
       <div className="col-lg-4">
         <div className="card">
           <div className="card-header">
-            <h5 className="mb-0">Add Repository</h5>
+            <h5 className="mb-0">新增仓库</h5>
           </div>
           <div className="card-body">
             {error ? <div className="alert alert-danger">{error}</div> : null}
             <form onSubmit={handleCreate}>
               <div className="mb-3">
                 <label className="form-label" htmlFor="repo_url">
-                  Repository URL
+                  仓库地址
                 </label>
                 <input
                   id="repo_url"
@@ -202,7 +202,7 @@ export default function RepositoryManagement() {
               </div>
               <div className="mb-3">
                 <label className="form-label" htmlFor="name">
-                  Name
+                  名称
                 </label>
                 <input
                   id="name"
@@ -214,7 +214,7 @@ export default function RepositoryManagement() {
               </div>
               <div className="mb-3">
                 <label className="form-label" htmlFor="description">
-                  Description
+                  描述
                 </label>
                 <textarea
                   id="description"
@@ -229,7 +229,7 @@ export default function RepositoryManagement() {
                 <>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="git_username">
-                      Git Username (optional)
+                      Git 用户名（可选）
                     </label>
                     <input
                       id="git_username"
@@ -241,7 +241,7 @@ export default function RepositoryManagement() {
                   </div>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="git_password">
-                      Git Password / Token (optional)
+                      Git 密码 / Token（可选）
                     </label>
                     <input
                       id="git_password"
@@ -254,7 +254,7 @@ export default function RepositoryManagement() {
                   </div>
                   <div className="mb-3">
                     <label className="form-label" htmlFor="ssh_public_key">
-                      SSH Public Key (optional)
+                      SSH 公钥（可选）
                     </label>
                     <textarea
                       id="ssh_public_key"
@@ -268,7 +268,7 @@ export default function RepositoryManagement() {
                 </>
               ) : null}
               <button className="btn btn-primary w-100" type="submit" disabled={saving}>
-                {saving ? 'Saving...' : 'Save Repository'}
+              {saving ? '保存中...' : '保存仓库'}
               </button>
             </form>
           </div>
@@ -277,15 +277,15 @@ export default function RepositoryManagement() {
       <div className="col-lg-8">
         <div className="card">
           <div className="card-header d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">Repositories</h5>
+            <h5 className="mb-0">仓库列表</h5>
             <button className="btn btn-outline-secondary btn-sm" type="button" onClick={loadRepos}>
-              Refresh
+              刷新
             </button>
           </div>
           <div className="card-body">
-            {loading ? <div className="alert alert-info">Loading...</div> : null}
+            {loading ? <div className="alert alert-info">加载中...</div> : null}
             {!loading && repos.length === 0 ? (
-              <div className="alert alert-secondary">No repositories found.</div>
+              <div className="alert alert-secondary">暂无仓库。</div>
             ) : null}
             <div className="d-flex flex-column gap-3">
               {repos.map((repo) => (
@@ -295,24 +295,24 @@ export default function RepositoryManagement() {
                       <h6 className="mb-1">{repo.name}</h6>
                       <div className="text-muted small">{repo.path}</div>
                       <div className="text-muted small">
-                        {repo.type === 'git' ? 'Git' : 'Filesystem'}{' '}
-                        {repo.last_sync ? `· Last sync ${repo.last_sync}` : ''}
+                        {repo.type === 'git' ? 'Git' : '文件系统'}{' '}
+                        {repo.last_sync ? `· 最近同步 ${repo.last_sync}` : ''}
                       </div>
                     </div>
                     <div className="d-flex gap-2 flex-wrap">
                       {repo.can_sync ? (
                         <button className="btn btn-outline-success btn-sm" onClick={() => handleSync(repo)}>
-                          Sync
+                          同步
                         </button>
                       ) : null}
                       <button className="btn btn-outline-info btn-sm" onClick={() => handleValidate(repo)}>
-                        Validate
+                        校验
                       </button>
                       <button className="btn btn-outline-primary btn-sm" onClick={() => handleEdit(repo)}>
-                        Edit
+                        编辑
                       </button>
                       <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(repo)}>
-                        Delete
+                        删除
                       </button>
                     </div>
                   </div>
@@ -326,12 +326,12 @@ export default function RepositoryManagement() {
         {editing ? (
           <div className="card mt-4">
             <div className="card-header">
-              <h6 className="mb-0">Edit Repository</h6>
+              <h6 className="mb-0">编辑仓库</h6>
             </div>
             <div className="card-body">
               <form onSubmit={handleUpdate}>
                 <div className="mb-3">
-                  <label className="form-label">Name</label>
+                  <label className="form-label">名称</label>
                   <input
                     className="form-control"
                     value={editing.name}
@@ -339,7 +339,7 @@ export default function RepositoryManagement() {
                   />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Description</label>
+                  <label className="form-label">描述</label>
                   <textarea
                     className="form-control"
                     rows="3"
@@ -348,7 +348,7 @@ export default function RepositoryManagement() {
                   />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git URL</label>
+                  <label className="form-label">Git 地址</label>
                   <input
                     className="form-control"
                     value={editing.git_url || ''}
@@ -356,7 +356,7 @@ export default function RepositoryManagement() {
                   />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git Branch</label>
+                  <label className="form-label">Git 分支</label>
                   <input
                     className="form-control"
                     value={editing.git_branch || ''}
@@ -364,7 +364,7 @@ export default function RepositoryManagement() {
                   />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git Username</label>
+                  <label className="form-label">Git 用户名</label>
                   <input
                     className="form-control"
                     value={editing.git_username || ''}
@@ -372,7 +372,7 @@ export default function RepositoryManagement() {
                   />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git Password</label>
+                  <label className="form-label">Git 密码</label>
                   <input
                     className="form-control"
                     type="password"
@@ -382,10 +382,10 @@ export default function RepositoryManagement() {
                 </div>
                 <div className="d-flex gap-2">
                   <button className="btn btn-primary" type="submit" disabled={saving}>
-                    {saving ? 'Updating...' : 'Update'}
+                    {saving ? '更新中...' : '更新'}
                   </button>
                   <button className="btn btn-outline-secondary" type="button" onClick={() => setEditing(null)}>
-                    Cancel
+                    取消
                   </button>
                 </div>
               </form>

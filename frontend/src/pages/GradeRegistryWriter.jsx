@@ -17,7 +17,7 @@ export default function GradeRegistryWriter() {
       const data = await response.json().catch(() => null)
       if (!mounted) return
       if (!response.ok || (data && data.status !== 'success')) {
-        setError((data && data.message) || 'Failed to load repositories')
+        setError((data && data.message) || '加载仓库失败')
         return
       }
       setRepositories(data.repositories || [])
@@ -28,7 +28,7 @@ export default function GradeRegistryWriter() {
       await loadExternalScript(staticUrl('/static/grading/js/grade_registry_writer.js'))
     }
 
-    setup().catch((err) => setError(err.message || 'Failed to load page'))
+    setup().catch((err) => setError(err.message || '页面加载失败'))
 
     return () => {
       mounted = false
@@ -40,9 +40,9 @@ export default function GradeRegistryWriter() {
       {error ? <div className="alert alert-danger">{error}</div> : null}
       <div className="row">
         <div className="col-12">
-          <h4 className="mb-3">Grade Registry Writer</h4>
+          <h4 className="mb-3">成绩登记册写入</h4>
           <p className="text-muted">
-            Select a repository and class directory to write grades into the registry file.
+            选择仓库和班级目录，将成绩写入登记册文件。
           </p>
         </div>
       </div>
@@ -50,15 +50,15 @@ export default function GradeRegistryWriter() {
         <div className="col-md-4">
           <div className="card">
             <div className="card-header">
-              <h6 className="mb-0">Select Directory</h6>
+              <h6 className="mb-0">选择目录</h6>
             </div>
             <div className="card-body">
               <div className="mb-3">
                 <label htmlFor="repository-select" className="form-label">
-                  Repository
+                  仓库
                 </label>
                 <select className="form-select" id="repository-select">
-                  <option value="">-- Select repository --</option>
+                  <option value="">-- 请选择仓库 --</option>
                   {repositories.map((repo) => (
                     <option key={repo.id} value={repo.id}>
                       {repo.name}
@@ -71,7 +71,7 @@ export default function GradeRegistryWriter() {
                 className="border rounded p-2"
                 style={{ minHeight: '400px', maxHeight: '600px', overflowY: 'auto' }}
               >
-                <p className="text-muted text-center mt-5">Select a repository first</p>
+                <p className="text-muted text-center mt-5">请先选择仓库</p>
               </div>
             </div>
           </div>
@@ -79,32 +79,32 @@ export default function GradeRegistryWriter() {
         <div className="col-md-8">
           <div className="card mb-3" id="selected-dir-card" style={{ display: 'none' }}>
             <div className="card-header bg-primary text-white">
-              <h6 className="mb-0">Selected Directory</h6>
+              <h6 className="mb-0">已选目录</h6>
             </div>
             <div className="card-body">
               <p className="mb-2">
-                <strong>Directory:</strong> <span id="selected-dir-path" />
+                <strong>目录：</strong> <span id="selected-dir-path" />
               </p>
               <p className="mb-0">
-                <strong>Registry file:</strong>{' '}
+                <strong>登记册文件：</strong>{' '}
                 <span id="registry-file-name" className="text-success">
-                  Checking...
+                  检查中...
                 </span>
               </p>
               <button type="button" className="btn btn-success mt-3" id="start-write-btn" disabled>
-                Start Write
+                开始写入
               </button>
             </div>
           </div>
 
           <div className="card mb-3" id="progress-card" style={{ display: 'none' }}>
             <div className="card-header">
-              <h6 className="mb-0">Progress</h6>
+              <h6 className="mb-0">进度</h6>
             </div>
             <div className="card-body">
               <div className="mb-3">
                 <div className="d-flex justify-content-between mb-1">
-                  <span id="progress-text">Preparing...</span>
+                  <span id="progress-text">准备中...</span>
                   <span id="progress-percentage">0%</span>
                 </div>
                 <div className="progress" style={{ height: '25px' }}>
@@ -127,7 +127,7 @@ export default function GradeRegistryWriter() {
 
           <div className="card" id="result-card" style={{ display: 'none' }}>
             <div className="card-header" id="result-header">
-              <h6 className="mb-0">Result</h6>
+              <h6 className="mb-0">结果</h6>
             </div>
             <div className="card-body">
               <div className="row mb-4" id="result-summary">
@@ -136,7 +136,7 @@ export default function GradeRegistryWriter() {
                     <h3 className="mb-0 text-primary" id="total-files">
                       0
                     </h3>
-                    <small className="text-muted">Total</small>
+                    <small className="text-muted">总计</small>
                   </div>
                 </div>
                 <div className="col-md-3">
@@ -144,7 +144,7 @@ export default function GradeRegistryWriter() {
                     <h3 className="mb-0 text-success" id="success-count">
                       0
                     </h3>
-                    <small className="text-muted">Success</small>
+                    <small className="text-muted">成功</small>
                   </div>
                 </div>
                 <div className="col-md-3">
@@ -152,7 +152,7 @@ export default function GradeRegistryWriter() {
                     <h3 className="mb-0 text-danger" id="failed-count">
                       0
                     </h3>
-                    <small className="text-muted">Failed</small>
+                    <small className="text-muted">失败</small>
                   </div>
                 </div>
                 <div className="col-md-3">
@@ -160,7 +160,7 @@ export default function GradeRegistryWriter() {
                     <h3 className="mb-0 text-warning" id="skipped-count">
                       0
                     </h3>
-                    <small className="text-muted">Skipped</small>
+                    <small className="text-muted">跳过</small>
                   </div>
                 </div>
               </div>
@@ -168,16 +168,16 @@ export default function GradeRegistryWriter() {
               <div id="result-details">
                 <div id="success-section" style={{ display: 'none' }}>
                   <h6 className="text-success">
-                    Success (<span id="success-count-text">0</span>)
+                    成功（<span id="success-count-text">0</span>）
                   </h6>
                   <div className="table-responsive mb-4">
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>File</th>
-                          <th>Student</th>
-                          <th>Homework</th>
-                          <th>Grade</th>
+                          <th>文件</th>
+                          <th>学生</th>
+                          <th>作业</th>
+                          <th>成绩</th>
                         </tr>
                       </thead>
                       <tbody id="success-list" />
@@ -187,14 +187,14 @@ export default function GradeRegistryWriter() {
 
                 <div id="failed-section" style={{ display: 'none' }}>
                   <h6 className="text-danger">
-                    Failed (<span id="failed-count-text">0</span>)
+                    失败（<span id="failed-count-text">0</span>）
                   </h6>
                   <div className="table-responsive mb-4">
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>File</th>
-                          <th>Error</th>
+                          <th>文件</th>
+                          <th>错误</th>
                         </tr>
                       </thead>
                       <tbody id="failed-list" />
@@ -204,14 +204,14 @@ export default function GradeRegistryWriter() {
 
                 <div id="skipped-section" style={{ display: 'none' }}>
                   <h6 className="text-warning">
-                    Skipped (<span id="skipped-count-text">0</span>)
+                    跳过（<span id="skipped-count-text">0</span>）
                   </h6>
                   <div className="table-responsive">
                     <table className="table table-sm table-hover">
                       <thead>
                         <tr>
-                          <th>File</th>
-                          <th>Reason</th>
+                          <th>文件</th>
+                          <th>原因</th>
                         </tr>
                       </thead>
                       <tbody id="skipped-list" />
@@ -222,7 +222,7 @@ export default function GradeRegistryWriter() {
 
               <div className="mt-4">
                 <button type="button" className="btn btn-primary" id="new-write-btn">
-                  New Write
+                  新的写入
                 </button>
               </div>
             </div>

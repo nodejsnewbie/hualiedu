@@ -25,11 +25,11 @@ export default function ClassList() {
       const response = await apiFetch(`/grading/api/classes/${query}`)
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to load classes')
+        throw new Error((data && data.message) || '加载班级失败')
       }
       setClasses(data.classes || [])
     } catch (err) {
-      setError(err.message || 'Failed to load classes')
+      setError(err.message || '加载班级失败')
     } finally {
       setLoading(false)
     }
@@ -61,7 +61,7 @@ export default function ClassList() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setError((data && data.message) || 'Failed to create class')
+      setError((data && data.message) || '创建班级失败')
       return
     }
     setForm({ course_id: '', name: '', student_count: '' })
@@ -73,13 +73,13 @@ export default function ClassList() {
       <div className="col-lg-4">
         <div className="card">
           <div className="card-header">
-            <h5 className="mb-0">Create Class</h5>
+            <h5 className="mb-0">创建班级</h5>
           </div>
           <div className="card-body">
             {error ? <div className="alert alert-danger">{error}</div> : null}
             <form onSubmit={handleCreate}>
               <div className="mb-3">
-                <label className="form-label">Course</label>
+                <label className="form-label">课程</label>
                 <select
                   className="form-select"
                   name="course_id"
@@ -87,7 +87,7 @@ export default function ClassList() {
                   onChange={handleChange}
                   required
                 >
-                  <option value="">Select course</option>
+                  <option value="">请选择课程</option>
                   {courses.map((course) => (
                     <option key={course.id} value={course.id}>
                       {course.name}
@@ -96,7 +96,7 @@ export default function ClassList() {
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label">Class Name</label>
+                <label className="form-label">班级名称</label>
                 <input
                   className="form-control"
                   name="name"
@@ -106,7 +106,7 @@ export default function ClassList() {
                 />
               </div>
               <div className="mb-3">
-                <label className="form-label">Student Count</label>
+                <label className="form-label">学生人数</label>
                 <input
                   className="form-control"
                   name="student_count"
@@ -115,7 +115,7 @@ export default function ClassList() {
                 />
               </div>
               <button className="btn btn-primary w-100" type="submit">
-                Create Class
+                创建班级
               </button>
             </form>
           </div>
@@ -124,9 +124,9 @@ export default function ClassList() {
       <div className="col-lg-8">
         <div className="card">
           <div className="card-header d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">Classes</h5>
+            <h5 className="mb-0">班级列表</h5>
             <select className="form-select form-select-sm" style={{ width: '200px' }} value={selectedCourse} onChange={handleFilter}>
-              <option value="">All courses</option>
+              <option value="">全部课程</option>
               {courses.map((course) => (
                 <option key={course.id} value={course.id}>
                   {course.name}
@@ -135,18 +135,18 @@ export default function ClassList() {
             </select>
           </div>
           <div className="card-body">
-            {loading ? <div className="alert alert-info">Loading...</div> : null}
+            {loading ? <div className="alert alert-info">加载中...</div> : null}
             {!loading && classes.length === 0 ? (
-              <div className="alert alert-secondary">No classes found.</div>
+              <div className="alert alert-secondary">暂无班级。</div>
             ) : null}
             <div className="table-responsive">
               <table className="table table-sm">
                 <thead>
                   <tr>
-                    <th>Name</th>
-                    <th>Course</th>
-                    <th>Students</th>
-                    <th>Created</th>
+                    <th>名称</th>
+                    <th>课程</th>
+                    <th>人数</th>
+                    <th>创建时间</th>
                   </tr>
                 </thead>
                 <tbody>

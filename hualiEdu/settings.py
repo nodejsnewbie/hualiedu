@@ -201,7 +201,7 @@ CORS_ALLOW_HEADERS = [
 ]
 
 # 允许静态文件的跨域访问
-CORS_URLS_REGEX = r"^/static/.*$"
+CORS_URLS_REGEX = r"^/.*$"
 
 # Media files (User uploaded files)
 MEDIA_URL = "/media/"

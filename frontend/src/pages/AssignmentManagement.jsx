@@ -38,13 +38,13 @@ export default function AssignmentManagement() {
       const response = await apiFetch(`/grading/api/assignments/?${query.toString()}`)
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to load assignments')
+        throw new Error((data && data.message) || '加载作业失败')
       }
       setAssignments(data.assignments || [])
       setCourses(data.courses || [])
       setClasses(data.classes || [])
     } catch (err) {
-      setError(err.message || 'Failed to load assignments')
+      setError(err.message || '加载作业失败')
     } finally {
       setLoading(false)
     }
@@ -117,12 +117,12 @@ export default function AssignmentManagement() {
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to create assignment')
+        throw new Error((data && data.message) || '创建作业失败')
       }
       setForm(emptyAssignment)
       loadAssignments()
     } catch (err) {
-      setError(err.message || 'Failed to create assignment')
+      setError(err.message || '创建作业失败')
     } finally {
       setSaving(false)
     }
@@ -157,19 +157,19 @@ export default function AssignmentManagement() {
       })
       const data = await response.json().catch(() => null)
       if (!response.ok || (data && data.status !== 'success')) {
-        throw new Error((data && data.message) || 'Failed to update assignment')
+        throw new Error((data && data.message) || '更新作业失败')
       }
       setEditing(null)
       loadAssignments()
     } catch (err) {
-      setError(err.message || 'Failed to update assignment')
+      setError(err.message || '更新作业失败')
     } finally {
       setSaving(false)
     }
   }
 
   const handleDelete = async (assignment) => {
-    if (!window.confirm(`Delete assignment "${assignment.name}"?`)) {
+    if (!window.confirm(`确定删除作业 "${assignment.name}" 吗？`)) {
       return
     }
     const response = await apiFetch(`/grading/assignments/${assignment.id}/delete/`, {
@@ -179,7 +179,7 @@ export default function AssignmentManagement() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      window.alert((data && data.message) || 'Failed to delete assignment')
+      window.alert((data && data.message) || '删除作业失败')
       return
     }
     loadAssignments()
@@ -190,19 +190,22 @@ export default function AssignmentManagement() {
       <div className="col-lg-4">
         <div className="card">
           <div className="card-header">
-            <h5 className="mb-0">Create Assignment</h5>
+            <h5 className="mb-0">创建作业</h5>
           </div>
           <div className="card-body">
+            <p className="text-muted small">
+              作业管理用于配置学生提交方式，Git 作业会直接读取远程仓库，文件上传作业会创建本地目录。
+            </p>
             {error ? <div className="alert alert-danger">{error}</div> : null}
             <form onSubmit={handleCreate}>
               <div className="mb-3">
-                <label className="form-label">Name</label>
+                <label className="form-label">作业名称/次数</label>
                 <input className="form-control" name="name" value={form.name} onChange={handleFormChange} required />
               </div>
               <div className="mb-3">
-                <label className="form-label">Course</label>
+                <label className="form-label">课程</label>
                 <select className="form-select" name="course_id" value={form.course_id} onChange={handleCourseSelection} required>
-                  <option value="">Select course</option>
+                  <option value="">请选择课程</option>
                   {courses.map((course) => (
                     <option key={course.id} value={course.id}>
                       {course.name}
@@ -211,9 +214,9 @@ export default function AssignmentManagement() {
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label">Class</label>
+                <label className="form-label">班级</label>
                 <select className="form-select" name="class_id" value={form.class_id} onChange={handleFormChange} required>
-                  <option value="">Select class</option>
+                  <option value="">请选择班级</option>
                   {classes.map((cls) => (
                     <option key={cls.id} value={cls.id}>
                       {cls.name}
@@ -222,39 +225,39 @@ export default function AssignmentManagement() {
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label">Storage Type</label>
+                <label className="form-label">存储方式</label>
                 <select className="form-select" name="storage_type" value={form.storage_type} onChange={handleFormChange} required>
-                  <option value="">Select type</option>
-                  <option value="filesystem">File Upload</option>
-                  <option value="git">Git Repository</option>
+                  <option value="">请选择类型</option>
+                  <option value="filesystem">文件上传</option>
+                  <option value="git">Git 仓库</option>
                 </select>
               </div>
               {isGit ? (
                 <>
                   <div className="mb-3">
-                    <label className="form-label">Git URL</label>
+                    <label className="form-label">Git 地址</label>
                     <input className="form-control" name="git_url" value={form.git_url} onChange={handleFormChange} required />
                   </div>
                   <div className="mb-3">
-                    <label className="form-label">Git Branch</label>
+                    <label className="form-label">Git 分支</label>
                     <input className="form-control" name="git_branch" value={form.git_branch} onChange={handleFormChange} />
                   </div>
                   <div className="mb-3">
-                    <label className="form-label">Git Username</label>
+                    <label className="form-label">Git 用户名</label>
                     <input className="form-control" name="git_username" value={form.git_username} onChange={handleFormChange} />
                   </div>
                   <div className="mb-3">
-                    <label className="form-label">Git Password / Token</label>
+                    <label className="form-label">Git 密码 / Token</label>
                     <input className="form-control" type="password" name="git_password" value={form.git_password} onChange={handleFormChange} />
                   </div>
                 </>
               ) : null}
               <div className="mb-3">
-                <label className="form-label">Description</label>
+                <label className="form-label">描述</label>
                 <textarea className="form-control" name="description" rows="3" value={form.description} onChange={handleFormChange} />
               </div>
               <button className="btn btn-primary w-100" type="submit" disabled={saving}>
-                {saving ? 'Saving...' : 'Create Assignment'}
+                {saving ? '保存中...' : '创建作业'}
               </button>
             </form>
           </div>
@@ -262,32 +265,32 @@ export default function AssignmentManagement() {
         {editing ? (
           <div className="card mt-4">
             <div className="card-header">
-              <h6 className="mb-0">Edit Assignment</h6>
+            <h6 className="mb-0">编辑作业</h6>
             </div>
             <div className="card-body">
               <form onSubmit={handleUpdate}>
                 <div className="mb-3">
-                  <label className="form-label">Name</label>
+                  <label className="form-label">名称</label>
                   <input className="form-control" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Description</label>
+                  <label className="form-label">描述</label>
                   <textarea className="form-control" rows="3" value={editing.description} onChange={(event) => setEditing({ ...editing, description: event.target.value })} />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git URL</label>
+                  <label className="form-label">Git 地址</label>
                   <input className="form-control" value={editing.git_url} onChange={(event) => setEditing({ ...editing, git_url: event.target.value })} />
                 </div>
                 <div className="mb-3">
-                  <label className="form-label">Git Branch</label>
+                  <label className="form-label">Git 分支</label>
                   <input className="form-control" value={editing.git_branch} onChange={(event) => setEditing({ ...editing, git_branch: event.target.value })} />
                 </div>
                 <div className="d-flex gap-2">
                   <button className="btn btn-primary" type="submit" disabled={saving}>
-                    {saving ? 'Updating...' : 'Update'}
+                    {saving ? '更新中...' : '更新'}
                   </button>
                   <button className="btn btn-outline-secondary" type="button" onClick={() => setEditing(null)}>
-                    Cancel
+                    取消
                   </button>
                 </div>
               </form>
@@ -298,14 +301,14 @@ export default function AssignmentManagement() {
       <div className="col-lg-8">
         <div className="card">
           <div className="card-header d-flex justify-content-between align-items-center">
-            <h5 className="mb-0">Assignments</h5>
+            <h5 className="mb-0">作业列表</h5>
           </div>
           <div className="card-body">
             <form className="row g-3 mb-3" onSubmit={applyFilters}>
               <div className="col-md-4">
-                <label className="form-label">Course</label>
+                <label className="form-label">课程</label>
                 <select className="form-select" name="course_id" value={filters.course_id} onChange={handleFilterChange}>
-                  <option value="">All</option>
+                  <option value="">全部</option>
                   {courses.map((course) => (
                     <option key={course.id} value={course.id}>
                       {course.name}
@@ -314,9 +317,9 @@ export default function AssignmentManagement() {
                 </select>
               </div>
               <div className="col-md-4">
-                <label className="form-label">Class</label>
+                <label className="form-label">班级</label>
                 <select className="form-select" name="class_id" value={filters.class_id} onChange={handleFilterChange}>
-                  <option value="">All</option>
+                  <option value="">全部</option>
                   {classes.map((cls) => (
                     <option key={cls.id} value={cls.id}>
                       {cls.name}
@@ -325,26 +328,26 @@ export default function AssignmentManagement() {
                 </select>
               </div>
               <div className="col-md-4">
-                <label className="form-label">Storage Type</label>
+                <label className="form-label">存储方式</label>
                 <select className="form-select" name="storage_type" value={filters.storage_type} onChange={handleFilterChange}>
-                  <option value="">All</option>
-                  <option value="filesystem">File Upload</option>
-                  <option value="git">Git Repository</option>
+                  <option value="">全部</option>
+                  <option value="filesystem">文件上传</option>
+                  <option value="git">Git 仓库</option>
                 </select>
               </div>
               <div className="col-12 d-flex gap-2">
                 <button className="btn btn-outline-primary" type="submit">
-                  Filter
+                  筛选
                 </button>
                 <button className="btn btn-outline-secondary" type="button" onClick={resetFilters}>
-                  Reset
+                  重置
                 </button>
               </div>
             </form>
 
-            {loading ? <div className="alert alert-info">Loading...</div> : null}
+            {loading ? <div className="alert alert-info">加载中...</div> : null}
             {!loading && assignments.length === 0 ? (
-              <div className="alert alert-secondary">No assignments found.</div>
+              <div className="alert alert-secondary">暂无作业。</div>
             ) : null}
             <div className="d-flex flex-column gap-3">
               {assignments.map((assignment) => (
@@ -356,15 +359,18 @@ export default function AssignmentManagement() {
                         {assignment.course?.name} · {assignment.class_obj?.name}
                       </div>
                       <div className="text-muted small">
-                        {assignment.storage_type === 'git' ? 'Git' : 'File Upload'}
+                  {assignment.storage_type === 'git' ? 'Git' : '文件上传'}
+                  {assignment.created_at ? (
+                    <> · 创建时间 {new Date(assignment.created_at).toLocaleString()}</>
+                  ) : null}
                       </div>
                     </div>
                     <div className="d-flex gap-2">
                       <button className="btn btn-outline-primary btn-sm" onClick={() => startEdit(assignment)}>
-                        Edit
+                        编辑
                       </button>
                       <button className="btn btn-outline-danger btn-sm" onClick={() => handleDelete(assignment)}>
-                        Delete
+                        删除
                       </button>
                     </div>
                   </div>

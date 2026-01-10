@@ -1,13 +1,68 @@
-# 文档索引
+# 项目文档
 
-- 环境配置与变量说明: [environment.md](environment.md)
-- AI 密钥排查与诊断: [ai-key.md](ai-key.md)
-- 项目优化与技术改进: [optimization.md](optimization.md)
-- 项目规则: [project_rules.md](project_rules.md)
-- 项目需求概述: [project_requirements.md](project_requirements.md)
-- AI 评分增强说明 [AI_SCORING_ENHANCEMENT.md](AI_SCORING_ENHANCEMENT.md)
-- API 安全最佳实践 [API_SECURITY_BEST_PRACTICES.md](API_SECURITY_BEST_PRACTICES.md)
-- 批量评分报告 [BATCH_SCORING_REPORT.md](BATCH_SCORING_REPORT.md)
-- Development and Makefile usage [development.md](development.md)
+本项目已改为前后端分离：后端仅提供 API（Django），前端使用 React + Vite。
 
-- ?????????? [frontend.md](frontend.md)
+## 本地开发
+
+### 后端（Django）
+```bash
+uv run python manage.py runserver
+```
+默认地址：`http://127.0.0.1:8000/`（根路径为健康检查）。
+
+### 前端（React）
+```bash
+cd frontend
+npm install
+npm run dev
+```
+默认地址：`http://127.0.0.1:5173/`。
+
+### 环境变量
+复制 `env.example` 为 `.env`，至少配置：
+- `SECRET_KEY`
+- `ARK_API_KEY`
+- `DEBUG`
+
+前端 API 基地址在 `frontend/.env` 中：
+```
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+## 作业管理说明（教师）
+
+### 功能定位
+“作业管理”用于配置学生提交方式与作业目录结构，替代原“仓库管理”概念。
+
+### 新建作业
+1) 选择课程、班级  
+2) 填写作业名称/次数（如“第一次作业”）  
+3) 选择提交方式：
+   - Git 仓库：填写仓库 URL 与分支
+   - 文件上传：系统会自动生成 `<课程>/<班级>/` 目录结构
+
+### 远程读取
+Git 类型作业直接读取远程仓库内容，无需本地同步或克隆。
+
+### 编辑与删除
+编辑作业配置不会删除已提交的学生作业；删除时会提示影响说明。
+
+## 学生提交说明
+
+### 提交流程
+1) 选择作业  
+2) 选择作业次数目录（可点击“创建新作业目录”自动生成下一次作业）  
+3) 上传文件  
+
+### 目录与命名
+- 目录结构：`<课程>/<班级>/<作业次数>/`  
+- 文件名会自动包含学生姓名  
+- 支持格式：docx/pdf/zip/txt 等常见格式  
+
+## 常见问题
+
+### 登录 403
+请确认前端访问地址与后端 API 基地址一致（推荐 `127.0.0.1`）。
+
+### AI 评分不可用
+未安装 `volcenginesdkarkruntime` 时会提示警告，AI 评分功能会被禁用。
