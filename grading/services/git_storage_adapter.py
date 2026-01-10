@@ -48,7 +48,10 @@ Git 远程仓库存储适配器 (Git Storage Adapter)
 
 import hashlib
 import logging
+import os
 import subprocess
+import tempfile
+import locale
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
 
@@ -137,6 +140,120 @@ class GitStorageAdapter(StorageAdapter):
 
         return self.git_url
 
+    def _is_ssh_url(self) -> bool:
+        return self.git_url.startswith("git@") or self.git_url.startswith("ssh://")
+
+    def _get_repo_dir(self) -> str:
+        repo_hash = hashlib.md5(self.git_url.encode("utf-8")).hexdigest()
+        base_dir = os.path.join(tempfile.gettempdir(), "huali-edu-git")
+        os.makedirs(base_dir, exist_ok=True)
+        return os.path.join(base_dir, repo_hash)
+
+    def _ensure_remote_configured(self, repo_dir: str) -> None:
+        try:
+            remotes_output = self._execute_git_command(
+                ["remote"], cwd=repo_dir, use_auth=False
+            )
+            remotes = {
+                remote.strip()
+                for remote in remotes_output.decode("utf-8", errors="ignore").splitlines()
+                if remote.strip()
+            }
+        except RemoteAccessError:
+            remotes = set()
+
+        if "origin" in remotes:
+            self._execute_git_command(
+                ["remote", "set-url", "origin", "{url}"], cwd=repo_dir, use_auth=True
+            )
+        else:
+            self._execute_git_command(
+                ["remote", "add", "origin", "{url}"], cwd=repo_dir, use_auth=True
+            )
+
+    def _ensure_remote_fetched(self) -> str:
+        repo_dir = self._get_repo_dir()
+        os.makedirs(repo_dir, exist_ok=True)
+
+        if not os.path.isfile(os.path.join(repo_dir, "HEAD")):
+            self._execute_git_command(["init", "--bare"], cwd=repo_dir, use_auth=False)
+
+        self._ensure_remote_configured(repo_dir)
+        
+        # 实现重试机制，处理网络不稳定问题
+        max_retries = 3
+        retry_delay = 1  # 初始延迟1秒
+        
+        for attempt in range(max_retries):
+            try:
+                self._execute_git_command(
+                    ["fetch", "--depth", "1", "origin", self.branch],
+                    cwd=repo_dir,
+                    use_auth=False,
+                )
+                break  # 成功则跳出重试循环
+            except RemoteAccessError as exc:
+                stderr = ""
+                if getattr(exc, "details", None):
+                    stderr = (exc.details.get("stderr") or "").lower()
+                
+                # 处理shallow file问题
+                if "shallow file has changed" in stderr:
+                    shallow_path = os.path.join(repo_dir, "shallow")
+                    if os.path.isfile(shallow_path):
+                        try:
+                            os.remove(shallow_path)
+                        except OSError:
+                            pass
+                    try:
+                        self._execute_git_command(
+                            ["fetch", "--depth", "1", "--force", "origin", self.branch],
+                            cwd=repo_dir,
+                            use_auth=False,
+                        )
+                        break  # 成功则跳出重试循环
+                    except RemoteAccessError:
+                        pass  # 继续重试
+                
+                # 处理锁文件问题
+                elif "shallow.lock" in stderr or "index.lock" in stderr or "another git process" in stderr:
+                    for lock_name in ("shallow.lock", "index.lock"):
+                        lock_path = os.path.join(repo_dir, lock_name)
+                        if os.path.isfile(lock_path):
+                            try:
+                                os.remove(lock_path)
+                            except OSError:
+                                pass
+                    try:
+                        self._execute_git_command(
+                            ["fetch", "--depth", "1", "--force", "origin", self.branch],
+                            cwd=repo_dir,
+                            use_auth=False,
+                        )
+                        break  # 成功则跳出重试循环
+                    except RemoteAccessError:
+                        pass  # 继续重试
+                
+                # 检查是否为网络连接问题
+                elif any(keyword in stderr for keyword in ["could not resolve hostname", "name or service not known", "network unreachable", "connection timed out"]):
+                    if attempt < max_retries - 1:  # 不是最后一次尝试
+                        import time
+                        logger.warning(f"网络连接失败，{retry_delay}秒后重试 (尝试 {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                        continue
+                    else:
+                        # 最后一次尝试失败，抛出网络错误
+                        raise RemoteAccessError(
+                            f"网络连接失败，已重试{max_retries}次: {stderr}",
+                            user_message="网络连接失败，无法访问远程Git仓库。请检查网络连接。"
+                        )
+                else:
+                    # 非网络问题，直接抛出
+                    raise exc
+        
+        return repo_dir
+
     def _get_cache_key(self, path: str, operation: str) -> str:
         """生成缓存键
 
@@ -151,8 +268,37 @@ class GitStorageAdapter(StorageAdapter):
         key_hash = hashlib.md5(key_data.encode()).hexdigest()
         return f"git_storage:{key_hash}"
 
+    def get_head_commit(self) -> Optional[str]:
+        try:
+            repo_dir = self._ensure_remote_fetched()
+            output = self._execute_git_command(
+                ["rev-parse", "FETCH_HEAD"], cwd=repo_dir, use_auth=False
+            )
+            return output.decode("utf-8", errors="ignore").strip()
+        except Exception:
+            return None
+
+    def file_changed_since_commit(self, path: str, commit: str) -> Optional[bool]:
+        if not path or not commit:
+            return None
+        try:
+            repo_dir = self._ensure_remote_fetched()
+            output = self._execute_git_command(
+                ["diff", "--name-only", f"{commit}..FETCH_HEAD", "--", path],
+                cwd=repo_dir,
+                use_auth=False,
+            )
+            output_str = output.decode("utf-8", errors="ignore").strip()
+            return bool(output_str)
+        except Exception:
+            return None
+
     def _execute_git_command(
-        self, args: List[str], timeout: int = 30, use_auth: bool = True
+        self,
+        args: List[str],
+        timeout: int = 30,
+        use_auth: bool = True,
+        cwd: Optional[str] = None,
     ) -> bytes:
         """执行 Git 命令
 
@@ -170,18 +316,26 @@ class GitStorageAdapter(StorageAdapter):
         url = self._auth_url if use_auth else self.git_url
 
         # 构建完整命令
-        cmd = ["git"] + args
+        cmd = ["git", "-c", "core.quotepath=false"] + args
 
         # 替换命令中的 URL 占位符
         cmd = [url if arg == "{url}" else arg for arg in cmd]
 
         try:
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            env["GIT_ASKPASS"] = "echo"
+            if self._is_ssh_url():
+                env["GIT_SSH_COMMAND"] = (
+                    "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+                )
             result = subprocess.run(
                 cmd,
-                env={"GIT_TERMINAL_PROMPT": "0"},  # 禁用交互式提示
+                env=env,  # 禁用交互式提示
                 capture_output=True,
                 timeout=timeout,
                 check=False,
+                cwd=cwd,
             )
 
             if result.returncode != 0:
@@ -246,6 +400,16 @@ class GitStorageAdapter(StorageAdapter):
         else:
             return "无法访问远程仓库，请检查配置或稍后重试"
 
+    def _decode_output(self, output: bytes) -> str:
+        try:
+            text = output.decode("utf-8")
+            if "\ufffd" in text:
+                return output.decode("gbk", errors="replace")
+            return text
+        except UnicodeDecodeError:
+            fallback = locale.getpreferredencoding(False) or "gbk"
+            return output.decode(fallback, errors="replace")
+
     def _parse_ls_tree_output(self, output: bytes) -> List[Dict]:
         """解析 git ls-tree 输出
 
@@ -256,7 +420,7 @@ class GitStorageAdapter(StorageAdapter):
             目录条目列表
         """
         entries = []
-        output_str = output.decode("utf-8", errors="ignore")
+        output_str = self._decode_output(output)
 
         for line in output_str.strip().split("\n"):
             if not line:
@@ -313,23 +477,12 @@ class GitStorageAdapter(StorageAdapter):
             logger.debug(f"Cache hit for directory listing: {path}")
             return cached
 
-        # 构建 git ls-tree 命令
-        ref = f"{self.branch}:{path}" if path else self.branch
-
         try:
-            output = self._execute_git_command(["ls-remote", "--heads", "--tags", "{url}"])
-
-            # 验证分支存在
-            output_str = output.decode("utf-8", errors="ignore")
-            if self.branch not in output_str:
-                raise RemoteAccessError(
-                    f"Branch '{self.branch}' not found in remote repository",
-                    user_message=f"分支 '{self.branch}' 不存在，请检查分支名称",
-                    details={"branch": self.branch, "url": self.git_url},
-                )
-
-            # 执行 ls-tree
-            output = self._execute_git_command(["ls-tree", "-l", ref, "{url}"])
+            repo_dir = self._ensure_remote_fetched()
+            ref = f"FETCH_HEAD:{path}" if path else "FETCH_HEAD"
+            output = self._execute_git_command(
+                ["ls-tree", "-l", ref], cwd=repo_dir, use_auth=False
+            )
 
             entries = self._parse_ls_tree_output(output)
 
@@ -373,11 +526,10 @@ class GitStorageAdapter(StorageAdapter):
             logger.debug(f"Cache hit for file: {path}")
             return cached
 
-        # 构建 git show 命令
-        ref = f"{self.branch}:{path}"
-
         try:
-            content = self._execute_git_command(["show", ref, "{url}"])
+            repo_dir = self._ensure_remote_fetched()
+            ref = f"FETCH_HEAD:{path}"
+            content = self._execute_git_command(["show", ref], cwd=repo_dir, use_auth=False)
 
             # 缓存结果（文件内容缓存时间更长）
             cache.set(cache_key, content, self.cache_timeout * 2)

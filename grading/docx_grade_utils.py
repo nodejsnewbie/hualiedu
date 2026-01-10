@@ -101,20 +101,20 @@ def extract_grade_and_comment_from_cell(cell) -> Tuple[Optional[str], Optional[s
         potential_grade = before_signature[0].strip()
         if potential_grade in ["A", "B", "C", "D", "E", "优秀", "良好", "中等", "及格", "不及格"]:
             grade = potential_grade
-            logger.info("✓ 提取到评分（第一行）: %s", grade)
+            logger.info("[OK] 提取到评分（第一行）: %s", grade)
         else:
-            logger.warning("✗ 第一行不是有效评分: %s", potential_grade)
+            logger.warning("[WARN] 第一行不是有效评分: %s", potential_grade)
 
     if len(before_signature) >= 2:
         comment = before_signature[1].strip()
         if comment:
-            logger.info("✓ 提取到评价（第二行）: %s...", comment[:50])
+            logger.info("[OK] 提取到评价（第二行）: %s...", comment[:50])
         else:
-            logger.info("✗ 第二行为空，无评价")
+            logger.info("[WARN] 第二行为空，无评价")
     else:
-        logger.info("✗ 没有第二行，无评价")
+        logger.info("[WARN] 没有第二行，无评价")
 
-    logger.info("✓ 提取到签字文本: %s...", signature_text[:50])
+    logger.info("[OK] 提取到签字文本: %s...", signature_text[:50])
     logger.info("=== 单元格内容提取完成 ===")
 
     return grade, comment, signature_text

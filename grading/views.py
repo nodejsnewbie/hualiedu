@@ -5,12 +5,15 @@ import logging
 import mimetypes
 import os
 import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import traceback
 import uuid
 from collections import deque
+from io import BytesIO
 from pathlib import Path
 from queue import Queue
 from typing import List, Optional, Tuple
@@ -18,6 +21,7 @@ from typing import List, Optional, Tuple
 import mammoth
 import pandas as pd
 from django.conf import settings
+from django.core.cache import cache
 from django.contrib import messages
 from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
@@ -175,20 +179,34 @@ def update_file_grade_status(repository, relative_path, course_name=None, user=N
     try:
         from grading.models import FileGradeStatus
         last_commit = None
-        repo_root = repository.get_full_path()
-        if GitHandler.is_git_repo(repo_root):
+        if repository.repo_type == "git":
             try:
-                result = subprocess.run(
-                    ["git", "rev-parse", "HEAD"],
-                    cwd=repo_root,
-                    capture_output=True,
-                    text=True,
-                    check=False,
+                from grading.services.git_storage_adapter import GitStorageAdapter
+
+                adapter = GitStorageAdapter(
+                    git_url=(repository.git_url or repository.url or "").strip(),
+                    branch=(repository.git_branch or repository.branch or "main").strip() or "main",
+                    username=(repository.git_username or "").strip(),
+                    password=repository.git_password or "",
                 )
-                if result.returncode == 0:
-                    last_commit = result.stdout.strip()
+                last_commit = adapter.get_head_commit()
             except Exception as e:
-                logger.warning(f"读取仓库提交失败: {e}")
+                logger.warning(f"读取远程仓库提交失败: {e}")
+        else:
+            repo_root = repository.get_full_path()
+            if GitHandler.is_git_repo(repo_root):
+                try:
+                    result = subprocess.run(
+                        ["git", "rev-parse", "HEAD"],
+                        cwd=repo_root,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if result.returncode == 0:
+                        last_commit = result.stdout.strip()
+                except Exception as e:
+                    logger.warning(f"读取仓库提交失败: {e}")
 
         FileGradeStatus.objects.update_or_create(
             repository=repository,
@@ -708,15 +726,16 @@ def get_course_type_from_name(course_name):
     return "theory"
 
 
-def _extract_homework_folder(file_path, base_dir):
+def _extract_homework_folder(file_path, base_dir, course_name=None):
     try:
         rel_path = os.path.relpath(file_path, base_dir)
         path_parts = rel_path.split(os.sep)
         if not path_parts:
             return None
-        if len(path_parts) >= 2 and ("班" in path_parts[0] or "class" in path_parts[0].lower()):
-            return path_parts[1]
-        return path_parts[0]
+        # 固定目录结构：课程/班级/作业批次/文件
+        if course_name and path_parts[0] == course_name and len(path_parts) >= 4:
+            return path_parts[2]
+        return None
     except Exception:
         return None
 
@@ -741,7 +760,7 @@ def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, b
     """
     # 方法1：根据作业批次类型判断（最准确）
     if course_name and not homework_folder and file_path and base_dir:
-        homework_folder = _extract_homework_folder(file_path, base_dir)
+        homework_folder = _extract_homework_folder(file_path, base_dir, course_name=course_name)
 
     if course_name and homework_folder:
         try:
@@ -755,35 +774,41 @@ def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, b
                 .first()
             )
 
+            course = Course.objects.filter(name=course_name).first()
+            if course and course.course_type in ["lab", "practice", "mixed"]:
+                logger.info(f"[OK] 从课程类型默认判断: 课程={course_name}")
+                logger.info(
+                    f"  课程类型: {course.course_type} ({course.get_course_type_display()})"
+                )
+                logger.info("  默认为实验报告: True")
+                return True
+
             if homework:
-                # 作业批次存在，直接使用作业类型
+                # 作业批次存在，使用作业类型
                 is_lab = homework.is_lab_report()
                 type_display = homework.get_homework_type_display()
                 logger.info(
-                    f"[✓] 从作业批次获取类型: 课程={course_name}, 作业批次={homework_folder}"
+                    f"[OK] 从作业批次获取类型: 课程={course_name}, 作业批次={homework_folder}"
                 )
                 logger.info(f"  作业类型: {homework.homework_type} ({type_display})")
                 logger.info(f"  是否实验报告: {is_lab}")
                 return is_lab
-            else:
-                # 作业批次不存在，根据课程类型默认判断
-                logger.info(
-                    f"[!] 数据库中未找到作业批次: 课程={course_name}, 作业批次={homework_folder}"
-                )
-                logger.info(f"[→] 尝试根据课程类型默认判断...")
 
-                course = Course.objects.filter(name=course_name).first()
-                if course:
-                    # 根据课程类型默认判断
-                    is_lab = course.course_type in ["lab", "practice", "mixed"]
-                    logger.info(f"[✓] 从课程类型默认判断: 课程={course_name}")
-                    logger.info(
-                        f"  课程类型: {course.course_type} ({course.get_course_type_display()})"
-                    )
-                    logger.info(f"  默认为实验报告: {is_lab}")
-                    return is_lab
-                else:
-                    logger.warning(f"[X] 数据库中未找到课程: {course_name}")
+            # 作业批次不存在，根据课程类型默认判断
+            logger.info(
+                f"[!] 数据库中未找到作业批次: 课程={course_name}, 作业批次={homework_folder}"
+            )
+            logger.info("[INFO] 尝试根据课程类型默认判断...")
+
+            if course:
+                is_lab = course.course_type in ["lab", "practice", "mixed"]
+                logger.info(f"[OK] 从课程类型默认判断: 课程={course_name}")
+                logger.info(
+                    f"  课程类型: {course.course_type} ({course.get_course_type_display()})"
+                )
+                logger.info(f"  默认为实验报告: {is_lab}")
+                return is_lab
+            logger.warning(f"[X] 数据库中未找到课程: {course_name}")
         except Exception as e:
             logger.warning(f"[X] 查询作业/课程信息失败: {e}")
 
@@ -850,7 +875,7 @@ def is_lab_report_file(course_name=None, homework_folder=None, file_path=None, b
     if course_name:
         # 如果前面的方法都失败，使用关键词判断
         is_lab = is_lab_course_by_name(course_name)
-        logger.info(f"[→] 根据课程名称关键词判断: {course_name} -> is_lab={is_lab}")
+        logger.info(f"[INFO] 根据课程名称关键词判断: {course_name} -> is_lab={is_lab}")
         return is_lab
 
     # 所有方法都失败，默认为普通作业
@@ -1141,6 +1166,28 @@ def get_dir_file_count(request):
         dir_path = data.get("path")
         if not dir_path:
             return HttpResponse("缺少path参数", status=400)
+
+        repo_id = data.get("repo_id") or request.POST.get("repo_id") or request.GET.get("repo_id")
+        course = (data.get("course") or "").strip()
+        repository = None
+        if repo_id:
+            repository = (
+                Repository.objects.filter(id=repo_id, owner=request.user, is_active=True)
+                .select_related("tenant")
+                .first()
+            )
+
+        if repository and repository.repo_type == "git":
+            try:
+                adapter = _build_git_adapter(repository)
+                parts = [p for p in [course, dir_path] if p]
+                target_path = "/".join(parts)
+                entries = adapter.list_directory(target_path)
+                file_count = sum(1 for entry in entries if entry.get("type") == "file")
+                return HttpResponse(str(file_count))
+            except Exception as e:
+                logger.error(f"获取远程目录文件数量失败: {str(e)}")
+                return HttpResponse("0")
 
         # 获取与请求相关的基础目录
         base_dir = get_base_directory(request)
@@ -1514,6 +1561,44 @@ def _file_changed_since_commit(repository, rel_path, last_commit, current_head):
         return False
 
 
+
+
+def _split_rel_path_parts(rel_path):
+    if not rel_path:
+        return []
+    return [p for p in rel_path.replace('\\', '/').split('/') if p]
+
+
+def _is_homework_folder_rel_path(rel_path, course_name=None):
+    if not course_name:
+        return False
+    parts = _split_rel_path_parts(rel_path)
+    return len(parts) == 2
+
+
+def _is_homework_file_rel_path(rel_path, course_name=None):
+    if not course_name:
+        return False
+    parts = _split_rel_path_parts(rel_path)
+    return len(parts) >= 3
+
+
+def _children_have_updates(children):
+    for child in children or []:
+        if child.get("data", {}).get("has_updates"):
+            return True
+        if _children_have_updates(child.get("children")):
+            return True
+    return False
+
+
+def _direct_file_updates(children):
+    for child in children or []:
+        if child.get("type") == "file" and child.get("data", {}).get("has_updates"):
+            return True
+    return False
+
+
 def _file_has_updates(
     repository,
     rel_path,
@@ -1530,6 +1615,8 @@ def _file_has_updates(
     try:
         from grading.models import FileGradeStatus
 
+        repo_root = repository.get_full_path()
+        is_git_repo = GitHandler.is_git_repo(repo_root)
         file_keys = [rel_path]
         fallback_key = None
         if repo_rel_prefix and rel_path.startswith(f"{repo_rel_prefix}/"):
@@ -1548,11 +1635,12 @@ def _file_has_updates(
                 return False
             return True
 
-        if current_head and status.last_graded_commit and current_head != status.last_graded_commit:
-            if _file_changed_since_commit(
-                repository, rel_path, status.last_graded_commit, current_head
-            ):
-                return True
+        if is_git_repo and current_head and status.last_graded_commit:
+            if current_head != status.last_graded_commit:
+                return _file_changed_since_commit(
+                    repository, rel_path, status.last_graded_commit, current_head
+                )
+            return False
 
         if status.last_graded_at and os.path.getmtime(abs_path) > status.last_graded_at.timestamp():
             return True
@@ -1564,7 +1652,13 @@ def _file_has_updates(
 
 
 def _homework_folder_has_updates(
-    repository, folder_abs_path, folder_rel_path, repo_rel_prefix="", current_head=None
+    repository,
+    folder_abs_path,
+    folder_rel_path,
+    repo_rel_prefix="",
+    current_head=None,
+    base_dir=None,
+    course_name=None,
 ):
     """判断作业文件夹是否有更新（相对上次评分）。"""
     if not repository or not folder_abs_path:
@@ -1574,6 +1668,8 @@ def _homework_folder_has_updates(
         if not os.path.isdir(folder_abs_path):
             return False
 
+        repo_root = repository.get_full_path()
+        is_git_repo = GitHandler.is_git_repo(repo_root)
         files = []
         base_depth = folder_abs_path.rstrip(os.sep).count(os.sep)
         for root, _, filenames in os.walk(folder_abs_path):
@@ -1620,11 +1716,22 @@ def _homework_folder_has_updates(
             last_graded_commit = commit_map.get(rel_path) or (
                 commit_map.get(alt_path) if alt_path else None
             )
-            if current_head and last_graded_commit and current_head != last_graded_commit:
-                return True
-            if not last_graded_at:
-                return True
-            if os.path.getmtime(abs_path) > last_graded_at.timestamp():
+            if not last_graded_at and not last_graded_commit:
+                grade_info = get_file_grade_info(
+                    abs_path, base_dir=base_dir, course_name=course_name
+                )
+                if not grade_info.get("has_grade"):
+                    return True
+                continue
+
+            if is_git_repo and current_head and last_graded_commit:
+                if current_head != last_graded_commit and _file_changed_since_commit(
+                    repository, rel_path, last_graded_commit, current_head
+                ):
+                    return True
+                continue
+
+            if last_graded_at and os.path.getmtime(abs_path) > last_graded_at.timestamp():
                 return True
 
     except Exception as e:
@@ -1639,6 +1746,7 @@ def get_directory_tree(
     course_name: str = None,
     request=None,
     repository=None,
+    homework_names=None,
 ):
     """获取目录树结构（返回Python对象列表）
 
@@ -1653,6 +1761,15 @@ def get_directory_tree(
             repo_base_dir = GlobalConfig.get_value("default_repo_base_dir", "~/jobs")
             base_dir = os.path.expanduser(repo_base_dir)
         logger.info(f"Base directory: {base_dir}")
+
+        if course_name and homework_names is None:
+            try:
+                homework_names = set(
+                    Homework.objects.filter(course__name=course_name)
+                    .values_list("folder_name", flat=True)
+                )
+            except Exception:
+                homework_names = set()
 
         if not os.path.exists(base_dir):
             os.makedirs(base_dir)
@@ -1722,18 +1839,29 @@ def get_directory_tree(
                         course_name=course_name,
                         request=request,
                         repository=repository,
+                        homework_names=homework_names,
                     )
                     if children:
                         node["children"] = children
                     else:
                         node["children"] = []
                         node["state"]["disabled"] = True
-
-                    # 统计并缓存目录文件数量
                     file_count = get_directory_file_count_cached(
                         relative_path, base_dir=base_dir, request=request
                     )
                     node["data"] = {"file_count": file_count}
+                    if (
+                        _is_homework_folder_rel_path(relative_path, course_name)
+                        or (homework_names and item in homework_names)
+                        or _direct_file_updates(node.get("children", []))
+                    ):
+                        if _children_have_updates(node.get("children", [])):
+                            node["data"]["has_updates"] = True
+                            logger.info(
+                                "[STAR] folder_update course=%s rel=%s",
+                                course_name,
+                                relative_path,
+                            )
 
                     # 如果提供了课程名称，检查是否是作业文件夹（第二层）
                     # file_path不为空但不包含'/'表示是第二层（班级下的作业文件夹）
@@ -1780,9 +1908,16 @@ def get_directory_tree(
                                 relative_path,
                                 repo_rel_prefix=repo_rel_prefix,
                                 current_head=current_head,
+                                base_dir=repo_base_dir,
+                                course_name=course_name,
                             )
                             if has_updates:
                                 node["data"]["has_updates"] = True
+                                logger.info(
+                                    "[STAR] homework_folder_update course=%s rel=%s",
+                                    course_name,
+                                    relative_path,
+                                )
                 # 如果是文件，添加文件特定的属性
                 else:
                     # 获取文件扩展名
@@ -1792,7 +1927,7 @@ def get_directory_tree(
                         "data-type": "file",
                         "data-ext": ext.lower(),
                     }
-                    if repository:
+                    if repository and _is_homework_file_rel_path(relative_path, course_name):
                         rel_path = relative_path.replace("\\", "/").lstrip("/")
                         repo_rel_prefix = course_name if course_name else ""
                         if repo_rel_prefix and not rel_path.startswith(f"{repo_rel_prefix}/"):
@@ -1808,6 +1943,11 @@ def get_directory_tree(
                         ):
                             node["data"] = node.get("data", {})
                             node["data"]["has_updates"] = True
+                            logger.info(
+                                "[STAR] file_update course=%s rel=%s",
+                                course_name,
+                                rel_path,
+                            )
 
                 items.append(node)
                 logger.info(f"Added {'directory' if is_dir else 'file'}: {item}")
@@ -1828,6 +1968,124 @@ def get_directory_tree(
         error_msg = f"Error in get_directory_tree: {str(e)}"
         logger.error(error_msg)
         return []
+
+
+def _build_git_adapter(repository: Repository):
+    from grading.services.git_storage_adapter import GitStorageAdapter
+
+    git_url = (repository.git_url or repository.url or "").strip()
+    if not git_url:
+        raise ValueError("Git 仓库URL不能为空")
+
+    branch = (repository.git_branch or repository.branch or "main").strip() or "main"
+    username = (repository.git_username or "").strip()
+    password = repository.git_password or ""
+
+    return GitStorageAdapter(
+        git_url=git_url,
+        branch=branch,
+        username=username,
+        password=password,
+    )
+
+
+def _get_git_file_has_updates(repository, adapter, rel_path, course_name, current_head):
+    if not repository or not rel_path:
+        return False
+    try:
+        from grading.models import FileGradeStatus
+
+        file_keys = [rel_path]
+        fallback_key = None
+        if course_name and rel_path.startswith(f"{course_name}/"):
+            fallback_key = rel_path[len(course_name) + 1 :]
+            file_keys.append(fallback_key)
+
+        status = FileGradeStatus.objects.filter(
+            repository=repository, file_path__in=file_keys
+        ).first()
+        if not status:
+            return True
+
+        if current_head and status.last_graded_commit:
+            if current_head != status.last_graded_commit:
+                changed = adapter.file_changed_since_commit(rel_path, status.last_graded_commit)
+                if changed is None:
+                    return True
+                return changed
+            return False
+    except Exception as e:
+        logger.warning(f"检测远程文件更新失败: {e}")
+        return True
+
+    return False
+
+
+def _get_git_directory_tree(adapter, path: str, base_prefix: str = "", repository=None, course_name=None, current_head=None, homework_names=None):
+    entries = adapter.list_directory(path)
+    nodes = []
+    for entry in entries:
+        name = entry.get("name", "")
+        if not name or name.startswith("."):
+            continue
+
+        full_path = f"{path}/{name}" if path else name
+        rel_id = full_path
+        if base_prefix and rel_id.startswith(f"{base_prefix}/"):
+            rel_id = rel_id[len(base_prefix) + 1 :]
+
+        is_dir = entry.get("type") == "dir"
+        node = {
+            "id": rel_id,
+            "text": name,
+            "type": "folder" if is_dir else "file",
+            "icon": "jstree-folder" if is_dir else "jstree-file",
+            "state": {"opened": False, "disabled": False, "selected": False},
+        }
+
+        if is_dir:
+            children = _get_git_directory_tree(
+                adapter,
+                full_path,
+                base_prefix=base_prefix,
+                repository=repository,
+                course_name=course_name,
+                current_head=current_head,
+                homework_names=homework_names,
+            )
+            node["children"] = children
+            if (
+                _is_homework_folder_rel_path(rel_id, course_name)
+                or (homework_names and name in homework_names)
+                or _direct_file_updates(children)
+            ):
+                if _children_have_updates(children):
+                    node["data"] = node.get("data", {})
+                    node["data"]["has_updates"] = True
+                    logger.info(
+                        "[STAR] git_folder_update course=%s rel=%s",
+                        course_name,
+                        rel_id,
+                    )
+        else:
+            _, ext = os.path.splitext(name)
+            node["a_attr"] = {"href": "#", "data-type": "file", "data-ext": ext.lower()}
+            if repository and _is_homework_file_rel_path(rel_id, course_name):
+                repo_rel_path = full_path
+                node["data"] = node.get("data", {})
+                if _get_git_file_has_updates(
+                    repository, adapter, repo_rel_path, course_name, current_head
+                ):
+                    node["data"]["has_updates"] = True
+                    logger.info(
+                        "[STAR] git_file_update course=%s rel=%s",
+                        course_name,
+                        repo_rel_path,
+                    )
+
+        nodes.append(node)
+
+    return nodes
 
 
 @login_required
@@ -2048,16 +2306,32 @@ def get_homework_info_api(request):
     try:
         course_name = request.GET.get("course_name")
         homework_folder = request.GET.get("homework_folder")
+        auto_create = request.GET.get("auto_create", "true").lower() == "true"
 
         if not course_name or not homework_folder:
             return JsonResponse({"success": False, "message": "缺少必要参数"})
 
         try:
             from grading.models import Homework
+            course = Course.objects.filter(name=course_name).first()
+            if not course and auto_create:
+                course = auto_create_or_update_course(course_name, request.user)
 
-            homework = Homework.objects.filter(
-                course__name=course_name, folder_name=homework_folder
-            ).first()
+            if not course:
+                return JsonResponse({"success": False, "message": "课程不存在"})
+
+            homework = Homework.objects.filter(course=course, folder_name=homework_folder).first()
+
+            if not homework and auto_create:
+                homework = Homework.objects.create(
+                    tenant=getattr(course, "tenant", None),
+                    course=course,
+                    class_obj=None,
+                    title=homework_folder,
+                    homework_type="normal",
+                    description="",
+                    folder_name=homework_folder,
+                )
 
             if not homework:
                 return JsonResponse({"success": False, "message": "作业不存在"})
@@ -2085,6 +2359,7 @@ def get_homework_info_api(request):
         return JsonResponse({"success": False, "message": str(e)})
 
 
+
 @login_required
 def get_courses_list_view(request):
     """获取仓库下的课程列表（第一级目录）
@@ -2092,7 +2367,7 @@ def get_courses_list_view(request):
     参数：
     - repo_id: 仓库ID
 
-    返回：课程列表 JSON
+    返回：课程列表JSON
     """
     try:
         repo_id = request.GET.get("repo_id")
@@ -2101,31 +2376,51 @@ def get_courses_list_view(request):
 
         try:
             repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
-            maybe_sync_repository(repo, request=request)
-            base_dir = repo.get_full_path()
         except Repository.DoesNotExist:
             return JsonResponse({"status": "error", "message": "仓库不存在", "courses": []})
 
-        if not os.path.exists(base_dir):
-            return JsonResponse({"status": "error", "message": "仓库目录不存在", "courses": []})
-
-        # 获取第一级目录（课程）
         courses = []
-        try:
-            for item in sorted(os.listdir(base_dir)):
-                # 跳过隐藏文件和目录
-                if item.startswith("."):
-                    continue
+        if repo.repo_type == "git":
+            try:
+                adapter = _build_git_adapter(repo)
+                entries = adapter.list_directory("")
+                for entry in entries:
+                    if entry.get("type") == "dir":
+                        name = entry.get("name")
+                        if name and not name.startswith("."):
+                            courses.append({"name": name, "path": name})
+            except Exception as e:
+                logger.error(f"读取远程课程目录失败: {str(e)}")
+                return JsonResponse(
+                    {
+                        "status": "error",
+                        "message": f"读取远程课程目录失败: {str(e)}",
+                        "courses": [],
+                    }
+                )
+        else:
+            base_dir = repo.get_full_path()
+            if not os.path.exists(base_dir):
+                return JsonResponse(
+                    {"status": "error", "message": "仓库目录不存在", "courses": []}
+                )
 
-                item_path = os.path.join(base_dir, item)
-                # 只获取目录
-                if os.path.isdir(item_path):
-                    courses.append({"name": item, "path": item})
-        except Exception as e:
-            logger.error(f"读取课程目录失败: {str(e)}")
-            return JsonResponse(
-                {"status": "error", "message": f"读取课程目录失败: {str(e)}", "courses": []}
-            )
+            try:
+                for item in sorted(os.listdir(base_dir)):
+                    if item.startswith("."):
+                        continue
+                    item_path = os.path.join(base_dir, item)
+                    if os.path.isdir(item_path):
+                        courses.append({"name": item, "path": item})
+            except Exception as e:
+                logger.error(f"读取课程目录失败: {str(e)}")
+                return JsonResponse(
+                    {
+                        "status": "error",
+                        "message": f"读取课程目录失败: {str(e)}",
+                        "courses": [],
+                    }
+                )
 
         return JsonResponse({"status": "success", "courses": courses})
     except Exception as e:
@@ -2133,9 +2428,10 @@ def get_courses_list_view(request):
         return JsonResponse({"status": "error", "message": str(e), "courses": []})
 
 
+
 @login_required
 def get_directory_tree_view(request):
-    """返回目录树 JSON（GET）
+    """返回目录树JSON（GET）
 
     支持按所选仓库和课程加载：
     - repo_id: 仓库ID（必需）
@@ -2143,7 +2439,6 @@ def get_directory_tree_view(request):
     - path: 以基础目录为根的相对路径
     """
     try:
-        # 权限：允许已登录用户加载自己的仓库目录
         repo_id = request.GET.get("repo_id")
         course = request.GET.get("course", "").strip()
         rel_path = request.GET.get("path", "").strip()
@@ -2151,25 +2446,44 @@ def get_directory_tree_view(request):
         base_dir = None
         repository = None
         if repo_id:
-            # 按仓库ID定位用户仓库
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
-                maybe_sync_repository(repo, request=request)
                 repository = repo
-                base_dir = repo.get_full_path()
-
-                # 如果指定了课程，则基础目录为课程目录
-                if course:
-                    base_dir = os.path.join(base_dir, course)
-                    if not os.path.exists(base_dir):
-                        return JsonResponse({"children": []}, safe=False)
+                if repo.repo_type != "git":
+                    base_dir = repo.get_full_path()
+                    if course:
+                        base_dir = os.path.join(base_dir, course)
+                        if not os.path.exists(base_dir):
+                            return JsonResponse({"children": []}, safe=False)
             except Repository.DoesNotExist:
+                return JsonResponse({"children": []}, safe=False)
+
+        if repository and repository.repo_type == "git":
+            try:
+                adapter = _build_git_adapter(repository)
+                parts = [p for p in [course, rel_path] if p]
+                target_path = "/".join(parts)
+                current_head = adapter.get_head_commit()
+                data = _get_git_directory_tree(
+                    adapter,
+                    target_path,
+                    base_prefix=course or "",
+                    repository=repository,
+                    course_name=course or "",
+                    current_head=current_head,
+                    homework_names=set(
+                        Homework.objects.filter(course__name=course)
+                        .values_list("folder_name", flat=True)
+                    ) if course else None,
+                )
+                return JsonResponse({"children": data}, safe=False)
+            except Exception as e:
+                logger.error(f"读取远程目录树失败: {str(e)}")
                 return JsonResponse({"children": []}, safe=False)
 
         data = get_directory_tree(
             rel_path, base_dir=base_dir, course_name=course, request=request, repository=repository
         )
-        # 转换为前端模板期望的格式（包含children属性）
         return JsonResponse({"children": data}, safe=False)
     except Exception as e:
         logger.error(f"get_directory_tree_view error: {e}")
@@ -2481,7 +2795,311 @@ def get_file_content(request):
             if repo_id:
                 try:
                     repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
-                    maybe_sync_repository(repo, request=request)
+                    if repo.repo_type == "git":
+                        adapter = _build_git_adapter(repo)
+                        parts = [p for p in [course, path] if p]
+                        target_path = "/".join(parts).replace("\\", "/")
+                        try:
+                            content_bytes = adapter.read_file(target_path)
+                        except Exception as e:
+                            logger.error(f"远程读取文件失败: {str(e)}")
+                            return JsonResponse(
+                                {
+                                    "status": "error",
+                                    "message": f"远程读取文件失败: {str(e)}",
+                                }
+                            )
+
+                        file_ext = os.path.splitext(target_path)[1].lower()
+                        mime_type, _ = mimetypes.guess_type(target_path)
+                        grade_info = {
+                            "has_grade": False,
+                            "grade": None,
+                            "grade_type": None,
+                            "in_table": False,
+                            "ai_grading_disabled": False,
+                            "locked": False,
+                            "is_lab_report": False,
+                            "has_comment": False,
+                            "format_valid": True,
+                        }
+                        try:
+                            path_parts = target_path.split("/")
+                            homework_folder = path_parts[1] if len(path_parts) >= 2 else None
+                            grade_info["is_lab_report"] = is_lab_report_file(
+                                course_name=course, homework_folder=homework_folder
+                            )
+                        except Exception:
+                            pass
+
+                        if file_ext == ".docx":
+                            try:
+                                try:
+                                    import mammoth
+
+                                    result = mammoth.convert_to_html(BytesIO(content_bytes))
+                                    html_content = result.value
+                                    css = """
+                                    <style>
+                                        .docx-content {
+                                            font-family: Arial, sans-serif;
+                                            line-height: 1.6;
+                                            padding: 20px;
+                                            max-width: 100%;
+                                            overflow-x: auto;
+                                            box-sizing: border-box;
+                                        }
+                                        .docx-content img {
+                                            max-width: 100%;
+                                            height: auto;
+                                        }
+                                        .docx-content table {
+                                            margin: 15px 0;
+                                            border-collapse: collapse;
+                                            width: 100%;
+                                            max-width: 100%;
+                                            overflow-x: auto;
+                                            display: block;
+                                        }
+                                        .docx-content td, .docx-content th {
+                                            padding: 8px;
+                                            border: 1px solid #ddd;
+                                            min-width: 100px;
+                                            word-break: break-word;
+                                        }
+                                        .docx-content tr:nth-child(even) {
+                                            background-color: #f9f9f9;
+                                        }
+                                        .docx-content h1 {
+                                            font-size: clamp(20px, 5vw, 24px);
+                                            margin: 20px 0;
+                                        }
+                                        .docx-content h2 {
+                                            font-size: clamp(18px, 4vw, 20px);
+                                            margin: 18px 0;
+                                        }
+                                        .docx-content h3 {
+                                            font-size: clamp(16px, 3vw, 18px);
+                                            margin: 16px 0;
+                                        }
+                                        .docx-content p {
+                                            margin: 10px 0;
+                                            font-size: clamp(14px, 2vw, 16px);
+                                        }
+                                        @media screen and (max-width: 768px) {
+                                            .docx-content {
+                                                padding: 10px;
+                                            }
+                                            .docx-content td, .docx-content th {
+                                                padding: 4px;
+                                                font-size: 14px;
+                                            }
+                                        }
+                                    </style>
+                                    """
+                                    final_content = css + f'<div class="docx-content">{html_content}</div>'
+                                    return JsonResponse(
+                                        {
+                                            "status": "success",
+                                            "type": "docx",
+                                            "content": final_content,
+                                            "grade_info": grade_info,
+                                        }
+                                    )
+                                except Exception:
+                                    doc = Document(BytesIO(content_bytes))
+                                    html_content = ['<div class="docx-content">']
+                                    for paragraph in doc.paragraphs:
+                                        style = paragraph.style.name
+                                        text = paragraph.text.strip()
+                                        if not text and not paragraph.runs:
+                                            continue
+                                        if style.startswith("Heading"):
+                                            level = style[-1] if style[-1].isdigit() else 1
+                                            html_content.append(f"<h{level}>{text}</h{level}>")
+                                        else:
+                                            formatted_text = ""
+                                            for run in paragraph.runs:
+                                                if run.bold:
+                                                    formatted_text += f"<strong>{run.text}</strong>"
+                                                elif run.italic:
+                                                    formatted_text += f"<em>{run.text}</em>"
+                                                else:
+                                                    formatted_text += run.text
+                                            if formatted_text:
+                                                html_content.append(f"<p>{formatted_text}</p>")
+                                            else:
+                                                html_content.append(f"<p>{text}</p>")
+                                    for table in _iter_tables(doc):
+                                        html_content.append('<table class="table table-bordered">')
+                                        for row in table.rows:
+                                            html_content.append("<tr>")
+                                            for cell in row.cells:
+                                                cell_text = ""
+                                                for paragraph in cell.paragraphs:
+                                                    for run in paragraph.runs:
+                                                        if run.bold:
+                                                            cell_text += f"<strong>{run.text}</strong>"
+                                                        elif run.italic:
+                                                            cell_text += f"<em>{run.text}</em>"
+                                                        else:
+                                                            cell_text += run.text
+                                                html_content.append(f"<td>{cell_text}</td>")
+                                            html_content.append("</tr>")
+                                        html_content.append("</table>")
+                                    html_content.append("</div>")
+                                    css = """
+                                    <style>
+                                        .docx-content {
+                                            font-family: Arial, sans-serif;
+                                            line-height: 1.6;
+                                            padding: 20px;
+                                            max-width: 100%;
+                                            overflow-x: auto;
+                                            box-sizing: border-box;
+                                        }
+                                        .docx-content img {
+                                            max-width: 100%;
+                                            height: auto;
+                                        }
+                                        .docx-content table {
+                                            margin: 15px 0;
+                                            border-collapse: collapse;
+                                            width: 100%;
+                                            max-width: 100%;
+                                            overflow-x: auto;
+                                            display: block;
+                                        }
+                                        .docx-content td, .docx-content th {
+                                            padding: 8px;
+                                            border: 1px solid #ddd;
+                                            min-width: 100px;
+                                            word-break: break-word;
+                                        }
+                                        .docx-content tr:nth-child(even) {
+                                            background-color: #f9f9f9;
+                                        }
+                                        .docx-content h1 {
+                                            font-size: clamp(20px, 5vw, 24px);
+                                            margin: 20px 0;
+                                        }
+                                        .docx-content h2 {
+                                            font-size: clamp(18px, 4vw, 20px);
+                                            margin: 18px 0;
+                                        }
+                                        .docx-content h3 {
+                                            font-size: clamp(16px, 3vw, 18px);
+                                            margin: 16px 0;
+                                        }
+                                        .docx-content p {
+                                            margin: 10px 0;
+                                            font-size: clamp(14px, 2vw, 16px);
+                                        }
+                                        @media screen and (max-width: 768px) {
+                                            .docx-content {
+                                                padding: 10px;
+                                            }
+                                            .docx-content td, .docx-content th {
+                                                padding: 4px;
+                                                font-size: 14px;
+                                            }
+                                        }
+                                    </style>
+                                    """
+                                    final_content = css + "\n".join(html_content)
+                                    return JsonResponse(
+                                        {
+                                            "status": "success",
+                                            "type": "docx",
+                                            "content": final_content,
+                                            "grade_info": grade_info,
+                                        }
+                                    )
+                            except Exception as e:
+                                return JsonResponse(
+                                    {
+                                        "status": "error",
+                                        "message": f"Word 文档处理失败: {str(e)}",
+                                    }
+                                )
+                        elif mime_type and mime_type.startswith("image/"):
+                            encoded = base64.b64encode(content_bytes).decode("utf-8")
+                            return JsonResponse(
+                                {
+                                    "status": "success",
+                                    "type": "image",
+                                    "content": f"data:{mime_type};base64,{encoded}",
+                                    "grade_info": grade_info,
+                                }
+                            )
+                        elif mime_type == "application/pdf":
+                            encoded = base64.b64encode(content_bytes).decode("utf-8")
+                            return JsonResponse(
+                                {
+                                    "status": "success",
+                                    "type": "pdf",
+                                    "content": f"data:application/pdf;base64,{encoded}",
+                                    "grade_info": grade_info,
+                                }
+                            )
+                        elif mime_type in [
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel.sheet.macroEnabled.12",
+                        ]:
+                            try:
+                                df = pd.read_excel(BytesIO(content_bytes), engine="openpyxl")
+                                df.columns = [
+                                    "" if str(col).startswith("Unnamed") else str(col)
+                                    for col in df.columns
+                                ]
+                                df = df.fillna("")
+                                html_content = df.to_html(
+                                    index=False,
+                                    classes="table table-bordered table-striped",
+                                    na_rep="",
+                                )
+                                return JsonResponse(
+                                    {
+                                        "status": "success",
+                                        "type": "excel",
+                                        "content": html_content,
+                                        "grade_info": grade_info,
+                                    }
+                                )
+                            except Exception as e:
+                                return JsonResponse(
+                                    {
+                                        "status": "error",
+                                        "message": f"Excel 文件处理失败: {str(e)}",
+                                    }
+                                )
+                        elif mime_type and mime_type.startswith("text/"):
+                            try:
+                                text = content_bytes.decode("utf-8")
+                            except UnicodeDecodeError:
+                                text = content_bytes.decode("gbk", errors="replace")
+                            return JsonResponse(
+                                {
+                                    "status": "success",
+                                    "type": "text",
+                                    "content": text,
+                                    "grade_info": grade_info,
+                                }
+                            )
+
+                        encoded = base64.b64encode(content_bytes).decode("utf-8")
+                        download_name = os.path.basename(target_path)
+                        return JsonResponse(
+                            {
+                                "status": "success",
+                                "type": "binary",
+                                "content": f"data:application/octet-stream;base64,{encoded}",
+                                "filename": download_name,
+                                "grade_info": grade_info,
+                            }
+                        )
+
                     base_dir = repo.get_full_path()
 
                     # 如果指定了课程，则基础目录为课程目录
@@ -3654,6 +4272,11 @@ def save_teacher_comment(request):
     """保存教师评价到文件末尾（同时保存评分和评价）"""
     logger.info("开始处理保存教师评价请求")
 
+    # 检查用户认证
+    if not request.user.is_authenticated:
+        logger.error("用户未认证")
+        return create_error_response("请先登录", response_format="success")
+
     # 获取请求参数
     file_path = request.POST.get("file_path")
     comment = request.POST.get("comment")
@@ -3677,10 +4300,258 @@ def save_teacher_comment(request):
         f"保存教师评价请求: file_path={file_path}, grade={grade}, repo_id={repo_id}, course={course}"
     )
 
+    repo = None
+    base_dir = None
+    base_dir_candidates = []
+    if repo_id:
+        try:
+            repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
+        except Repository.DoesNotExist:
+            return create_error_response("仓库不存在或无权限访问", response_format="success")
+
+    if repo and repo.repo_type == "git":
+        adapter = _build_git_adapter(repo)
+        branch = (repo.git_branch or repo.branch or "main").strip() or "main"
+        work_dir = tempfile.mkdtemp(prefix="grading_git_")
+        try:
+            # Git远程获取
+            try:
+                repo_dir = adapter._ensure_remote_fetched()
+                logger.info(f"Git仓库目录: {repo_dir}")
+            except Exception as e:
+                logger.error(f"Git远程访问失败: {str(e)}")
+                # 检查是否为网络连接问题
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in ["could not resolve hostname", "name or service not known", "network", "connection"]):
+                    return create_error_response("网络连接失败，无法访问远程Git仓库。请检查网络连接或稍后重试。", response_format="success")
+                else:
+                    return create_error_response(f"Git操作失败: {str(e)}", response_format="success")
+            
+            # Git fetch成功后继续处理
+            # 先检查远程分支
+            list_branches = subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    repo_dir,
+                    "branch",
+                    "-r"
+                ],
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"远程分支列表: {list_branches.stdout}")
+            
+            # 检查FETCH_HEAD
+            fetch_head_check = subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    repo_dir,
+                    "log",
+                    "--oneline",
+                    "-n",
+                    "5",
+                    "FETCH_HEAD"
+                ],
+                capture_output=True,
+                text=True,
+            )
+            logger.info(f"FETCH_HEAD最近提交: {fetch_head_check.stdout}")
+            
+            checkout = subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    repo_dir,
+                    "--work-tree",
+                    work_dir,
+                    "checkout",
+                    "-f",  # 强制checkout
+                    "FETCH_HEAD"
+                ],
+                capture_output=True,
+                text=True,
+            )
+            
+            logger.info(f"Git checkout命令: git --git-dir {repo_dir} --work-tree {work_dir} checkout -f FETCH_HEAD")
+            logger.info(f"Git checkout返回码: {checkout.returncode}")
+            logger.info(f"Git checkout输出: {checkout.stdout}")
+            
+            if checkout.returncode != 0:
+                logger.error(f"git checkout failed: {checkout.stderr}")
+                return create_error_response("Git 检出失败", response_format="success")
+
+            # 构建Git仓库中的实际文件路径 - 使用与get_teacher_comment相同的逻辑
+            normalized_file = file_path.replace("\\", "/")
+            
+            # 使用与get_teacher_comment完全相同的路径构建逻辑
+            target_path = "/".join([p for p in [course, normalized_file] if p]).replace("\\", "/")
+            local_path = os.path.join(work_dir, *target_path.split("/"))
+            
+            logger.info(f"=== 文件路径调试信息 ===")
+            logger.info(f"前端请求路径: {normalized_file}")
+            logger.info(f"课程参数: {course}")
+            logger.info(f"构建的Git路径: {target_path}")
+            logger.info(f"本地文件路径: {local_path}")
+            logger.info(f"工作目录: {work_dir}")
+            
+            # 先列出工作目录的所有文件
+            try:
+                actual_files = []
+                for root, dirs, files in os.walk(work_dir):
+                    for file in files:
+                        rel_path = os.path.relpath(os.path.join(root, file), work_dir)
+                        actual_files.append(rel_path.replace("\\", "/"))
+                
+                logger.info(f"工作目录中的所有文件 ({len(actual_files)}个):")
+                for i, f in enumerate(actual_files[:20]):  # 显示前20个文件
+                    logger.info(f"  {i+1}. {f}")
+                if len(actual_files) > 20:
+                    logger.info(f"  ... 还有 {len(actual_files) - 20} 个文件")
+                    
+            except Exception as e:
+                logger.error(f"无法列出工作目录文件: {str(e)}")
+            
+            if not os.path.exists(local_path):
+                # 列出实际文件结构用于调试
+                try:
+                    actual_files = []
+                    for root, dirs, files in os.walk(work_dir):
+                        for file in files:
+                            rel_path = os.path.relpath(os.path.join(root, file), work_dir)
+                            actual_files.append(rel_path.replace("\\", "/"))
+                    
+                    logger.error(
+                        "=== 路径不匹配详情 ===\n前端路径: %s\n课程: %s\n构建路径: %s\n实际文件前10个: %s",
+                        normalized_file,
+                        course,
+                        target_path,
+                        ", ".join(actual_files[:10])
+                    )
+                    
+                    # 检查是否存在相似的文件名
+                    filename = os.path.basename(normalized_file)
+                    matching_files = [f for f in actual_files if filename in f]
+                    if matching_files:
+                        logger.info(f"找到包含相同文件名的文件: {matching_files}")
+                        
+                except Exception as e:
+                    logger.error(f"无法列出Git文件: {str(e)}")
+                    
+                return create_error_response("文件路径与Git仓库不匹配", response_format="success")
+
+            is_lab_report = is_lab_report_file(
+                course_name=course,
+                file_path=local_path,
+                base_dir=work_dir,
+            )
+            if is_lab_report and (not comment or comment.strip() == ""):
+                logger.error("实验报告必须添加评语")
+                return create_error_response("实验报告必须添加评语内容", response_format="success")
+
+            warning = write_grade_and_comment_to_file(
+                local_path,
+                grade=grade,
+                comment=comment,
+                base_dir=work_dir,
+                is_lab_report=is_lab_report,
+                teacher_name=get_teacher_display_name(request.user),
+                allow_locked=True,
+            )
+
+            add_result = subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    repo_dir,
+                    "--work-tree",
+                    work_dir,
+                    "add",
+                    target_path,
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if add_result.returncode != 0:
+                logger.error(f"git add failed: {add_result.stderr}")
+                return create_error_response("Git add 失败", response_format="success")
+
+            author_name = get_teacher_display_name(request.user) or "Grading Bot"
+            author_email = request.user.email or "grading@local"
+            commit_result = subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    repo_dir,
+                    "--work-tree",
+                    work_dir,
+                    "-c",
+                    f"user.name={author_name}",
+                    "-c",
+                    f"user.email={author_email}",
+                    "commit",
+                    "-m",
+                    f"评分更新: {file_path}",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if commit_result.returncode == 0:
+                try:
+                    adapter._execute_git_command(
+                        ["push", "origin", f"HEAD:{branch}"],
+                        cwd=repo_dir,
+                        use_auth=True,
+                    )
+                    cache.delete(adapter._get_cache_key(target_path, "file"))
+                except Exception as e:
+                    logger.warning(f"git push failed: {e}")
+                    return create_error_response("Git push 失败", response_format="success")
+            else:
+                if "nothing to commit" not in commit_result.stderr.lower():
+                    logger.error(f"git commit failed: {commit_result.stderr}")
+                    return create_error_response("Git commit 失败", response_format="success")
+
+            update_file_grade_status(repo, file_path, course_name=course, user=request.user)
+
+            if warning:
+                logger.warning(f"保存时有警告: {warning}")
+                return create_success_response(
+                    message=f"教师评价和评分已保存（警告：{warning}）",
+                    response_format="success",
+                )
+
+            logger.info(f"成功保存教师评价和评分: {file_path}")
+            return create_success_response(
+                message="教师评价和评分已保存", response_format="success"
+            )
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    # 如果不是Git仓库，处理本地文件系统
+    if repo and repo.repo_type != "git":
+        repo_root = repo.get_full_path()
+        if course:
+            base_dir_candidates.append(os.path.join(repo_root, course))
+        base_dir_candidates.append(repo_root)
+
     # 验证文件路径
-    is_valid, full_path, error_msg = validate_file_path(
-        file_path, request=request, repo_id=repo_id, course=course
-    )
+    is_valid = False
+    full_path = None
+    error_msg = None
+    if base_dir_candidates:
+        for candidate in base_dir_candidates:
+            is_valid, full_path, error_msg = validate_file_path(
+                file_path, base_dir=candidate, request=request
+            )
+            if is_valid:
+                base_dir = candidate
+                break
+    else:
+        is_valid, full_path, error_msg = validate_file_path(
+            file_path, request=request, repo_id=repo_id, course=course
+        )
 
     if not is_valid:
         logger.error(f"文件路径验证失败: {error_msg}")
@@ -3697,8 +4568,12 @@ def save_teacher_comment(request):
     # 使用统一函数保存评分和评价
     try:
         # 从文件路径自动判断作业类型（会查询数据库中的作业批次类型）
-        base_dir = get_base_directory(request)
-        is_lab_report = is_lab_report_file(file_path=full_path, base_dir=base_dir)
+        base_dir_for_lab = base_dir or get_base_directory(request)
+        is_lab_report = is_lab_report_file(
+            course_name=course,
+            file_path=full_path,
+            base_dir=base_dir_for_lab,
+        )
 
         # 需求 4.5, 5.2: 实验报告强制评价验证
         if is_lab_report and (not comment or comment.strip() == ""):
@@ -3837,11 +4712,17 @@ def get_teacher_comment(request):
     - 16.6: 未找到评价返回"暂无评价"
     """
     try:
+        # 检查用户认证
+        if not request.user.is_authenticated:
+            return JsonResponse({"success": False, "message": "请先登录"})
+
         # 获取参数
         file_path = request.GET.get("file_path")
         repo_id = request.GET.get("repo_id")
         course = request.GET.get("course", "").strip()
         homework_folder = request.GET.get("homework_folder", "").strip()
+        file_bytes = None
+        repo = None
 
         if not file_path:
             return JsonResponse({"success": False, "message": "未提供文件路径"})
@@ -3884,21 +4765,34 @@ def get_teacher_comment(request):
                 logger.error(f"在所有仓库中都未找到文件: {file_path}")
                 return JsonResponse({"success": False, "message": "文件不存在"})
         else:
-            # 验证文件路径
-            is_valid, full_path, error_msg = validate_file_path(
-                file_path, request=request, repo_id=repo_id, course=course
-            )
-
-            if not is_valid:
-                logger.error(f"文件路径验证失败: {error_msg}")
-                return JsonResponse({"success": False, "message": error_msg})
-
-            # 获取base_dir用于判断作业类型
+            # repo_id 指定时，优先判断是否为远程仓库
             try:
                 repo = Repository.objects.get(id=repo_id, owner=request.user, is_active=True)
-                base_dir = repo.get_full_path()
             except Repository.DoesNotExist:
-                base_dir = get_base_directory(request)
+                return JsonResponse({"success": False, "message": "仓库不存在或无权限访问"})
+
+            if repo.repo_type == "git":
+                adapter = _build_git_adapter(repo)
+                target_path = "/".join([p for p in [course, file_path] if p]).replace("\\", "/")
+                full_path = target_path
+                base_dir = None
+                try:
+                    file_bytes = adapter.read_file(target_path)
+                except Exception as e:
+                    logger.error(f"远程读取文件失败: {str(e)}")
+                    return JsonResponse({"success": False, "message": f"远程读取文件失败: {str(e)}"})
+            else:
+                # 验证文件路径
+                is_valid, full_path, error_msg = validate_file_path(
+                    file_path, request=request, repo_id=repo_id, course=course
+                )
+
+                if not is_valid:
+                    logger.error(f"文件路径验证失败: {error_msg}")
+                    return JsonResponse({"success": False, "message": error_msg})
+
+                # 获取base_dir用于判断作业类型
+                base_dir = repo.get_full_path()
 
         logger.info(f"验证通过，完整路径: {full_path}")
 
@@ -3907,10 +4801,15 @@ def get_teacher_comment(request):
         ext = ext.lower()
 
         # 需求 16.1: 判断文件是否为实验报告
+        if not homework_folder:
+            path_parts = file_path.replace("\\", "/").split("/")
+            if len(path_parts) >= 2:
+                homework_folder = path_parts[1]
+
         is_lab = is_lab_report_file(
             course_name=course,
             homework_folder=homework_folder,
-            file_path=full_path,
+            file_path=None if (repo and repo.repo_type == "git") else full_path,
             base_dir=base_dir,
         )
         logger.info(f"文件类型判断: is_lab_report={is_lab}")
@@ -3919,7 +4818,10 @@ def get_teacher_comment(request):
         if ext == ".docx":
             # 对于 Word 文档，使用 python-docx 读取评价
             try:
-                doc = Document(full_path)
+                if repo and repo.repo_type == "git":
+                    doc = Document(BytesIO(file_bytes))
+                else:
+                    doc = Document(full_path)
                 teacher_comment = None
 
                 logger.info(
@@ -3940,9 +4842,9 @@ def get_teacher_comment(request):
 
                         if comment_from_cell:
                             teacher_comment = comment_from_cell
-                            logger.info(f"✓ 从实验报告表格中提取评价: '{teacher_comment}'")
+                            logger.info(f"[OK] 从实验报告表格中提取评价: '{teacher_comment}'")
                             if grade_from_cell:
-                                logger.info(f"✓ 同时提取到评分: '{grade_from_cell}'")
+                                logger.info(f"[OK] 同时提取到评分: '{grade_from_cell}'")
                         else:
                             logger.info("单元格中未找到评价内容")
                     else:
@@ -3963,12 +4865,12 @@ def get_teacher_comment(request):
                                 teacher_comment = text.split("：", 1)[1].strip()
                             else:
                                 teacher_comment = text
-                            logger.info(f"✓ 找到评价段落: '{teacher_comment}'")
+                            logger.info(f"[OK] 找到评价段落: '{teacher_comment}'")
                             break
 
                 # 需求 16.5 & 16.6: 返回评价内容或"暂无评价"
                 if teacher_comment:
-                    logger.info(f"✓ 成功获取教师评价: {teacher_comment}")
+                    logger.info(f"[OK] 成功获取教师评价: {teacher_comment}")
                     return JsonResponse({"success": True, "comment": teacher_comment})
                 else:
                     logger.info("文件中没有找到教师评价")
@@ -3981,8 +4883,15 @@ def get_teacher_comment(request):
         else:
             # 对于其他文件类型，尝试以文本方式读取
             try:
-                with open(full_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
+                if repo and repo.repo_type == "git":
+                    try:
+                        text = file_bytes.decode("utf-8")
+                    except UnicodeDecodeError:
+                        text = file_bytes.decode("gbk", errors="replace")
+                    lines = text.splitlines()
+                else:
+                    with open(full_path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
 
                 teacher_comment = None
 
@@ -3996,11 +4905,11 @@ def get_teacher_comment(request):
                             teacher_comment = line_text.split("：", 1)[1].strip()
                         else:
                             teacher_comment = line_text
-                        logger.info(f"✓ 找到评价内容: '{teacher_comment}'")
+                        logger.info(f"[OK] 找到评价内容: '{teacher_comment}'")
                         break
 
                 if teacher_comment:
-                    logger.info(f"✓ 成功获取教师评价: {teacher_comment}")
+                    logger.info(f"[OK] 成功获取教师评价: {teacher_comment}")
                     return JsonResponse({"success": True, "comment": teacher_comment})
                 else:
                     logger.info("文件中没有找到教师评价")
@@ -4994,10 +5903,7 @@ def generate_random_comment(grade):
             "完成得很好，实验步骤规范，有一定的分析深度。",
         ],
         "C": [
-            "作业基本完成，还有提升空间。",
-            "中等水平，实验报告内容基本完整。",
-            "实验过程记录尚可，建议加强分析。",
-            "基本达标，建议在数据分析方面多下功夫。",
+            "缺少思考题。",
         ],
         "D": [
             "作业完成情况一般，需要改进。",
@@ -5735,7 +6641,7 @@ def calendar_view(request):
         current_semester = Semester.objects.filter(is_active=True).first()
         if not current_semester:
             messages.warning(request, "请先设置当前学期")
-            return redirect("admin:grading_semester_add")
+            return redirect("grading:semester_add")
 
         # 获取指定周次，默认为当前周
         week_number = request.GET.get("week", None)
@@ -5803,7 +6709,7 @@ def course_management_view(request):
         current_semester = Semester.objects.filter(is_active=True).first()
         if not current_semester:
             messages.warning(request, "请先设置当前学期")
-            return redirect("admin:grading_semester_add")
+            return redirect("grading:semester_add")
 
         # 获取当前用户的课程
         user_courses = get_user_courses_optimized(request.user, semester=current_semester)
@@ -6165,7 +7071,11 @@ def semester_management_view(request):
         # 使用 annotate 优化查询，避免 N+1 问题
         from django.db.models import Count
 
-        semesters = semesters.annotate(courses_count=Count("courses"))
+        if hasattr(semesters, "annotate"):
+            semesters = semesters.annotate(courses_count=Count("courses"))
+        else:
+            for semester in semesters:
+                semester.courses_count = semester.courses.count()
 
         for semester in semesters:
             semester.can_delete = not semester.is_active and semester.courses_count == 0
@@ -6744,15 +7654,8 @@ def repository_management_view(request):
         tenant = getattr(request, "tenant", None)
         repositories = service.list_repositories(request.user, tenant=tenant)
 
-        # 获取用户的所有班级（用于创建仓库时选择）
-        from grading.services.class_service import ClassService
-
-        class_service = ClassService()
-        classes = class_service.list_classes_by_teacher(request.user, tenant=tenant)
-
         context = {
             "repositories": repositories,
-            "classes": classes,
             "page_title": "仓库管理",
         }
 
@@ -6764,41 +7667,264 @@ def repository_management_view(request):
         return redirect("grading:index")
 
 
+def _build_git_auth_url(git_url: str, username: str = "", password: str = "") -> str:
+    if not username or not password:
+        return git_url
+
+    from urllib.parse import urlparse, urlunparse
+
+    parsed = urlparse(git_url)
+    if parsed.scheme not in ["http", "https"]:
+        return git_url
+
+    netloc = f"{username}:{password}@{parsed.netloc}"
+    return urlunparse(
+        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+def _get_remote_default_branch(git_url: str, username: str = "", password: str = "") -> str | None:
+    auth_url = _build_git_auth_url(git_url, username=username, password=password)
+    try:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        result = subprocess.run(
+            ["git", "ls-remote", "--symref", auth_url, "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            if line.startswith("ref: ") and "\tHEAD" in line:
+                ref = line.split("\t", 1)[0].strip()
+                if ref.startswith("ref: refs/heads/"):
+                    return ref.replace("ref: refs/heads/", "").strip()
+    except Exception:
+        return None
+    return None
+
+
+def _get_remote_branches(git_url: str, username: str = "", password: str = "") -> list[str]:
+    auth_url = _build_git_auth_url(git_url, username=username, password=password)
+    branches = []
+    try:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", auth_url],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            ref = parts[1].strip()
+            if ref.startswith("refs/heads/"):
+                branches.append(ref.replace("refs/heads/", ""))
+    except Exception:
+        return []
+    return sorted(set(branches))
+
+
+
 @login_required
 @require_http_methods(["POST"])
 def add_repository_view(request):
     """添加仓库"""
     try:
-        from grading.models import Class
+        from grading.models import Class, Repository
+        from django.db.models import Q
         from grading.services.repository_service import RepositoryService
+        from urllib.parse import urlparse
 
         service = RepositoryService()
 
+        current_user = getattr(request, "user", None)
+        if not current_user or not current_user.is_authenticated:
+            return JsonResponse({"status": "error", "message": "Please login"})
+
+        def _infer_repo_name(repo_url: str) -> str:
+            repo_url = repo_url.strip().rstrip("/")
+            if repo_url.startswith("git@") and ":" in repo_url:
+                path = repo_url.split(":", 1)[1]
+            else:
+                parsed = urlparse(repo_url)
+                path = parsed.path or repo_url
+            name = os.path.basename(path)
+            if name.endswith(".git"):
+                name = name[:-4]
+            return name or "repository"
+
+        def _parse_git_url(repo_url: str) -> tuple[str, str]:
+            repo_url = repo_url.strip()
+            if repo_url.startswith("git@") and ":" in repo_url:
+                host = repo_url.split("@", 1)[1].split(":", 1)[0]
+                return "ssh", host
+            parsed = urlparse(repo_url)
+            scheme = (parsed.scheme or "").lower()
+            host = parsed.hostname or ""
+            if repo_url.startswith("ssh://"):
+                scheme = "ssh"
+            return scheme, host
+
+        def _repo_identity(repo_url: str) -> str:
+            repo_url = (repo_url or "").strip()
+            if not repo_url:
+                return ""
+            host = ""
+            path = ""
+            if repo_url.startswith("git@") and ":" in repo_url:
+                host = repo_url.split("@", 1)[1].split(":", 1)[0]
+                path = repo_url.split(":", 1)[1]
+            else:
+                parsed = urlparse(repo_url)
+                host = parsed.hostname or ""
+                path = parsed.path or repo_url
+            path = path.strip().lstrip("/")
+            if path.endswith(".git"):
+                path = path[:-4]
+            return f"{host.lower()}/{path.lower()}"
+
         name = request.POST.get("name", "").strip()
-        repo_type = request.POST.get("repo_type", "filesystem")
+        repo_url = request.POST.get("repo_url", "").strip()
+        if not repo_url:
+            repo_url = request.POST.get("git_url", "").strip()
+        if not name and repo_url:
+            name = _infer_repo_name(repo_url)
+        repo_type = request.POST.get("repo_type", "git").strip() or "git"
         description = request.POST.get("description", "").strip()
         class_id = request.POST.get("class_id", "").strip()
 
-        # 获取班级对象
+        # 班级关联已移除，保持空
         class_obj = None
-        if class_id:
-            try:
-                class_obj = Class.objects.get(id=class_id, course__teacher=request.user)
-            except Class.DoesNotExist:
-                return JsonResponse({"status": "error", "message": "班级不存在或无权限访问"})
 
         # 获取租户
         tenant = getattr(request, "tenant", None)
 
         # 根据仓库类型创建
         if repo_type == "git":
-            git_url = request.POST.get("git_url", "").strip()
-            git_branch = request.POST.get("git_branch", "main").strip()
+            git_url = repo_url
+            git_branch = request.POST.get("git_branch", "").strip()
             git_username = request.POST.get("git_username", "").strip()
             git_password = request.POST.get("git_password", "").strip()
+            ssh_public_key = request.POST.get("ssh_public_key", "").strip()
+            if not ssh_public_key and "ssh_public_key_file" in request.FILES:
+                uploaded_key = request.FILES["ssh_public_key_file"]
+                try:
+                    ssh_public_key = uploaded_key.read().decode("utf-8", errors="ignore").strip()
+                except Exception:
+                    ssh_public_key = ""
+
+            scheme, host = _parse_git_url(git_url)
+            requires_credentials = scheme in ("http", "https")
+            saved_username = ""
+            saved_password = ""
+            if requires_credentials and host:
+                saved_repo = (
+                    Repository.objects.filter(owner=current_user, repo_type="git")
+                    .filter(git_url__icontains=host)
+                    .filter(Q(git_url__startswith="http://") | Q(git_url__startswith="https://"))
+                    .exclude(git_password="")
+                    .order_by("-updated_at")
+                    .first()
+                )
+                if saved_repo:
+                    saved_username = saved_repo.git_username or ""
+                    saved_password = saved_repo.git_password or ""
+
+            if requires_credentials:
+                used_saved_credentials = False
+                if not git_password and saved_password:
+                    git_password = saved_password
+                    used_saved_credentials = True
+                if not git_username and saved_username:
+                    git_username = saved_username
+                    used_saved_credentials = True
+                if not git_password:
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "code": "credential_required",
+                            "message": "HTTPS 仓库需要认证信息，系统未找到已保存凭据，请输入用户名和密码/Token。",
+                        }
+                    )
+                is_valid, error_message = service.validate_git_connection(
+                    git_url=git_url,
+                    branch=git_branch,
+                    username=git_username,
+                    password=git_password,
+                )
+                if not is_valid:
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "code": "credential_invalid",
+                            "message": f"认证失败：{error_message}",
+                        }
+                    )
+            elif scheme == "ssh":
+                if ssh_public_key:
+                    git_password = ssh_public_key
+                elif host:
+                    saved_ssh_repo = (
+                        Repository.objects.filter(owner=current_user, repo_type="git")
+                        .filter(git_url__icontains=host)
+                        .filter(Q(git_url__startswith="git@") | Q(git_url__startswith="ssh://"))
+                        .exclude(git_password="")
+                        .order_by("-updated_at")
+                        .first()
+                    )
+                    if saved_ssh_repo:
+                        git_password = saved_ssh_repo.git_password or ""
+                if not git_password:
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "code": "credential_required_ssh",
+                            "message": "Git@ ???? SSH ??????????????????",
+                        }
+                    )
+                if not git_password.startswith("ssh-") or len(git_password.split()) < 2:
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "message": "SSH ???????????????????",
+                        }
+                    )
+
+            if not git_branch:
+                detected_branch = _get_remote_default_branch(
+                    git_url=git_url, username=git_username, password=git_password
+                )
+                git_branch = detected_branch or "main"
+
+            repo_identity = _repo_identity(git_url)
+            if repo_identity:
+                existing_repos = Repository.objects.filter(owner=current_user, repo_type="git")
+                for repo in existing_repos:
+                    existing_url = repo.git_url or repo.url or ""
+                    if _repo_identity(existing_url) == repo_identity:
+                        return JsonResponse(
+                            {
+                                "status": "error",
+                                "message": "仓库已存在，请不要重复添加。",
+                            }
+                        )
 
             repository = service.create_git_repository(
-                teacher=request.user,
+                teacher=current_user,
                 class_obj=class_obj,
                 name=name,
                 git_url=git_url,
@@ -6812,7 +7938,7 @@ def add_repository_view(request):
             allocated_space_mb = int(request.POST.get("allocated_space_mb", "1024"))
 
             repository = service.create_filesystem_repository(
-                teacher=request.user,
+                teacher=current_user,
                 class_obj=class_obj,
                 name=name,
                 allocated_space_mb=allocated_space_mb,
@@ -6839,12 +7965,54 @@ def add_repository_view(request):
         logger.error(f"创建仓库失败: {str(e)}")
         return JsonResponse({"status": "error", "message": str(e)})
     except Exception as e:
-        logger.error(f"创建仓库失败: {str(e)}")
+        logger.exception("创建仓库失败")
         return JsonResponse({"status": "error", "message": f"创建仓库失败: {str(e)}"})
 
 
 @login_required
-@require_http_methods(["POST"])
+@require_http_methods(["GET"])
+def get_repository_branches_view(request):
+    """获取远程仓库的分支列表"""
+    try:
+        current_user = getattr(request, "user", None)
+        if not current_user or not current_user.is_authenticated:
+            return JsonResponse({"status": "error", "message": "Please login"})
+
+        repo_id = request.GET.get("repo_id")
+        if not repo_id:
+            return JsonResponse({"status": "error", "message": "仓库ID不能为空"})
+
+        try:
+            repo = Repository.objects.get(id=repo_id, owner=current_user, is_active=True)
+        except Repository.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "仓库不存在"})
+
+        if repo.repo_type != "git":
+            return JsonResponse({"status": "error", "message": "非 Git 仓库不支持分支列表"})
+
+        git_url = (repo.git_url or repo.url or "").strip()
+        if not git_url:
+            return JsonResponse({"status": "error", "message": "Git 仓库URL不能为空"})
+
+        branches = _get_remote_branches(
+            git_url=git_url,
+            username=repo.git_username or "",
+            password=repo.git_password or "",
+        )
+        if not branches:
+            return JsonResponse({"status": "error", "message": "读取远程分支失败"})
+
+        return JsonResponse(
+            {
+                "status": "success",
+                "branches": branches,
+                "current": repo.git_branch or repo.branch or "main",
+            }
+        )
+    except Exception as e:
+        logger.error(f"获取远程分支失败: {str(e)}")
+        return JsonResponse({"status": "error", "message": f"获取分支失败: {str(e)}"})
+
 def update_repository_view(request):
     """更新仓库信息"""
     try:
@@ -7027,7 +8195,7 @@ def validate_git_connection_view(request):
         service = RepositoryService()
 
         git_url = request.POST.get("git_url", "").strip()
-        git_branch = request.POST.get("git_branch", "main").strip()
+        git_branch = request.POST.get("git_branch", "").strip()
         git_username = request.POST.get("git_username", "").strip()
         git_password = request.POST.get("git_password", "").strip()
 
@@ -7804,6 +8972,227 @@ def batch_grade_to_registry(request, homework_id):
         resolution_meta = {}
 
         manual_relative_path = (request.POST.get("relative_path") or "").strip()
+        repo_id = (request.POST.get("repo_id") or "").strip()
+        repo_for_git = None
+        if repo_id:
+            repo_for_git = (
+                Repository.objects.filter(id=repo_id, owner=request.user, is_active=True)
+                .select_related("tenant")
+                .first()
+            )
+
+        if repo_for_git and repo_for_git.repo_type == "git":
+            try:
+                adapter = _build_git_adapter(repo_for_git)
+                rel_path = (manual_relative_path or "").replace("\\", "/").strip("/")
+                if not rel_path:
+                    return error_response("缺少作业目录路径", status_code=400)
+
+                parts = [p for p in rel_path.split("/") if p]
+                course_name = ""
+                class_name = ""
+                homework_folder = ""
+                if len(parts) >= 3:
+                    course_name, class_name, homework_folder = parts[0], parts[1], parts[2]
+                elif len(parts) == 2:
+                    course_name = homework.course.name
+                    class_name, homework_folder = parts[0], parts[1]
+                else:
+                    return error_response("作业目录路径不完整", status_code=400)
+
+                class_dir_remote = "/".join([p for p in [course_name, class_name] if p])
+                homework_dir_remote = "/".join(
+                    [p for p in [class_dir_remote, homework_folder] if p]
+                )
+
+                class_entries = adapter.list_directory(class_dir_remote)
+                registry_name = ""
+                for entry in class_entries:
+                    if entry.get("type") != "file":
+                        continue
+                    name = entry.get("name") or ""
+                    lower_name = name.lower()
+                    if name.startswith("~$"):
+                        continue
+                    if lower_name.endswith(".xlsx") and "登分册" in name:
+                        registry_name = name
+                        break
+                if not registry_name:
+                    return error_response("未找到成绩登分册文件", status_code=404)
+
+                registry_bytes = adapter.read_file(
+                    f"{class_dir_remote}/{registry_name}".replace("\\", "/")
+                )
+
+                homework_entries = adapter.list_directory(homework_dir_remote)
+                word_entries = [
+                    entry
+                    for entry in homework_entries
+                    if entry.get("type") == "file"
+                    and (entry.get("name") or "").lower().endswith(".docx")
+                ]
+
+                temp_root = tempfile.mkdtemp(prefix="huali-grading-")
+                class_dir_full_path = os.path.join(temp_root, course_name or "course", class_name)
+                homework_dir_full_path = os.path.join(class_dir_full_path, homework_folder)
+                os.makedirs(homework_dir_full_path, exist_ok=True)
+
+                registry_path = os.path.join(class_dir_full_path, registry_name)
+                with open(registry_path, "wb") as registry_file:
+                    registry_file.write(registry_bytes)
+
+                for entry in word_entries:
+                    name = entry.get("name") or ""
+                    if not name:
+                        continue
+                    content = adapter.read_file(
+                        f"{homework_dir_remote}/{name}".replace("\\", "/")
+                    )
+                    with open(os.path.join(homework_dir_full_path, name), "wb") as out_file:
+                        out_file.write(content)
+
+                resolved_class_name = class_name or "未知"
+
+                tenant = None
+                if hasattr(request, "tenant"):
+                    tenant = request.tenant
+                elif hasattr(request.user, "profile"):
+                    tenant = request.user.profile.tenant
+
+                service = GradeRegistryWriterService(
+                    user=request.user,
+                    tenant=tenant,
+                    scenario=GradeRegistryWriterService.SCENARIO_GRADING_SYSTEM,
+                )
+
+                result = service.process_grading_system_scenario(
+                    homework_dir=homework_dir_full_path,
+                    class_dir=class_dir_full_path,
+                    progress_tracker=progress_tracker,
+                )
+
+                if result["success"]:
+                    registry_bytes = b""
+                    try:
+                        with open(result["registry_path"], "rb") as registry_file:
+                            registry_bytes = registry_file.read()
+                    except OSError:
+                        registry_bytes = b""
+                    registry_download = ""
+                    if registry_bytes:
+                        encoded = base64.b64encode(registry_bytes).decode("utf-8")
+                        registry_download = (
+                            "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;"
+                            f"base64,{encoded}"
+                        )
+
+                    # Push updated registry back to remote
+                    try:
+                        workdir = tempfile.mkdtemp(prefix="huali-grading-git-")
+                        auth_url = _build_git_auth_url(
+                            repo_for_git.git_url or repo_for_git.url or "",
+                            username=repo_for_git.git_username or "",
+                            password=repo_for_git.git_password or "",
+                        )
+                        branch = (repo_for_git.git_branch or repo_for_git.branch or "main").strip()
+
+                        def _run_git(cmd_args):
+                            env = os.environ.copy()
+                            env["GIT_TERMINAL_PROMPT"] = "0"
+                            env["GIT_ASKPASS"] = "echo"
+                            if auth_url.startswith("git@") or auth_url.startswith("ssh://"):
+                                ssh_key_path = os.path.expanduser("~/.ssh/id_ed25519")
+                                if not os.path.isfile(ssh_key_path):
+                                    ssh_key_path = os.path.expanduser("~/.ssh/id_rsa")
+                                if not os.path.isfile(ssh_key_path):
+                                    raise RuntimeError(f"未找到系统用户私钥: {ssh_key_path}")
+                                env["GIT_SSH_COMMAND"] = (
+                                    f"ssh -i \"{ssh_key_path}\" -o BatchMode=yes "
+                                    "-o StrictHostKeyChecking=no -o ConnectTimeout=10"
+                                )
+                            result = subprocess.run(
+                                ["git"] + cmd_args,
+                                cwd=workdir,
+                                env=env,
+                                capture_output=True,
+                                text=False,
+                            )
+                            if result.returncode != 0:
+                                stderr = result.stderr or b""
+                                try:
+                                    stderr_text = stderr.decode("utf-8")
+                                except UnicodeDecodeError:
+                                    stderr_text = stderr.decode("gbk", errors="replace")
+                                raise RuntimeError(
+                                    f"{' '.join(cmd_args)} failed: {stderr_text.strip()}"
+                                )
+
+                        _run_git(["init"])
+                        _run_git(["config", "user.name", "huali-batch"])
+                        _run_git(["config", "user.email", "huali-batch@local"])
+                        _run_git(["remote", "add", "origin", auth_url])
+                        _run_git(["fetch", "--depth", "1", "origin", branch])
+                        _run_git(["checkout", "-B", branch, "FETCH_HEAD"])
+
+                        repo_registry_path = os.path.join(
+                            workdir, course_name or "course", class_name, registry_name
+                        )
+                        os.makedirs(os.path.dirname(repo_registry_path), exist_ok=True)
+                        with open(repo_registry_path, "wb") as registry_file:
+                            registry_file.write(registry_bytes)
+
+                        _run_git(["add", repo_registry_path])
+                        _run_git(
+                            ["commit", "-m", f"Update registry: {course_name}/{class_name}/{homework_folder}"]
+                        )
+                        _run_git(["push", "origin", branch])
+                    except Exception as e:
+                        return error_response(f"推送登分册失败: {str(e)}", status_code=500)
+
+                    return create_success_response(
+                        data={
+                            "homework_number": result["homework_number"],
+                            "homework_name": homework.title,
+                            "course_name": homework.course.name,
+                            "class_name": resolved_class_name,
+                            "summary": result["statistics"],
+                            "details": {
+                                "processed_files": result["processed_files"],
+                                "failed_files": result["failed_files"],
+                                "skipped_files": result["skipped_files"],
+                            },
+                            "registry_path": result["registry_path"],
+                            "registry_download": registry_download,
+                            "registry_filename": registry_name,
+                            "tracking_id": tracking_id,
+                        },
+                        message="批量登分完成",
+                        response_format="success",
+                    )
+
+                return error_response(
+                    result.get("error_message", "批量登分失败"),
+                    status_code=500,
+                )
+            except Exception as e:
+                logger.error("批量登分远程处理失败: %s", str(e), exc_info=True)
+                
+                # 检查是否为网络连接问题
+                error_str = str(e).lower()
+                if any(keyword in error_str for keyword in [
+                    "could not resolve hostname", 
+                    "name or service not known", 
+                    "network unreachable", 
+                    "connection timed out",
+                    "connection closed",
+                    "could not read from remote repository"
+                ]):
+                    return error_response(
+                        "网络连接失败，无法访问远程Git仓库。请检查网络连接或稍后重试。", 
+                        status_code=503  # Service Unavailable
+                    )
+                else:
+                    return error_response(f"批量登分失败: {str(e)}", status_code=500)
         if manual_relative_path:
             manual_resolution, manual_meta = _resolve_homework_directory_by_relative_path(
                 manual_relative_path, user_repositories
