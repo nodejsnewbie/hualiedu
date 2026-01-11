@@ -31,6 +31,10 @@
 """
 
 import logging
+from grading.services.storage_adapter import RemoteAccessError
+from grading.services.repository_service import RepositoryService
+from grading.services.git_storage_adapter import GitStorageAdapter
+from urllib.parse import urlparse
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -45,7 +49,70 @@ from grading.services.assignment_management_service import AssignmentManagementS
 logger = logging.getLogger(__name__)
 
 
-@login_required
+def _get_git_url_scheme(git_url: str) -> str:
+    if not git_url:
+        return ""
+    if git_url.startswith("git@"):
+        return "ssh"
+    parsed = urlparse(git_url)
+    scheme = (parsed.scheme or "").lower()
+    if git_url.startswith("ssh://"):
+        return "ssh"
+    return scheme
+
+
+def _looks_like_private_key(value: str) -> bool:
+    if not value:
+        return False
+    normalized = value.strip()
+    if "PRIVATE KEY" in normalized and "BEGIN" in normalized:
+        return True
+    return False
+
+
+def _validate_git_credentials(git_url: str, git_branch: str, git_username: str, git_password: str):
+    scheme = _get_git_url_scheme(git_url)
+    service = RepositoryService()
+
+    if not scheme:
+        return False, "Git 仓库地址格式不正确"
+
+    if scheme in ("http", "https"):
+        if not git_username or not git_password:
+            return False, "HTTPS 仓库需要用户名和密码/Token"
+        is_valid, error_message = service.validate_git_connection(
+            git_url=git_url, branch=git_branch, username=git_username, password=git_password
+        )
+        if not is_valid:
+            return False, error_message
+        return True, ""
+
+    if scheme == "ssh":
+        if not git_password:
+            return False, "SSH 仓库需要提供私钥"
+        if not _looks_like_private_key(git_password):
+            return False, "SSH 私钥格式不正确"
+        try:
+            adapter = GitStorageAdapter(
+                git_url=git_url,
+                branch=git_branch or "main",
+                username=git_username or "",
+                password=git_password,
+            )
+            adapter._execute_git_command(["ls-remote", "{url}"], use_auth=True)
+        except RemoteAccessError as exc:
+            message = getattr(exc, "user_message", "") or str(exc)
+            return False, f"SSH 认证失败：{message}"
+        return True, ""
+
+    is_valid, error_message = service.validate_git_connection(
+        git_url=git_url, branch=git_branch, username="", password=""
+    )
+    if not is_valid:
+        return False, error_message
+    return True, ""
+
+
 def assignment_list_view(request):
     """作业管理列表页面
 
@@ -287,7 +354,7 @@ def assignment_create_view(request):
 
             # 获取表单数据
             name = request.POST.get("name", "").strip()
-            storage_type = request.POST.get("storage_type", "").strip()
+            storage_type = request.POST.get("storage_type", "git").strip() or "git"
             description = request.POST.get("description", "").strip()
             course_id = request.POST.get("course_id")
             class_id = request.POST.get("class_id")
@@ -296,8 +363,8 @@ def assignment_create_view(request):
             if not name:
                 return JsonResponse({"status": "error", "message": "作业名称不能为空"})
 
-            if not storage_type or storage_type not in ["git", "filesystem"]:
-                return JsonResponse({"status": "error", "message": "请选择提交方式"})
+            if storage_type != "git":
+                return JsonResponse({"status": "error", "message": "作业管理仅支持 Git 仓库"})
 
             if not course_id:
                 return JsonResponse({"status": "error", "message": "请选择课程"})
@@ -324,6 +391,15 @@ def assignment_create_view(request):
 
                 if not git_url:
                     return JsonResponse({"status": "error", "message": "Git仓库URL不能为空"})
+
+                is_valid, error_message = _validate_git_credentials(
+                    git_url=git_url,
+                    git_branch=git_branch or "main",
+                    git_username=git_username,
+                    git_password=git_password,
+                )
+                if not is_valid:
+                    return JsonResponse({"status": "error", "message": error_message})
 
                 create_params.update(
                     {
@@ -419,6 +495,25 @@ def assignment_edit_view(request, assignment_id):
                         update_fields["git_password"] = git_password
 
             # 执行更新
+            if assignment.storage_type == "git":
+                git_url = update_fields.get("git_url", assignment.git_url or "")
+                git_branch = update_fields.get("git_branch", assignment.git_branch or "main")
+                git_username = update_fields.get("git_username", assignment.git_username or "")
+                git_password = update_fields.get("git_password", "")
+
+                git_url_changed = "git_url" in update_fields and git_url != (assignment.git_url or "")
+                needs_validation = git_url_changed or "git_username" in update_fields or "git_password" in update_fields
+
+                if needs_validation:
+                    is_valid, error_message = _validate_git_credentials(
+                        git_url=git_url,
+                        git_branch=git_branch or "main",
+                        git_username=git_username,
+                        git_password=git_password,
+                    )
+                    if not is_valid:
+                        return JsonResponse({"status": "error", "message": error_message})
+
             assignment = service.update_assignment(
                 assignment=assignment, teacher=request.user, **update_fields
             )

@@ -585,6 +585,7 @@ class AssignmentManagementService:
                     or git_url.startswith("https://")
                     or git_url.startswith("git@")
                     or git_url.startswith("git://")
+                    or git_url.startswith("ssh://")
                 ):
                     raise ValidationError(
                         f"Invalid Git URL format: {git_url}",

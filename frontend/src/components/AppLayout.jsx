@@ -82,6 +82,11 @@ export default function AppLayout() {
                   成绩登记册
                 </NavLink>
               </li>
+              <li className="nav-item">
+                <NavLink className="nav-link" to="/toolbox">
+                  工具箱
+                </NavLink>
+              </li>
               <li className="nav-item dropdown">
                 <a
                   className="nav-link dropdown-toggle"

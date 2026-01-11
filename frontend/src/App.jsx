@@ -21,6 +21,12 @@ import SuperAdminDashboard from './pages/SuperAdminDashboard.jsx'
 import TenantManagement from './pages/TenantManagement.jsx'
 import TenantAdminDashboard from './pages/TenantAdminDashboard.jsx'
 import TenantUserManagement from './pages/TenantUserManagement.jsx'
+import ToolboxAssignmentGradeImport from './pages/ToolboxAssignmentGradeImport.jsx'
+import ToolboxBatchUnzip from './pages/ToolboxBatchUnzip.jsx'
+import ToolboxHome from './pages/ToolboxHome.jsx'
+import ToolboxPptToPdf from './pages/ToolboxPptToPdf.jsx'
+import ToolboxTaskDetail from './pages/ToolboxTaskDetail.jsx'
+import ToolboxTaskList from './pages/ToolboxTaskList.jsx'
 
 export default function App() {
   return (
@@ -47,6 +53,12 @@ export default function App() {
           <Route path="/tenant-management" element={<TenantManagement />} />
           <Route path="/tenant-admin" element={<TenantAdminDashboard />} />
           <Route path="/tenant-users" element={<TenantUserManagement />} />
+          <Route path="/toolbox" element={<ToolboxHome />} />
+          <Route path="/toolbox/ppt-to-pdf" element={<ToolboxPptToPdf />} />
+          <Route path="/toolbox/assignment-grade-import" element={<ToolboxAssignmentGradeImport />} />
+          <Route path="/toolbox/batch-unzip" element={<ToolboxBatchUnzip />} />
+          <Route path="/toolbox/tasks" element={<ToolboxTaskList />} />
+          <Route path="/toolbox/tasks/:taskId" element={<ToolboxTaskDetail />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

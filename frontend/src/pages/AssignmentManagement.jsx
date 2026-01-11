@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { apiFetch } from '../api/client.js'
 
 const emptyAssignment = {
   name: '',
-  storage_type: '',
-  description: '',
   course_id: '',
   class_id: '',
   git_url: '',
@@ -13,18 +11,41 @@ const emptyAssignment = {
   git_password: '',
 }
 
+const getGitAuthMode = (gitUrl) => {
+  const value = (gitUrl || '').trim()
+  if (!value) return ''
+  if (value.startsWith('http://') || value.startsWith('https://')) return 'http'
+  if (value.startsWith('git@') || value.startsWith('ssh://')) return 'ssh'
+  if (value.startsWith('git://')) return 'git'
+  return ''
+}
+
+const getGitAuthLabel = (mode) => {
+  if (mode === 'ssh') return 'SSH 私钥'
+  return 'Git 密码 / Token'
+}
+
+const getGitAuthHint = (mode) => {
+  if (mode === 'http') return 'HTTPS 仓库需要用户名与密码/Token。'
+  if (mode === 'ssh') return 'SSH 仓库需要私钥内容（以 -----BEGIN 开头）。'
+  if (mode === 'git') return 'git:// 协议通常无需凭据。'
+  return '请输入正确的 Git 仓库地址。'
+}
+
 export default function AssignmentManagement() {
   const [assignments, setAssignments] = useState([])
   const [courses, setCourses] = useState([])
   const [classes, setClasses] = useState([])
-  const [filters, setFilters] = useState({ course_id: '', class_id: '', storage_type: '' })
+  const [filters, setFilters] = useState({ course_id: '', class_id: '' })
   const [form, setForm] = useState(emptyAssignment)
   const [editing, setEditing] = useState(null)
+  const [editingSource, setEditingSource] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const isGit = useMemo(() => form.storage_type === 'git', [form.storage_type])
+  const gitAuthMode = useMemo(() => getGitAuthMode(form.git_url), [form.git_url])
+  const editAuthMode = useMemo(() => (editing ? getGitAuthMode(editing.git_url) : ''), [editing])
 
   const loadAssignments = async (params = filters) => {
     setLoading(true)
@@ -33,7 +54,6 @@ export default function AssignmentManagement() {
       const query = new URLSearchParams()
       if (params.course_id) query.append('course_id', params.course_id)
       if (params.class_id) query.append('class_id', params.class_id)
-      if (params.storage_type) query.append('storage_type', params.storage_type)
 
       const response = await apiFetch(`/grading/api/assignments/?${query.toString()}`)
       const data = await response.json().catch(() => null)
@@ -65,7 +85,7 @@ export default function AssignmentManagement() {
   }
 
   const resetFilters = () => {
-    const cleared = { course_id: '', class_id: '', storage_type: '' }
+    const cleared = { course_id: '', class_id: '' }
     setFilters(cleared)
     loadAssignments(cleared)
   }
@@ -93,22 +113,43 @@ export default function AssignmentManagement() {
     await fetchClassesForCourse(courseId)
   }
 
+  const validateGitAuth = (mode, username, password) => {
+    if (!mode) return '请输入正确的 Git 仓库地址'
+    if (mode === 'http') {
+      if (!username.trim() || !password) return 'HTTPS 仓库需要用户名和密码/Token'
+      return ''
+    }
+    if (mode === 'ssh') {
+      if (!password.trim()) return 'SSH 仓库需要私钥'
+      return ''
+    }
+    return ''
+  }
+
   const handleCreate = async (event) => {
     event.preventDefault()
     setSaving(true)
     setError('')
     try {
+      const authError = validateGitAuth(gitAuthMode, form.git_username, form.git_password)
+      if (authError) {
+        setError(authError)
+        setSaving(false)
+        return
+      }
+
       const payload = new FormData()
       payload.append('name', form.name)
-      payload.append('storage_type', form.storage_type)
+      payload.append('storage_type', 'git')
       payload.append('course_id', form.course_id)
       payload.append('class_id', form.class_id)
-      if (form.description) payload.append('description', form.description)
-      if (isGit) {
-        payload.append('git_url', form.git_url)
-        payload.append('git_branch', form.git_branch || 'main')
-        if (form.git_username) payload.append('git_username', form.git_username)
-        if (form.git_password) payload.append('git_password', form.git_password)
+      payload.append('git_url', form.git_url)
+      payload.append('git_branch', form.git_branch || 'main')
+      if (gitAuthMode === 'http') {
+        payload.append('git_username', form.git_username.trim())
+        payload.append('git_password', form.git_password)
+      } else if (gitAuthMode === 'ssh') {
+        payload.append('git_password', form.git_password)
       }
 
       const response = await apiFetch('/grading/assignments/create/', {
@@ -129,13 +170,16 @@ export default function AssignmentManagement() {
   }
 
   const startEdit = (assignment) => {
-    setEditing({
+    const next = {
       id: assignment.id,
       name: assignment.name,
-      description: assignment.description || '',
       git_url: assignment.git_url || '',
       git_branch: assignment.git_branch || 'main',
-    })
+      git_username: '',
+      git_password: '',
+    }
+    setEditing(next)
+    setEditingSource({ ...next })
   }
 
   const handleUpdate = async (event) => {
@@ -144,12 +188,26 @@ export default function AssignmentManagement() {
     setSaving(true)
     setError('')
     try {
+      const gitUrlChanged = editingSource ? editing.git_url !== editingSource.git_url : true
+      const needsAuth = gitUrlChanged || editing.git_username || editing.git_password
+      if (needsAuth) {
+        const authError = validateGitAuth(editAuthMode, editing.git_username, editing.git_password)
+        if (authError) {
+          setError(authError)
+          setSaving(false)
+          return
+        }
+      }
+
       const payload = new FormData()
       payload.append('assignment_id', editing.id)
       payload.append('name', editing.name)
-      if (editing.description) payload.append('description', editing.description)
-      if (editing.git_url) payload.append('git_url', editing.git_url)
-      if (editing.git_branch) payload.append('git_branch', editing.git_branch)
+      if (gitUrlChanged) payload.append('git_url', editing.git_url)
+      if (!editingSource || editing.git_branch !== editingSource.git_branch) {
+        payload.append('git_branch', editing.git_branch)
+      }
+      if (editing.git_username) payload.append('git_username', editing.git_username)
+      if (editing.git_password) payload.append('git_password', editing.git_password)
 
       const response = await apiFetch(`/grading/assignments/${editing.id}/edit/`, {
         method: 'POST',
@@ -160,6 +218,7 @@ export default function AssignmentManagement() {
         throw new Error((data && data.message) || '更新作业失败')
       }
       setEditing(null)
+      setEditingSource(null)
       loadAssignments()
     } catch (err) {
       setError(err.message || '更新作业失败')
@@ -194,7 +253,7 @@ export default function AssignmentManagement() {
           </div>
           <div className="card-body">
             <p className="text-muted small">
-              作业管理用于配置学生提交方式，Git 作业会直接读取远程仓库，文件上传作业会创建本地目录。
+              作业管理仅维护 Git 仓库地址，保存前会验证仓库连接。
             </p>
             {error ? <div className="alert alert-danger">{error}</div> : null}
             <form onSubmit={handleCreate}>
@@ -225,37 +284,44 @@ export default function AssignmentManagement() {
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label">存储方式</label>
-                <select className="form-select" name="storage_type" value={form.storage_type} onChange={handleFormChange} required>
-                  <option value="">请选择类型</option>
-                  <option value="filesystem">文件上传</option>
-                  <option value="git">Git 仓库</option>
-                </select>
+                <label className="form-label">Git 地址</label>
+                <input className="form-control" name="git_url" value={form.git_url} onChange={handleFormChange} required />
               </div>
-              {isGit ? (
-                <>
-                  <div className="mb-3">
-                    <label className="form-label">Git 地址</label>
-                    <input className="form-control" name="git_url" value={form.git_url} onChange={handleFormChange} required />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">Git 分支</label>
-                    <input className="form-control" name="git_branch" value={form.git_branch} onChange={handleFormChange} />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">Git 用户名</label>
-                    <input className="form-control" name="git_username" value={form.git_username} onChange={handleFormChange} />
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">Git 密码 / Token</label>
-                    <input className="form-control" type="password" name="git_password" value={form.git_password} onChange={handleFormChange} />
-                  </div>
-                </>
-              ) : null}
               <div className="mb-3">
-                <label className="form-label">描述</label>
-                <textarea className="form-control" name="description" rows="3" value={form.description} onChange={handleFormChange} />
+                <label className="form-label">Git 分支</label>
+                <input className="form-control" name="git_branch" value={form.git_branch} onChange={handleFormChange} />
               </div>
+              {gitAuthMode === 'http' ? (
+                <div className="mb-3">
+                  <label className="form-label">Git 用户名</label>
+                  <input className="form-control" name="git_username" value={form.git_username} onChange={handleFormChange} required />
+                </div>
+              ) : null}
+              {(gitAuthMode === 'http' || gitAuthMode === 'ssh') ? (
+                <div className="mb-3">
+                  <label className="form-label">{getGitAuthLabel(gitAuthMode)}</label>
+                  {gitAuthMode === 'ssh' ? (
+                    <textarea
+                      className="form-control"
+                      name="git_password"
+                      rows="4"
+                      value={form.git_password}
+                      onChange={handleFormChange}
+                      required
+                    />
+                  ) : (
+                    <input
+                      className="form-control"
+                      type="password"
+                      name="git_password"
+                      value={form.git_password}
+                      onChange={handleFormChange}
+                      required
+                    />
+                  )}
+                  <div className="form-text">{getGitAuthHint(gitAuthMode)}</div>
+                </div>
+              ) : null}
               <button className="btn btn-primary w-100" type="submit" disabled={saving}>
                 {saving ? '保存中...' : '创建作业'}
               </button>
@@ -265,17 +331,13 @@ export default function AssignmentManagement() {
         {editing ? (
           <div className="card mt-4">
             <div className="card-header">
-            <h6 className="mb-0">编辑作业</h6>
+              <h6 className="mb-0">编辑作业</h6>
             </div>
             <div className="card-body">
               <form onSubmit={handleUpdate}>
                 <div className="mb-3">
                   <label className="form-label">名称</label>
                   <input className="form-control" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
-                </div>
-                <div className="mb-3">
-                  <label className="form-label">描述</label>
-                  <textarea className="form-control" rows="3" value={editing.description} onChange={(event) => setEditing({ ...editing, description: event.target.value })} />
                 </div>
                 <div className="mb-3">
                   <label className="form-label">Git 地址</label>
@@ -285,11 +347,42 @@ export default function AssignmentManagement() {
                   <label className="form-label">Git 分支</label>
                   <input className="form-control" value={editing.git_branch} onChange={(event) => setEditing({ ...editing, git_branch: event.target.value })} />
                 </div>
+                {editAuthMode === 'http' ? (
+                  <div className="mb-3">
+                    <label className="form-label">Git 用户名</label>
+                    <input
+                      className="form-control"
+                      value={editing.git_username}
+                      onChange={(event) => setEditing({ ...editing, git_username: event.target.value })}
+                    />
+                  </div>
+                ) : null}
+                {(editAuthMode === 'http' || editAuthMode === 'ssh') ? (
+                  <div className="mb-3">
+                    <label className="form-label">{getGitAuthLabel(editAuthMode)}</label>
+                    {editAuthMode === 'ssh' ? (
+                      <textarea
+                        className="form-control"
+                        rows="4"
+                        value={editing.git_password}
+                        onChange={(event) => setEditing({ ...editing, git_password: event.target.value })}
+                      />
+                    ) : (
+                      <input
+                        className="form-control"
+                        type="password"
+                        value={editing.git_password}
+                        onChange={(event) => setEditing({ ...editing, git_password: event.target.value })}
+                      />
+                    )}
+                    <div className="form-text">{getGitAuthHint(editAuthMode)}</div>
+                  </div>
+                ) : null}
                 <div className="d-flex gap-2">
                   <button className="btn btn-primary" type="submit" disabled={saving}>
                     {saving ? '更新中...' : '更新'}
                   </button>
-                  <button className="btn btn-outline-secondary" type="button" onClick={() => setEditing(null)}>
+                  <button className="btn btn-outline-secondary" type="button" onClick={() => { setEditing(null); setEditingSource(null) }}>
                     取消
                   </button>
                 </div>
@@ -327,14 +420,6 @@ export default function AssignmentManagement() {
                   ))}
                 </select>
               </div>
-              <div className="col-md-4">
-                <label className="form-label">存储方式</label>
-                <select className="form-select" name="storage_type" value={filters.storage_type} onChange={handleFilterChange}>
-                  <option value="">全部</option>
-                  <option value="filesystem">文件上传</option>
-                  <option value="git">Git 仓库</option>
-                </select>
-              </div>
               <div className="col-12 d-flex gap-2">
                 <button className="btn btn-outline-primary" type="submit">
                   筛选
@@ -356,13 +441,13 @@ export default function AssignmentManagement() {
                     <div>
                       <h6 className="mb-1">{assignment.name}</h6>
                       <div className="text-muted small">
-                        {assignment.course?.name} · {assignment.class_obj?.name}
+                        {(assignment.course?.name || '') + ' · ' + (assignment.class_obj?.name || '')}
                       </div>
                       <div className="text-muted small">
-                  {assignment.storage_type === 'git' ? 'Git' : '文件上传'}
-                  {assignment.created_at ? (
-                    <> · 创建时间 {new Date(assignment.created_at).toLocaleString()}</>
-                  ) : null}
+                        Git
+                        {assignment.created_at ? (
+                          <> · 创建时间 {new Date(assignment.created_at).toLocaleString()}</>
+                        ) : null}
                       </div>
                     </div>
                     <div className="d-flex gap-2">
@@ -374,7 +459,6 @@ export default function AssignmentManagement() {
                       </button>
                     </div>
                   </div>
-                  {assignment.description ? <div className="text-muted mt-2">{assignment.description}</div> : null}
                 </div>
               ))}
             </div>

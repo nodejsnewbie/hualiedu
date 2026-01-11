@@ -143,6 +143,16 @@ class GitStorageAdapter(StorageAdapter):
     def _is_ssh_url(self) -> bool:
         return self.git_url.startswith("git@") or self.git_url.startswith("ssh://")
 
+    def _write_ssh_key_tempfile(self, ssh_key: str) -> str:
+        key = (ssh_key or "").replace("\r\n", "\n").strip()
+        if not key.endswith("\n"):
+            key = f"{key}\n"
+        temp_file = tempfile.NamedTemporaryFile(delete=False, mode="w", encoding="utf-8")
+        temp_file.write(key)
+        temp_file.flush()
+        temp_file.close()
+        return temp_file.name
+
     def _get_repo_dir(self) -> str:
         repo_hash = hashlib.md5(self.git_url.encode("utf-8")).hexdigest()
         base_dir = os.path.join(tempfile.gettempdir(), "huali-edu-git")
@@ -300,38 +310,45 @@ class GitStorageAdapter(StorageAdapter):
         use_auth: bool = True,
         cwd: Optional[str] = None,
     ) -> bytes:
-        """执行 Git 命令
+        """?? Git ??
 
         Args:
-            args: Git 命令参数列表
-            timeout: 超时时间（秒）
-            use_auth: 是否使用认证 URL
+            args: Git ??????
+            timeout: ???????
+            use_auth: ?????? URL
 
         Returns:
-            命令输出（字节）
+            ????????
 
         Raises:
-            RemoteAccessError: 命令执行失败时抛出
+            RemoteAccessError: ?????????
         """
         url = self._auth_url if use_auth else self.git_url
 
-        # 构建完整命令
+        # ??????
         cmd = ["git", "-c", "core.quotepath=false"] + args
 
-        # 替换命令中的 URL 占位符
+        # ?????? URL ???
         cmd = [url if arg == "{url}" else arg for arg in cmd]
+
+        ssh_key_path = None
 
         try:
             env = os.environ.copy()
             env["GIT_TERMINAL_PROMPT"] = "0"
             env["GIT_ASKPASS"] = "echo"
             if self._is_ssh_url():
-                env["GIT_SSH_COMMAND"] = (
+                ssh_command = (
                     "ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=10"
                 )
+                if self.password and "PRIVATE KEY" in self.password:
+                    ssh_key_path = self._write_ssh_key_tempfile(self.password)
+                    ssh_command = f'{ssh_command} -i "{ssh_key_path}" -o IdentitiesOnly=yes'
+                env["GIT_SSH_COMMAND"] = ssh_command
+
             result = subprocess.run(
                 cmd,
-                env=env,  # 禁用交互式提示
+                env=env,  # ???????
                 capture_output=True,
                 timeout=timeout,
                 check=False,
@@ -341,7 +358,7 @@ class GitStorageAdapter(StorageAdapter):
             if result.returncode != 0:
                 error_msg = result.stderr.decode("utf-8", errors="ignore").strip()
 
-                # 根据错误类型提供友好的用户消息
+                # ???????????????
                 user_message = self._get_user_friendly_error(error_msg)
 
                 raise RemoteAccessError(
@@ -359,15 +376,21 @@ class GitStorageAdapter(StorageAdapter):
         except subprocess.TimeoutExpired:
             raise RemoteAccessError(
                 f"Git command timeout: {' '.join(cmd)}",
-                user_message="远程仓库访问超时，请稍后重试",
+                user_message="??????????????",
                 details={"command": " ".join(cmd), "timeout": timeout},
             )
         except FileNotFoundError:
             raise RemoteAccessError(
                 "Git command not found",
-                user_message="Git 服务暂时不可用，请联系管理员",
+                user_message="Git ??????????????",
                 details={"command": "git"},
             )
+        finally:
+            if ssh_key_path:
+                try:
+                    os.remove(ssh_key_path)
+                except OSError:
+                    pass
 
     def _get_user_friendly_error(self, error_msg: str) -> str:
         """将技术错误消息转换为用户友好的消息

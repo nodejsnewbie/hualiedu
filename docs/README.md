@@ -6,20 +6,22 @@
 - 默认端口：后端 8000，前端 5173（冲突时会自动切换）
 
 ## 目录
-- `hualiEdu/` Django 项目配置
-- `grading/` 作业与评分相关业务
-- `toolbox/` 通用工具
+- `backend/` Django 后端（API）
+  - `backend/hualiEdu/` 项目配置
+  - `backend/grading/` 作业与评分相关业务
+  - `backend/toolbox/` 通用工具
 - `frontend/` React 前端
 - `docs/` 文档（仅此一个）
 
 ## 本地开发
 ### 后端
-1. 安装依赖：`uv sync --all-extras`（或使用已有虚拟环境安装依赖）
-2. 运行迁移：`uv run python manage.py migrate`
-3. 启动服务：`uv run python manage.py runserver 127.0.0.1:8000`
+1. `cd backend`
+2. 安装依赖：`uv sync --all-extras`（或使用已有虚拟环境安装依赖）
+3. 运行迁移：`uv run python manage.py migrate`
+4. 启动服务：`uv run python manage.py runserver 127.0.0.1:8000`
    - 可选：`make runserver`
 
-后端配置文件为 `.env`，示例见 `env.example`。
+后端配置文件为 `backend/.env`，示例见 `backend/env.example`。
 
 ### 前端
 1. `cd frontend`
