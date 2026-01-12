@@ -8,7 +8,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from django.contrib.auth.models import User
 
-from .models import Assignment, Course, Semester, Tenant, UserProfile
+from .models import AssignmentSetting, Course, Semester, Tenant, UserProfile
 from .services.class_service import ClassService
 from .services.course_service import CourseService
 from .services.semester_manager import SemesterManager
@@ -150,7 +150,7 @@ def course_create_api(request):
 
     current_semester = Semester.objects.filter(is_active=True).first()
     if not current_semester:
-        return JsonResponse({"status": "error", "message": "请先设置当前学期"}, status=400)
+        return JsonResponse({"status": "error", "message": "请先设置当前学期"})
 
     tenant = getattr(request, "tenant", None)
     try:
@@ -518,10 +518,10 @@ def student_assignment_list_api(request):
         return JsonResponse({"status": "error", "message": "用户未绑定租户"}, status=400)
 
     assignments = (
-        Assignment.objects.filter(
-            tenant=profile.tenant, storage_type="filesystem", is_active=True
+        AssignmentSetting.objects.filter(
+            tenant=profile.tenant, repo_type="filesystem", is_active=True
         )
-        .select_related("course", "class_obj")
+        .select_related("tenant", "owner")
         .order_by("-created_at")
     )
 
@@ -529,8 +529,7 @@ def student_assignment_list_api(request):
         {
             "id": assignment.id,
             "name": assignment.name,
-            "course_name": assignment.course.name if assignment.course else "",
-            "class_name": assignment.class_obj.name if assignment.class_obj else "",
+            "filesystem_path": assignment.filesystem_path,
         }
         for assignment in assignments
     ]

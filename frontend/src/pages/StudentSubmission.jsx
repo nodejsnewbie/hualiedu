@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client.js'
 
 export default function StudentSubmission() {
@@ -112,89 +112,107 @@ export default function StudentSubmission() {
   }
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <h4 className="mb-0">学生提交</h4>
-      </div>
-      <div className="card-body">
-        {message ? <div className="alert alert-info">{message}</div> : null}
-        <form onSubmit={handleSubmit}>
-          <div className="mb-3">
-            <label className="form-label">课程</label>
-            <select
-              className="form-select"
-              value={selectedCourse}
-              onChange={(event) => {
-                setSelectedCourse(event.target.value)
-                setAssignmentId('')
-                setAssignmentNumber('')
-                setDirectories([])
-              }}
-            >
-              <option value="">全部课程</option>
-              {courseOptions.map((course) => (
-                <option key={course} value={course}>
-                  {course}
-                </option>
-              ))}
-            </select>
+    <div className="min-h-screen">
+      <div className="mx-auto w-full max-w-4xl px-4 py-8">
+        <header className="mb-6">
+          <h1 className="text-2xl font-semibold text-slate-900">学生提交</h1>
+          <p className="mt-1 text-sm text-slate-500">选择作业并上传文件。</p>
+        </header>
+
+        {message ? (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            {message}
           </div>
-          <div className="mb-3">
-            <label className="form-label">作业</label>
-            <select
-              className="form-select"
-              value={assignmentId}
-              onChange={handleAssignmentChange}
-              required
-            >
-              <option value="">请选择作业</option>
-              {filteredAssignments.map((assignment) => (
-                <option key={assignment.id} value={assignment.id}>
-                  {assignment.course_name} · {assignment.class_name} · {assignment.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mb-3">
-            <label className="form-label">作业次数目录</label>
-            <select
-              className="form-select"
-              value={assignmentNumber}
-              onChange={(event) => setAssignmentNumber(event.target.value)}
-              required
-              disabled={!assignmentId || loadingDirectories}
-            >
-              <option value="">
-                {loadingDirectories ? '加载中...' : '请选择作业次数'}
-              </option>
-              {directories.map((dir) => (
-                <option key={dir.name} value={dir.name}>
-                  {dir.name}
-                </option>
-              ))}
-            </select>
-            <div className="d-flex align-items-center gap-2 mt-2">
-              <button
-                className="btn btn-outline-primary btn-sm"
-                type="button"
-                onClick={createDirectory}
-                disabled={!assignmentId || creatingDirectory}
+        ) : null}
+
+        <section className="card-surface p-6">
+          <form className="space-y-4" onSubmit={handleSubmit}>
+            <div>
+              <label className="text-sm font-medium text-slate-700">课程</label>
+              <select
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                value={selectedCourse}
+                onChange={(event) => {
+                  setSelectedCourse(event.target.value)
+                  setAssignmentId('')
+                  setAssignmentNumber('')
+                  setDirectories([])
+                }}
               >
-                {creatingDirectory ? '创建中...' : '创建新作业目录'}
-              </button>
-              <span className="text-muted small">
-                未找到合适目录时可自动创建下一次作业目录。
-              </span>
+                <option value="">全部课程</option>
+                {courseOptions.map((course) => (
+                  <option key={course} value={course}>
+                    {course}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
-          <div className="mb-3">
-            <label className="form-label">文件</label>
-            <input className="form-control" type="file" onChange={(event) => setFile(event.target.files[0])} />
-          </div>
-          <button className="btn btn-primary" type="submit">
-            上传
-          </button>
-        </form>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">作业</label>
+              <select
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                value={assignmentId}
+                onChange={handleAssignmentChange}
+                required
+              >
+                <option value="">请选择作业</option>
+                {filteredAssignments.map((assignment) => (
+                  <option key={assignment.id} value={assignment.id}>
+                    {assignment.course_name} · {assignment.class_name} · {assignment.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">作业次数目录</label>
+              <select
+                className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                value={assignmentNumber}
+                onChange={(event) => setAssignmentNumber(event.target.value)}
+                required
+                disabled={!assignmentId || loadingDirectories}
+              >
+                <option value="">
+                  {loadingDirectories ? '加载中...' : '请选择作业次数'}
+                </option>
+                {directories.map((dir) => (
+                  <option key={dir.name} value={dir.name}>
+                    {dir.name}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <button
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                  type="button"
+                  onClick={createDirectory}
+                  disabled={!assignmentId || creatingDirectory}
+                >
+                  {creatingDirectory ? '创建中...' : '创建新作业目录'}
+                </button>
+                <span>未找到合适目录时，可自动创建下一次作业目录。</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700">文件</label>
+              <input
+                className="mt-2 block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-slate-700 hover:file:bg-slate-200"
+                type="file"
+                onChange={(event) => setFile(event.target.files[0])}
+              />
+            </div>
+
+            <button
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+              type="submit"
+            >
+              上传
+            </button>
+          </form>
+        </section>
       </div>
     </div>
   )

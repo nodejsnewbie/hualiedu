@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client.js'
 
 const statusBadgeClass = (status) => {
-  if (status === 'completed') return 'success'
-  if (status === 'failed') return 'danger'
-  if (status === 'processing') return 'warning'
-  return 'secondary'
+  if (status === 'completed') return 'bg-emerald-100 text-emerald-700'
+  if (status === 'failed') return 'bg-rose-100 text-rose-700'
+  if (status === 'processing') return 'bg-amber-100 text-amber-700'
+  return 'bg-slate-100 text-slate-600'
 }
 
 export default function ToolboxTaskList() {
@@ -51,109 +51,133 @@ export default function ToolboxTaskList() {
   }
 
   return (
-    <div className="container mt-4">
-      <div className="row">
-        <div className="col-12">
-          <nav aria-label="breadcrumb">
-            <ol className="breadcrumb">
-              <li className="breadcrumb-item">
-                <Link to="/toolbox">工具箱</Link>
-              </li>
-              <li className="breadcrumb-item active">任务列表</li>
-            </ol>
+    <div className="min-h-screen">
+      <div className="page-shell">
+        <div className="mb-6">
+          <nav className="text-xs text-slate-500">
+            <Link to="/toolbox" className="hover:text-slate-700">
+              工具箱
+            </Link>
+            <span className="mx-2">/</span>
+            <span className="text-slate-700">任务列表</span>
           </nav>
-          <div className="d-flex justify-content-between align-items-center mb-4">
-            <h1 className="mb-0">任务列表</h1>
-            <Link to="/toolbox/ppt-to-pdf" className="btn btn-primary">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-900">任务列表</h1>
+              <p className="mt-1 text-sm text-slate-500">查看全部转换任务。</p>
+            </div>
+            <Link
+              to="/toolbox/ppt-to-pdf"
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+            >
               新建任务
             </Link>
           </div>
         </div>
-      </div>
 
-      <div className="card">
-        <div className="card-header d-flex justify-content-between align-items-center">
-          <h5 className="mb-0">全部转换任务</h5>
-          <button className="btn btn-outline-secondary btn-sm" type="button" onClick={loadTasks}>
-            刷新
-          </button>
-        </div>
-        <div className="card-body">
-          {error ? <div className="alert alert-danger">{error}</div> : null}
-          {message ? <div className="alert alert-success">{message}</div> : null}
-          {loading ? (
-            <div className="alert alert-info">正在加载任务...</div>
-          ) : tasks.length === 0 ? (
-            <div className="text-center py-4 text-muted">暂无任务记录</div>
-          ) : (
-            <div className="table-responsive">
-              <table className="table table-hover align-middle">
-                <thead>
-                  <tr>
-                    <th>任务类型</th>
-                    <th>状态</th>
-                    <th>进度</th>
-                    <th>文件统计</th>
-                    <th>创建时间</th>
-                    <th>更新时间</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {tasks.map((task) => (
-                    <tr key={task.id}>
-                      <td>{task.task_type_display}</td>
-                      <td>
-                        <span className={`badge bg-${statusBadgeClass(task.status)}`}>
-                          {task.status_display}
-                        </span>
-                      </td>
-                      <td style={{ minWidth: '160px' }}>
-                        <div className="progress" style={{ height: '18px' }}>
-                          <div
-                            className="progress-bar"
-                            role="progressbar"
-                            style={{ width: `${task.progress_percentage}%` }}
-                            aria-valuenow={task.progress_percentage}
-                            aria-valuemin="0"
-                            aria-valuemax="100"
-                          >
-                            {task.progress_percentage}%
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <small>
-                          总数: {task.total_files}
-                          <br />
-                          成功: <span className="text-success">{task.success_files}</span>
-                          <br />
-                          失败: <span className="text-danger">{task.failed_files}</span>
-                        </small>
-                      </td>
-                      <td>{new Date(task.created_at).toLocaleString()}</td>
-                      <td>{new Date(task.updated_at).toLocaleString()}</td>
-                      <td>
-                        <div className="btn-group" role="group">
-                          <Link to={`/toolbox/tasks/${task.id}`} className="btn btn-sm btn-outline-primary">
-                            详情
-                          </Link>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => deleteTask(task.id)}
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </td>
+        <section className="card-surface p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-slate-800">全部转换任务</h2>
+            <button
+              className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              type="button"
+              onClick={loadTasks}
+            >
+              刷新
+            </button>
+          </div>
+
+          <div className="mt-4">
+            {error ? (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {error}
+              </div>
+            ) : null}
+            {message ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                {message}
+              </div>
+            ) : null}
+            {loading ? (
+              <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+                正在加载任务...
+              </div>
+            ) : tasks.length === 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                暂无任务记录。
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
+                    <tr>
+                      <th className="px-4 py-2 text-left font-medium">任务类型</th>
+                      <th className="px-4 py-2 text-left font-medium">状态</th>
+                      <th className="px-4 py-2 text-left font-medium">进度</th>
+                      <th className="px-4 py-2 text-left font-medium">文件统计</th>
+                      <th className="px-4 py-2 text-left font-medium">创建时间</th>
+                      <th className="px-4 py-2 text-left font-medium">更新时间</th>
+                      <th className="px-4 py-2 text-left font-medium"></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {tasks.map((task) => (
+                      <tr key={task.id} className="text-slate-700">
+                        <td className="px-4 py-2 font-medium text-slate-800">{task.task_type_display}</td>
+                        <td className="px-4 py-2">
+                          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusBadgeClass(task.status)}`}>
+                            {task.status_display}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="h-2 w-40 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full bg-slate-900"
+                              style={{ width: `${task.progress_percentage}%` }}
+                              role="progressbar"
+                              aria-valuenow={task.progress_percentage}
+                              aria-valuemin="0"
+                              aria-valuemax="100"
+                            />
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">{task.progress_percentage}%</div>
+                        </td>
+                        <td className="px-4 py-2 text-xs text-slate-600">
+                          <div>总数：{task.total_files}</div>
+                          <div>成功：<span className="text-emerald-600">{task.success_files}</span></div>
+                          <div>失败：<span className="text-rose-600">{task.failed_files}</span></div>
+                        </td>
+                        <td className="px-4 py-2 text-xs text-slate-500">
+                          {new Date(task.created_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-xs text-slate-500">
+                          {new Date(task.updated_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              to={`/toolbox/tasks/${task.id}`}
+                              className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                            >
+                              详情
+                            </Link>
+                            <button
+                              type="button"
+                              className="rounded-lg border border-rose-200 px-3 py-1 text-xs font-semibold text-rose-600 transition hover:border-rose-300 hover:bg-rose-50"
+                              onClick={() => deleteTask(task.id)}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
       </div>
     </div>
   )

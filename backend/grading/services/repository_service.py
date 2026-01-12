@@ -266,12 +266,14 @@ class RepositoryService:
             # 构建认证URL
             if username and password:
                 # 解析URL并插入认证信息
-                from urllib.parse import urlparse, urlunparse
+                from urllib.parse import quote, urlparse, urlunparse
 
                 parsed = urlparse(git_url)
                 if parsed.scheme in ["http", "https"]:
                     # 构建带认证的URL
-                    netloc = f"{username}:{password}@{parsed.netloc}"
+                    safe_username = quote(username, safe="")
+                    safe_password = quote(password, safe="")
+                    netloc = f"{safe_username}:{safe_password}@{parsed.netloc}"
                     auth_url = urlunparse(
                         (
                             parsed.scheme,

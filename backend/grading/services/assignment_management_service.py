@@ -25,11 +25,12 @@
 import logging
 import os
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from django.contrib.auth.models import User
 from django.db.models import Q, QuerySet
 
-from grading.models import Assignment, Class, Course
+from grading.models import AssignmentSetting, Class, Course
 
 logger = logging.getLogger(__name__)
 
@@ -70,12 +71,10 @@ class AssignmentManagementService:
     def create_assignment(
         self,
         teacher: User,
-        course: Course,
-        class_obj: Class,
         name: str,
-        storage_type: str,
+        repo_type: str,
         **kwargs,
-    ) -> Assignment:
+    ) -> AssignmentSetting:
         """创建作业配置
 
         验证输入并创建作业配置记录。对于文件系统类型，自动生成并创建目录结构。
@@ -138,74 +137,80 @@ class AssignmentManagementService:
         except AttributeError:
             raise PermissionError("用户没有关联的租户")
 
-        # 验证作业名称
-        if not name or not name.strip():
-            raise ValidationError("作业名称不能为空", "请输入作业名称")
+        def _derive_name_from_source() -> str:
+            source = ""
+            if repo_type == "git":
+                git_url = (kwargs.get("git_url") or "").strip()
+                if git_url:
+                    if git_url.startswith("git@") and ":" in git_url:
+                        source = git_url.split(":", 1)[1]
+                    else:
+                        parsed = urlparse(git_url)
+                        source = parsed.path or git_url
+            elif repo_type == "filesystem":
+                source = (kwargs.get("filesystem_path") or kwargs.get("base_path") or "").strip()
+
+            name_candidate = os.path.basename(source.rstrip("/\\")) if source else ""
+            if name_candidate.endswith(".git"):
+                name_candidate = name_candidate[:-4]
+            return name_candidate or "作业配置"
+
+        raw_name = (name or "").strip()
+        auto_named = False
+        if not raw_name:
+            raw_name = _derive_name_from_source()
+            auto_named = True
 
         # 清理作业名称
         try:
-            clean_name = PathValidator.sanitize_name(name)
+            clean_name = PathValidator.sanitize_name(raw_name)
         except ValidationError as e:
             raise ValidationError(f"作业名称验证失败: {e.message}", e.user_message)
+        if not clean_name:
+            clean_name = "作业配置"
 
         # 验证存储类型
-        if storage_type not in ["git", "filesystem"]:
+        if repo_type not in ["git", "filesystem"]:
             raise ValidationError(
-                f"Invalid storage_type: {storage_type}", "存储类型必须是 'git' 或 'filesystem'"
-            )
-
-        # 验证课程和班级关联
-        if class_obj.course != course:
-            raise ValidationError(
-                f"班级 {class_obj.name} 不属于课程 {course.name}",
-                "所选班级不属于该课程，请重新选择",
-            )
-
-        # 验证课程和班级的租户
-        if course.tenant != tenant:
-            raise ValidationError(
-                f"课程 {course.name} 不属于租户 {tenant.name}", "所选课程不属于您的租户"
-            )
-
-        if class_obj.tenant != tenant:
-            raise ValidationError(
-                f"班级 {class_obj.name} 不属于租户 {tenant.name}", "所选班级不属于您的租户"
+                f"Invalid repo_type: {repo_type}", "存储类型必须是 'git' 或 'filesystem'"
             )
 
         # 检查重复配置（Requirement 8.5）
-        duplicate = Assignment.objects.filter(
-            owner=teacher, course=course, class_obj=class_obj, name=clean_name, is_active=True
+        duplicate = AssignmentSetting.objects.filter(
+            owner=teacher, name=clean_name, is_active=True
         ).exists()
-
-        if duplicate:
+        if duplicate and not auto_named:
             raise ValidationError(
-                f"Duplicate assignment: {clean_name}",
-                f"该课程和班级下已存在名为'{clean_name}'的作业配置",
+                f"Duplicate assignment setting: {clean_name}",
+                f"已存在名为'{clean_name}'的作业配置",
             )
+        if duplicate and auto_named:
+            base_name = clean_name
+            counter = 2
+            while AssignmentSetting.objects.filter(
+                owner=teacher, name=f"{base_name}-{counter}", is_active=True
+            ).exists():
+                counter += 1
+            clean_name = f"{base_name}-{counter}"
 
         # 准备创建参数
         create_params = {
             "owner": teacher,
             "tenant": tenant,
-            "course": course,
-            "class_obj": class_obj,
             "name": clean_name,
-            "storage_type": storage_type,
+            "repo_type": repo_type,
             "description": kwargs.get("description", ""),
             "is_active": True,
         }
 
         # 根据存储类型验证和设置特定字段
-        if storage_type == "git":
-            # Git类型必填字段验证
+        if repo_type == "git":
             git_url = kwargs.get("git_url", "").strip()
             if not git_url:
                 raise ValidationError(
-                    "Git URL is required for git storage type", "Git类型作业必须提供仓库URL"
+                    "Git URL is required for git repo_type", "Git类型作业必须提供仓库URL"
                 )
 
-            # 简单的URL格式验证（Requirement 8.4）
-            # 支持 http://, https://, git://, ssh://, git@
             if not (
                 git_url.startswith("http://")
                 or git_url.startswith("https://")
@@ -219,10 +224,9 @@ class AssignmentManagementService:
                 )
 
             create_params["git_url"] = git_url
-            create_params["git_branch"] = kwargs.get("git_branch", "main").strip() or "main"
+            create_params["git_branch"] = kwargs.get("git_branch", "").strip()
             create_params["git_username"] = kwargs.get("git_username", "").strip()
 
-            # 处理Git密码加密
             git_password = kwargs.get("git_password", "").strip()
             if git_password:
                 try:
@@ -235,28 +239,31 @@ class AssignmentManagementService:
             else:
                 create_params["git_password_encrypted"] = ""
 
-        elif storage_type == "filesystem":
-            # 文件系统类型：生成基础路径（Requirement 4.1）
-            base_path = self.get_class_assignment_path(course, class_obj)
-            create_params["base_path"] = base_path
+        elif repo_type == "filesystem":
+            filesystem_path = (kwargs.get("filesystem_path") or kwargs.get("base_path") or "").strip()
+            if not filesystem_path:
+                raise ValidationError(
+                    "Filesystem assignments require filesystem_path",
+                    "文件上传方式需要设置存储路径",
+                )
+            create_params["filesystem_path"] = filesystem_path
 
         # 创建作业记录
         try:
-            assignment = Assignment.objects.create(**create_params)
+            assignment = AssignmentSetting.objects.create(**create_params)
 
             logger.info(
                 f"Assignment created: id={assignment.id}, name={assignment.name}, "
-                f"storage_type={storage_type}, teacher={teacher.username}, "
-                f"course={course.name}, class={class_obj.name}"
+                f"repo_type={repo_type}, teacher={teacher.username}"
             )
 
             # 如果是文件系统类型，创建基础目录
-            if storage_type == "filesystem":
+            if repo_type == "filesystem":
                 try:
-                    adapter = FileSystemStorageAdapter(base_path)
+                    adapter = FileSystemStorageAdapter(assignment.filesystem_path)
                     adapter.create_directory("")  # 创建基础目录
                     logger.info(
-                        f"Created base directory for assignment {assignment.id}: {base_path}"
+                        f"Created base directory for assignment {assignment.id}: {assignment.filesystem_path}"
                     )
                 except Exception as e:
                     logger.warning(
@@ -274,22 +281,18 @@ class AssignmentManagementService:
     def list_assignments(
         self,
         teacher: User,
-        course_id: Optional[int] = None,
-        class_id: Optional[int] = None,
-        storage_type: Optional[str] = None,
+        repo_type: Optional[str] = None,
         is_active: Optional[bool] = True,
-    ) -> QuerySet[Assignment]:
+    ) -> QuerySet[AssignmentSetting]:
         """获取作业列表，支持教师隔离和筛选
 
         实现需求:
         - Requirements 5.1: 教师只能看到自己创建的作业
-        - Requirements 7.4: 支持按课程和班级筛选
+        - Requirements 7.4: 支持按存储类型筛选
 
         Args:
             teacher: 教师用户对象
-            course_id: 可选的课程ID筛选
-            class_id: 可选的班级ID筛选
-            storage_type: 可选的存储类型筛选 ("git" 或 "filesystem")
+            repo_type: 可选的存储类型筛选 ("git" 或 "filesystem")
             is_active: 是否只显示激活的作业，默认True
 
         Returns:
@@ -299,101 +302,39 @@ class AssignmentManagementService:
             >>> service = AssignmentManagementService()
             >>> # 获取教师的所有作业
             >>> assignments = service.list_assignments(teacher)
-            >>> # 获取特定课程的作业
-            >>> assignments = service.list_assignments(teacher, course_id=1)
-            >>> # 获取特定班级的作业
-            >>> assignments = service.list_assignments(teacher, class_id=2)
             >>> # 获取Git类型的作业
-            >>> assignments = service.list_assignments(teacher, storage_type="git")
+            >>> assignments = service.list_assignments(teacher, repo_type="git")
         """
         # 基础查询：只返回该教师创建的作业（教师隔离）
         # 同时确保租户隔离
-        queryset = Assignment.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
+        queryset = AssignmentSetting.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
 
         # 应用激活状态筛选
         if is_active is not None:
             queryset = queryset.filter(is_active=is_active)
 
-        # 应用课程筛选
-        if course_id is not None:
-            queryset = queryset.filter(course_id=course_id)
-
-        # 应用班级筛选
-        if class_id is not None:
-            queryset = queryset.filter(class_obj_id=class_id)
-
         # 应用存储类型筛选
-        if storage_type is not None:
-            if storage_type not in ["git", "filesystem"]:
+        if repo_type is not None:
+            if repo_type not in ["git", "filesystem"]:
                 logger.warning(
-                    f"Invalid storage_type filter: {storage_type}. "
+                    f"Invalid repo_type filter: {repo_type}. "
                     f"Must be 'git' or 'filesystem'"
                 )
             else:
-                queryset = queryset.filter(storage_type=storage_type)
+                queryset = queryset.filter(repo_type=repo_type)
 
         # 优化查询：预加载关联对象以减少数据库查询
-        queryset = queryset.select_related("owner", "tenant", "course", "class_obj")
+        queryset = queryset.select_related("owner", "tenant")
 
         # 按创建时间倒序排列（最新的在前）
         queryset = queryset.order_by("-created_at")
 
         logger.info(
             f"Listed {queryset.count()} assignments for teacher {teacher.username} "
-            f"(course_id={course_id}, class_id={class_id}, "
-            f"storage_type={storage_type}, is_active={is_active})"
+            f"(repo_type={repo_type}, is_active={is_active})"
         )
 
         return queryset
-
-    def get_teacher_courses(self, teacher: User) -> QuerySet[Course]:
-        """获取教师的课程列表
-
-        用于在作业列表页面提供课程筛选选项。
-
-        Args:
-            teacher: 教师用户对象
-
-        Returns:
-            QuerySet[Course]: 教师创建的作业所关联的课程列表（去重）
-        """
-        # 获取该教师所有作业关联的课程ID
-        course_ids = (
-            Assignment.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
-            .values_list("course_id", flat=True)
-            .distinct()
-        )
-
-        # 返回这些课程
-        return Course.objects.filter(id__in=course_ids).order_by("name")
-
-    def get_teacher_classes(
-        self, teacher: User, course_id: Optional[int] = None
-    ) -> QuerySet[Class]:
-        """获取教师的班级列表
-
-        用于在作业列表页面提供班级筛选选项。
-        如果指定了课程ID，则只返回该课程下的班级。
-
-        Args:
-            teacher: 教师用户对象
-            course_id: 可选的课程ID，用于筛选特定课程的班级
-
-        Returns:
-            QuerySet[Class]: 教师创建的作业所关联的班级列表（去重）
-        """
-        # 基础查询
-        queryset = Assignment.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
-
-        # 如果指定了课程，则筛选该课程的作业
-        if course_id is not None:
-            queryset = queryset.filter(course_id=course_id)
-
-        # 获取班级ID列表
-        class_ids = queryset.values_list("class_obj_id", flat=True).distinct()
-
-        # 返回这些班级
-        return Class.objects.filter(id__in=class_ids).order_by("name")
 
     def get_assignment_summary(self, teacher: User) -> Dict[str, Any]:
         """获取教师的作业统计摘要
@@ -414,20 +355,20 @@ class AssignmentManagementService:
                 'classes_count': 涉及的班级数
             }
         """
-        base_queryset = Assignment.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
+        base_queryset = AssignmentSetting.objects.filter(owner=teacher, tenant=teacher.profile.tenant)
 
         return {
             "total": base_queryset.count(),
             "active": base_queryset.filter(is_active=True).count(),
-            "git_count": base_queryset.filter(storage_type="git").count(),
-            "filesystem_count": base_queryset.filter(storage_type="filesystem").count(),
-            "courses_count": base_queryset.values("course").distinct().count(),
-            "classes_count": base_queryset.values("class_obj").distinct().count(),
+            "git_count": base_queryset.filter(repo_type="git").count(),
+            "filesystem_count": base_queryset.filter(repo_type="filesystem").count(),
+            "courses_count": 0,
+            "classes_count": 0,
         }
 
     def update_assignment(
-        self, assignment: Assignment, teacher: User, **update_fields
-    ) -> Assignment:
+        self, assignment: AssignmentSetting, teacher: User, **update_fields
+    ) -> AssignmentSetting:
         """更新作业配置
 
         实现需求:
@@ -476,11 +417,10 @@ class AssignmentManagementService:
             ...     is_active=False
             ... )
 
-        Note:
-            - 不允许更改存储类型 (storage_type)
-            - 不允许更改关联的课程和班级 (course, class_obj)
-            - 这些限制是为了保护已提交的学生作业数据完整性
-            - Git密码会自动加密存储
+          Note:
+              - 不允许更改存储类型 (repo_type)
+              - 这些限制是为了保护已提交的学生作业数据完整性
+              - Git密码会自动加密存储
         """
         from grading.assignment_utils import CredentialEncryption, PathValidator, ValidationError
 
@@ -501,7 +441,7 @@ class AssignmentManagementService:
             raise PermissionError("您没有权限编辑此作业配置")
 
         # 定义允许更新的字段
-        # 注意：不允许更改 storage_type, course, class_obj, owner, tenant
+        # 注意：不允许更改 repo_type, owner, tenant
         # 这些字段的更改可能会破坏已提交的学生作业数据
         allowed_fields = {
             "name",
@@ -511,7 +451,7 @@ class AssignmentManagementService:
             "git_branch",
             "git_username",
             "git_password",
-            "base_path",
+            "filesystem_path",
         }
 
         # 过滤出有效的更新字段
@@ -542,12 +482,10 @@ class AssignmentManagementService:
             except ValidationError as e:
                 raise ValidationError(f"作业名称验证失败: {e.message}", e.user_message)
 
-            # 检查名称唯一性（同一教师、课程、班级下不能有重名作业）
+            # 检查名称唯一性（同一教师下不能重名）
             duplicate = (
-                Assignment.objects.filter(
+                AssignmentSetting.objects.filter(
                     owner=teacher,
-                    course=assignment.course,
-                    class_obj=assignment.class_obj,
                     name=valid_updates["name"],
                 )
                 .exclude(id=assignment.id)
@@ -557,8 +495,13 @@ class AssignmentManagementService:
             if duplicate:
                 raise ValidationError(
                     f"Duplicate assignment name: {valid_updates['name']}",
-                    f"该课程和班级下已存在名为'{valid_updates['name']}'的作业配置",
+                    f"已存在名为'{valid_updates['name']}'的作业配置",
                 )
+
+        if "filesystem_path" in valid_updates:
+            filesystem_path = valid_updates["filesystem_path"]
+            if not filesystem_path or not str(filesystem_path).strip():
+                raise ValidationError("存储路径不能为空", "存储路径不能为空")
 
         # 处理Git密码加密
         if "git_password" in valid_updates:
@@ -574,7 +517,7 @@ class AssignmentManagementService:
                 valid_updates["git_password_encrypted"] = ""
 
         # 验证Git配置（如果是Git类型作业）
-        if assignment.storage_type == "git":
+        if assignment.repo_type == "git":
             if "git_url" in valid_updates:
                 git_url = valid_updates["git_url"]
                 if not git_url or not git_url.strip():
@@ -610,7 +553,7 @@ class AssignmentManagementService:
         return assignment
 
     def delete_assignment(
-        self, assignment: Assignment, teacher: User, confirm: bool = False
+        self, assignment: AssignmentSetting, teacher: User, confirm: bool = False
     ) -> Dict[str, Any]:
         """删除作业配置
 
@@ -681,9 +624,9 @@ class AssignmentManagementService:
         # 收集删除影响信息
         impact_info = {
             "assignment_name": assignment.name,
-            "course_name": assignment.course.name,
-            "class_name": assignment.class_obj.name,
-            "storage_type": "Git仓库" if assignment.storage_type == "git" else "文件上传",
+            "course_name": assignment.course.name if assignment.course else "未设置",
+            "class_name": assignment.class_obj.name if assignment.class_obj else "未设置",
+            "storage_type": "Git仓库" if assignment.repo_type == "git" else "文件上传",
             "has_submissions": False,  # 未来扩展：检查是否有学生提交
             "warning": "",
         }
@@ -691,8 +634,10 @@ class AssignmentManagementService:
         # 构建警告信息
         warnings = []
         warnings.append(f"您即将删除作业配置：{assignment.name}")
-        warnings.append(f"课程：{assignment.course.name}")
-        warnings.append(f"班级：{assignment.class_obj.name}")
+        if assignment.course:
+            warnings.append(f"课程：{assignment.course.name}")
+        if assignment.class_obj:
+            warnings.append(f"班级：{assignment.class_obj.name}")
         warnings.append(f"提交方式：{impact_info['storage_type']}")
 
         # 检查是否有相关的提交记录（未来扩展）
@@ -705,9 +650,9 @@ class AssignmentManagementService:
         #     warnings.append(f"警告：此作业配置下有 {submission_count} 条学生提交记录，删除后将无法恢复！")
 
         # 添加文件系统说明
-        if assignment.storage_type == "filesystem":
+        if assignment.repo_type == "filesystem":
             warnings.append("注意：删除作业配置不会删除文件系统中已上传的作业文件。")
-        elif assignment.storage_type == "git":
+        elif assignment.repo_type == "git":
             warnings.append("注意：删除作业配置不会影响远程Git仓库的内容。")
 
         warnings.append("此操作不可撤销，请确认是否继续？")
@@ -825,7 +770,7 @@ class AssignmentManagementService:
             logger.warning(f"Could not retrieve courses for student {student.username}: {e}")
             return Course.objects.none()
 
-    def get_assignment_structure(self, assignment: Assignment, path: str = "") -> Dict[str, Any]:
+    def get_assignment_structure(self, assignment: AssignmentSetting, path: str = "") -> Dict[str, Any]:
         """获取作业目录结构
 
         直接从远程仓库或本地文件系统读取目录结构。
@@ -912,7 +857,7 @@ class AssignmentManagementService:
                 "error": "无法访问作业目录，请检查配置或稍后重试",
             }
 
-    def _get_storage_adapter(self, assignment: Assignment):
+    def _get_storage_adapter(self, assignment: AssignmentSetting):
         """获取存储适配器
 
         根据作业配置的存储类型返回相应的存储适配器实例。
@@ -954,7 +899,7 @@ class AssignmentManagementService:
         from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
         from grading.services.git_storage_adapter import GitStorageAdapter
 
-        if assignment.storage_type == "git":
+        if assignment.repo_type == "git":
             # Git 存储适配器
             if not assignment.git_url:
                 raise ValidationError(
@@ -979,23 +924,23 @@ class AssignmentManagementService:
                 password=password,
             )
 
-        elif assignment.storage_type == "filesystem":
+        elif assignment.repo_type == "filesystem":
             # 文件系统存储适配器
-            if not assignment.base_path:
+            if not assignment.filesystem_path:
                 raise ValidationError(
                     f"Base path not configured for assignment {assignment.id}", "文件系统路径未配置"
                 )
 
-            return FileSystemStorageAdapter(assignment.base_path)
+            return FileSystemStorageAdapter(assignment.filesystem_path)
 
         else:
             raise ValidationError(
-                f"Invalid storage type: {assignment.storage_type}",
-                f"不支持的存储类型: {assignment.storage_type}",
+                f"Invalid storage type: {assignment.repo_type}",
+                f"不支持的存储类型: {assignment.repo_type}",
             )
 
     def get_assignment_directories(
-        self, assignment: Assignment, path: str = ""
+        self, assignment: AssignmentSetting, path: str = ""
     ) -> List[Dict[str, Any]]:
         """获取作业次数目录列表
 
@@ -1067,7 +1012,7 @@ class AssignmentManagementService:
 
     def upload_student_file(
         self,
-        assignment: Assignment,
+        assignment: AssignmentSetting,
         student: User,
         file: Any,  # UploadedFile
         assignment_number_path: str,
@@ -1112,7 +1057,7 @@ class AssignmentManagementService:
         from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
 
         # 只支持文件系统存储
-        if assignment.storage_type != "filesystem":
+        if assignment.repo_type != "filesystem":
             raise ValidationError(
                 "Only filesystem storage supports file upload", "只有文件上传方式的作业支持此操作"
             )
@@ -1171,14 +1116,14 @@ class AssignmentManagementService:
         # 构建文件路径
         # 格式: <base_path>/<assignment_number_path>/<filename>
         file_path = os.path.join(
-            assignment.base_path,
+            assignment.filesystem_path,
             PathValidator.sanitize_name(assignment_number_path),
             final_filename,
         )
 
         try:
             # 使用文件系统适配器保存文件
-            adapter = FileSystemStorageAdapter(assignment.base_path)
+            adapter = FileSystemStorageAdapter(assignment.filesystem_path)
 
             # 读取文件内容
             if hasattr(file, "read"):
@@ -1215,7 +1160,7 @@ class AssignmentManagementService:
 
     def create_assignment_number_directory(
         self,
-        assignment: Assignment,
+        assignment: AssignmentSetting,
         auto_generate_name: bool = True,
         custom_name: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1259,7 +1204,7 @@ class AssignmentManagementService:
         from grading.services.filesystem_storage_adapter import FileSystemStorageAdapter
 
         # 只支持文件系统存储
-        if assignment.storage_type != "filesystem":
+        if assignment.repo_type != "filesystem":
             raise ValidationError(
                 "Only filesystem storage supports directory creation",
                 "只有文件上传方式的作业支持此操作",
@@ -1267,7 +1212,7 @@ class AssignmentManagementService:
 
         try:
             # 获取存储适配器
-            adapter = FileSystemStorageAdapter(assignment.base_path)
+            adapter = FileSystemStorageAdapter(assignment.filesystem_path)
 
             # 确定目录名称
             if auto_generate_name:
@@ -1342,7 +1287,7 @@ class AssignmentManagementService:
             adapter.create_directory(directory_name)
 
             # 构建完整路径
-            directory_path = os.path.join(assignment.base_path, directory_name)
+            directory_path = os.path.join(assignment.filesystem_path, directory_name)
 
             logger.info(
                 f"Created assignment number directory for assignment {assignment.id}: "
@@ -1367,7 +1312,7 @@ class AssignmentManagementService:
 
     def generate_file_storage_path(
         self,
-        assignment: Assignment,
+        assignment: AssignmentSetting,
         assignment_number: str,
         filename: str,
         student: Optional[User] = None,
@@ -1407,7 +1352,7 @@ class AssignmentManagementService:
         clean_filename = PathValidator.sanitize_name(filename)
 
         # 构建路径组件
-        path_components = [assignment.base_path, clean_assignment_number]
+        path_components = [assignment.filesystem_path, clean_assignment_number]
 
         # 如果提供了学生信息，添加学生子目录
         if student:
@@ -1425,7 +1370,7 @@ class AssignmentManagementService:
 
         return full_path
 
-    def validate_class_directory_isolation(self, assignment: Assignment, path: str) -> bool:
+    def validate_class_directory_isolation(self, assignment: AssignmentSetting, path: str) -> bool:
         """验证班级目录隔离
 
         实现需求:
@@ -1453,13 +1398,13 @@ class AssignmentManagementService:
         from grading.assignment_utils import PathValidator, ValidationError
 
         # 获取基础路径的绝对路径
-        base_path = os.path.abspath(assignment.base_path)
+        base_path = os.path.abspath(assignment.filesystem_path)
 
         # 获取目标路径的绝对路径
         if os.path.isabs(path):
             target_path = os.path.abspath(path)
         else:
-            target_path = os.path.abspath(os.path.join(assignment.base_path, path))
+            target_path = os.path.abspath(os.path.join(assignment.filesystem_path, path))
 
         # 确保目标路径在基础路径内
         if not target_path.startswith(base_path):

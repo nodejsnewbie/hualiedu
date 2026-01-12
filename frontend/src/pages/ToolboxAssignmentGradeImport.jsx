@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client.js'
 
 const normalizePath = (value) => (value || '').replace(/\\/g, '/').replace(/\/+$/, '')
+
+const mapTreeNodes = (items) =>
+  (items || []).map((item) => ({
+    id: item.id,
+    text: item.text,
+    hasChildren: Array.isArray(item.children) ? item.children.length > 0 : !!item.children,
+  }))
 
 export default function ToolboxAssignmentGradeImport() {
   const [repositories, setRepositories] = useState([])
@@ -12,7 +19,11 @@ export default function ToolboxAssignmentGradeImport() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const treeRef = useRef(null)
+  const [treeNodes, setTreeNodes] = useState([])
+  const [treeChildren, setTreeChildren] = useState({})
+  const [expandedIds, setExpandedIds] = useState(new Set())
+  const [loadingIds, setLoadingIds] = useState(new Set())
+  const [treeError, setTreeError] = useState('')
   const [modalOpen, setModalOpen] = useState(false)
   const [currentPath, setCurrentPath] = useState('/')
   const [items, setItems] = useState([])
@@ -21,7 +32,7 @@ export default function ToolboxAssignmentGradeImport() {
 
   const currentRepo = useMemo(
     () => repositories.find((repo) => repo.id === selectedRepoId),
-    [repositories, selectedRepoId]
+    [repositories, selectedRepoId],
   )
   const courses = currentRepo ? currentRepo.courses || [] : []
   const courseRoot = useMemo(() => {
@@ -64,6 +75,7 @@ export default function ToolboxAssignmentGradeImport() {
     if (!selectedRepoId) {
       setSelectedCourse('')
       setSelectedClass('')
+      setTreeNodes([])
       return
     }
     if (!courses.includes(selectedCourse)) {
@@ -72,52 +84,62 @@ export default function ToolboxAssignmentGradeImport() {
     }
   }, [selectedRepoId, courses, selectedCourse])
 
-  useEffect(() => {
-    const $ = window.$
-    if (!treeRef.current || !$) return undefined
+  const fetchTreeChildren = async (path) => {
+    const response = await apiFetch(
+      `/toolbox/api/class-directory-tree/?repo_id=${encodeURIComponent(
+        selectedRepoId,
+      )}&course=${encodeURIComponent(selectedCourse)}&path=${encodeURIComponent(path)}`,
+    )
+    const data = await response.json().catch(() => null)
+    return mapTreeNodes(data && data.children)
+  }
 
-    const $tree = $(treeRef.current)
-    if ($tree.data('jstree')) {
-      $tree.jstree(true).destroy()
-    }
-
+  const loadRootTree = async () => {
+    setTreeError('')
     if (!selectedRepoId || !selectedCourse) {
-      $tree.html('<div class="text-muted">请选择仓库与课程</div>')
-      return undefined
+      setTreeNodes([])
+      return
     }
-
-    $tree
-      .empty()
-      .jstree({
-        core: {
-          data: function (node, cb) {
-            const path = node.id === '#' ? '' : node.id
-            apiFetch(
-              `/toolbox/api/class-directory-tree/?repo_id=${encodeURIComponent(
-                selectedRepoId
-              )}&course=${encodeURIComponent(selectedCourse)}&path=${encodeURIComponent(path)}`
-            )
-              .then((response) => response.json())
-              .then((data) => cb(data.children || []))
-              .catch(() => cb([]))
-          },
-          themes: { responsive: false },
-        },
-        plugins: ['types'],
-        types: {
-          default: { icon: 'bi bi-folder-fill text-secondary' },
-        },
-      })
-      .on('select_node.jstree', function (_event, data) {
-        setSelectedClass(data.node.id || '')
-      })
-
-    return () => {
-      if ($tree.data('jstree')) {
-        $tree.jstree(true).destroy()
-      }
+    try {
+      const children = await fetchTreeChildren('')
+      setTreeNodes(children)
+      setTreeChildren({ '': children })
+      setExpandedIds(new Set())
+    } catch {
+      setTreeError('加载课程目录失败')
+      setTreeNodes([])
     }
+  }
+
+  useEffect(() => {
+    loadRootTree()
   }, [selectedRepoId, selectedCourse])
+
+  const toggleNode = async (node) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(node.id)) {
+        next.delete(node.id)
+      } else {
+        next.add(node.id)
+      }
+      return next
+    })
+
+    if (!node.hasChildren || treeChildren[node.id]) return
+
+    setLoadingIds((prev) => new Set(prev).add(node.id))
+    try {
+      const children = await fetchTreeChildren(node.id)
+      setTreeChildren((prev) => ({ ...prev, [node.id]: children }))
+    } finally {
+      setLoadingIds((prev) => {
+        const next = new Set(prev)
+        next.delete(node.id)
+        return next
+      })
+    }
+  }
 
   useEffect(() => {
     if (modalOpen) {
@@ -202,43 +224,96 @@ export default function ToolboxAssignmentGradeImport() {
     ? `${selectedCourse ? `${selectedCourse}/` : ''}${selectedClass}`
     : '未选择'
 
+  const renderTree = (nodes) => (
+    <ul className="space-y-1">
+      {nodes.map((node) => {
+        const isExpanded = expandedIds.has(node.id)
+        const isLoading = loadingIds.has(node.id)
+        const children = treeChildren[node.id] || []
+        const isSelected = selectedClass === node.id
+        return (
+          <li key={node.id}>
+            <div
+              className={`flex items-center gap-2 rounded-md px-2 py-1 text-sm transition ${
+                isSelected ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              {node.hasChildren ? (
+                <button
+                  type="button"
+                  className="h-5 w-5 rounded border border-slate-200 text-xs text-slate-500 hover:border-slate-300 hover:bg-white"
+                  onClick={() => toggleNode(node)}
+                >
+                  {isExpanded ? '-' : '+'}
+                </button>
+              ) : (
+                <span className="inline-block h-5 w-5" />
+              )}
+              <button
+                type="button"
+                className="flex-1 text-left"
+                onClick={() => setSelectedClass(node.id)}
+              >
+                {node.text}
+              </button>
+            </div>
+            {node.hasChildren && isExpanded ? (
+              <div className="ml-6 border-l border-slate-200 pl-3">
+                {isLoading ? (
+                  <div className="py-2 text-xs text-slate-400">加载中...</div>
+                ) : children.length ? (
+                  renderTree(children)
+                ) : (
+                  <div className="py-2 text-xs text-slate-400">空目录</div>
+                )}
+              </div>
+            ) : null}
+          </li>
+        )
+      })}
+    </ul>
+  )
+
   return (
-    <div className="container mt-4">
-      <div className="row">
-        <div className="col-12">
-          <nav aria-label="breadcrumb">
-            <ol className="breadcrumb">
-              <li className="breadcrumb-item">
-                <Link to="/toolbox">工具箱</Link>
-              </li>
-              <li className="breadcrumb-item active">作业成绩写入</li>
-            </ol>
+    <div className="min-h-screen">
+      <div className="page-shell">
+        <div className="mb-6">
+          <nav className="text-xs text-slate-500">
+            <Link to="/toolbox" className="hover:text-slate-700">
+              工具箱
+            </Link>
+            <span className="mx-2">/</span>
+            <span className="text-slate-700">作业成绩写入</span>
           </nav>
-          <h1 className="mb-3">作业成绩写入</h1>
-          <p className="text-muted">
+          <h1 className="mt-3 text-2xl font-semibold text-slate-900">作业成绩写入</h1>
+          <p className="mt-2 text-sm text-slate-500">
             选择班级目录后，系统会自动查找“第X次作业.xlsx”并写入成绩登记册。
           </p>
         </div>
-      </div>
 
-      <div className="card mb-4">
-        <div className="card-header">
-          <h5 className="mb-0">配置参数</h5>
-        </div>
-        <div className="card-body">
-          {error ? <div className="alert alert-danger">{error}</div> : null}
+        <section className="card-surface p-5">
+          <h2 className="text-base font-semibold text-slate-800">配置参数</h2>
+          {error ? (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
           {loading ? (
-            <div className="alert alert-info">正在加载仓库...</div>
+            <div className="mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+              正在加载仓库...
+            </div>
           ) : repositories.length === 0 ? (
-            <div className="alert alert-warning">暂无可用仓库</div>
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+              暂无可用仓库。
+            </div>
           ) : (
-            <form onSubmit={handleSubmit}>
-              <div className="row">
-                <div className="col-md-4">
-                  <div className="mb-3">
-                    <label className="form-label">选择仓库</label>
+            <form className="mt-4" onSubmit={handleSubmit}>
+              <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700">选择仓库</label>
                     <select
-                      className="form-select"
+                      className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
                       value={selectedRepoId}
                       onChange={(event) => {
                         setSelectedRepoId(event.target.value)
@@ -252,11 +327,11 @@ export default function ToolboxAssignmentGradeImport() {
                       ))}
                     </select>
                   </div>
-                  <div className="mb-3">
-                    <label className="form-label">选择课程</label>
+                  <div>
+                    <label className="text-sm font-medium text-slate-700">选择课程</label>
                     {courses.length ? (
                       <select
-                        className="form-select"
+                        className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
                         value={selectedCourse}
                         onChange={(event) => {
                           setSelectedCourse(event.target.value)
@@ -270,96 +345,102 @@ export default function ToolboxAssignmentGradeImport() {
                         ))}
                       </select>
                     ) : (
-                      <div className="alert alert-warning mb-0">该仓库下没有课程目录</div>
+                      <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                        该仓库下没有课程目录。
+                      </div>
                     )}
                   </div>
-                  <div className="mb-3">
-                    <label className="form-label">已选择的班级目录</label>
-                    <div className="form-control-plaintext border rounded py-2 px-2 bg-light">
+                  <div>
+                    <label className="text-sm font-medium text-slate-700">已选择的班级目录</label>
+                    <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                       {classDisplay}
                     </div>
                     <button
                       type="button"
-                      className="btn btn-outline-secondary btn-sm mt-2"
+                      className="mt-2 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
                       onClick={openModal}
                       disabled={!selectedCourse}
                     >
                       浏览目录
                     </button>
                   </div>
-                  <button type="submit" className="btn btn-primary w-100" disabled={!selectedClass}>
+                  <button
+                    type="submit"
+                    className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                    disabled={!selectedClass}
+                  >
                     开始写入
                   </button>
                 </div>
-                <div className="col-md-8">
-                  <label className="form-label">课程目录</label>
-                  <div
-                    ref={treeRef}
-                    className="border rounded p-2"
-                    style={{ maxHeight: '420px', overflowY: 'auto', background: '#fff' }}
-                  />
-                  <small className="form-text text-muted">
-                    展开课程目录后选择班级，系统只显示目录结构。
-                  </small>
+
+                <div>
+                  <label className="text-sm font-medium text-slate-700">课程目录</label>
+                  <div className="mt-2 max-h-[420px] overflow-y-auto rounded-lg border border-slate-200 bg-white p-3">
+                    {treeError ? (
+                      <div className="text-xs text-rose-600">{treeError}</div>
+                    ) : treeNodes.length === 0 ? (
+                      <div className="text-xs text-slate-400">请选择仓库与课程</div>
+                    ) : (
+                      renderTree(treeNodes)
+                    )}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    展开课程目录后选择班级，仅显示目录结构。
+                  </p>
                 </div>
               </div>
             </form>
           )}
-        </div>
-      </div>
+        </section>
 
-      {result ? (
-        <div className="card mb-4">
-          <div className="card-header">
-            <h5 className="mb-0">执行结果</h5>
-          </div>
-          <div className="card-body">
-            <div className="row">
-              <div className="col-md-3 mb-3">
-                <p className="mb-1 text-muted">仓库</p>
-                <p className="h6 text-break">{result.repository_name}</p>
+        {result ? (
+          <section className="mt-6 card-surface p-5">
+            <h2 className="text-base font-semibold text-slate-800">执行结果</h2>
+            <div className="mt-4 grid gap-4 md:grid-cols-4">
+              <div>
+                <p className="text-xs text-slate-500">仓库</p>
+                <p className="text-sm font-semibold text-slate-800 break-all">{result.repository_name}</p>
               </div>
-              <div className="col-md-3 mb-3">
-                <p className="mb-1 text-muted">课程</p>
-                <p className="h6 text-break">{result.course_name}</p>
+              <div>
+                <p className="text-xs text-slate-500">课程</p>
+                <p className="text-sm font-semibold text-slate-800 break-all">{result.course_name}</p>
               </div>
-              <div className="col-md-3 mb-3">
-                <p className="mb-1 text-muted">班级目录</p>
-                <p className="h6 text-break">{result.class_directory}</p>
+              <div>
+                <p className="text-xs text-slate-500">班级目录</p>
+                <p className="text-sm font-semibold text-slate-800 break-all">{result.class_directory}</p>
               </div>
-              <div className="col-md-3 mb-3">
-                <p className="mb-1 text-muted">成绩登记册</p>
-                <p className="h6 text-break">{result.gradebook_file}</p>
+              <div>
+                <p className="text-xs text-slate-500">成绩登记册</p>
+                <p className="text-sm font-semibold text-slate-800 break-all">{result.gradebook_file}</p>
               </div>
             </div>
 
-            <div className="mb-3">
-              共找到 {result.total_files} 个作业文件，成功 {result.success_count} 个，失败{' '}
-              {result.error_count} 个。
+            <div className="mt-4 text-sm text-slate-600">
+              共找到 {result.total_files} 个作业文件，成功 {result.success_count} 个，失败 {result.error_count} 个。
             </div>
 
             {result.processed && result.processed.length ? (
-              <div className="table-responsive">
-                <table className="table table-striped align-middle">
-                  <thead>
+              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-slate-100 text-slate-600">
                     <tr>
-                      <th>文件名</th>
-                      <th>作业次数</th>
-                      <th>写入列</th>
-                      <th>已更新学生</th>
-                      <th>登记册缺失</th>
-                      <th>作业缺失</th>
+                      <th className="px-3 py-2 text-left font-medium">文件名</th>
+                      <th className="px-3 py-2 text-left font-medium">作业次数</th>
+                      <th className="px-3 py-2 text-left font-medium">写入列</th>
+                      <th className="px-3 py-2 text-left font-medium">已更新学生</th>
+                      <th className="px-3 py-2 text-left font-medium">登记册缺失</th>
+                      <th className="px-3 py-2 text-left font-medium">作业缺失</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {result.processed.map((item) => (
-                      <tr key={`${item.file_name}-${item.assignment_number}`}>
-                        <td className="text-break">{item.file_name}</td>
-                        <td>第 {item.assignment_number} 次</td>
-                        <td>{item.assignment_column_letter}</td>
-                        <td>{item.updated_students} 人</td>
-                        <td>{item.missing_in_gradebook.length} 人</td>
-                        <td>{item.missing_in_assignment.length} 人</td>
+                      <tr key={`${item.file_name}-${item.assignment_number}`} className="text-slate-700">
+                        <td className="px-3 py-2 break-all">{item.file_name}</td>
+                        <td className="px-3 py-2">第 {item.assignment_number} 次</td>
+                        <td className="px-3 py-2">{item.assignment_column_letter}</td>
+                        <td className="px-3 py-2">{item.updated_students} 人</td>
+                        <td className="px-3 py-2">{item.missing_in_gradebook.length} 人</td>
+                        <td className="px-3 py-2">{item.missing_in_assignment.length} 人</td>
                       </tr>
                     ))}
                   </tbody>
@@ -369,76 +450,96 @@ export default function ToolboxAssignmentGradeImport() {
 
             {result.errors && result.errors.length ? (
               <div className="mt-4">
-                <h6>写入失败的文件（{result.errors.length}）</h6>
-                <div className="list-group">
+                <h3 className="text-sm font-semibold text-rose-600">
+                  写入失败的文件（{result.errors.length}）
+                </h3>
+                <div className="mt-2 space-y-2">
                   {result.errors.map((item) => (
-                    <div key={`${item.file_name}-${item.assignment_number}`} className="list-group-item list-group-item-warning">
-                      <strong className="text-break">{item.file_name}</strong>
-                      <span className="ms-2 text-muted">第 {item.assignment_number} 次作业</span>
-                      <div className="small text-danger mt-1">{item.error}</div>
+                    <div
+                      key={`${item.file_name}-${item.assignment_number}`}
+                      className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+                    >
+                      <div className="font-semibold break-all">{item.file_name}</div>
+                      <div className="text-rose-600">第 {item.assignment_number} 次作业</div>
+                      <div className="mt-1 text-rose-500">{item.error}</div>
                     </div>
                   ))}
                 </div>
               </div>
             ) : null}
-          </div>
-        </div>
-      ) : null}
+          </section>
+        ) : null}
+      </div>
 
       {modalOpen ? (
-        <>
-          <div className="modal fade show d-block" tabIndex="-1" role="dialog">
-            <div className="modal-dialog modal-lg" role="document">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">选择目录</h5>
-                  <button type="button" className="btn-close" aria-label="Close" onClick={closeModal} />
-                </div>
-                <div className="modal-body">
-                  <div className="input-group mb-3">
-                    <span className="input-group-text">当前路径</span>
-                    <input type="text" className="form-control" value={currentPath} readOnly />
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary"
-                      onClick={() => parentPath && loadDirectory(parentPath)}
-                      disabled={!parentPath}
-                    >
-                      上一级
-                    </button>
-                  </div>
-                  {dirError ? <div className="alert alert-danger">{dirError}</div> : null}
-                  {dirLoading ? (
-                    <div className="text-center">正在加载...</div>
-                  ) : (
-                    <div className="list-group">
-                      {items.map((item) => (
-                        <button
-                          key={item.path}
-                          type="button"
-                          className="list-group-item list-group-item-action"
-                          onClick={() => item.type === 'directory' && loadDirectory(item.path)}
-                        >
-                          {item.type === 'directory' ? '[DIR] ' : '[FILE] '}
-                          {item.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={closeModal}>
-                    取消
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={handleSelectDirectory}>
-                    选择当前目录
-                  </button>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-10">
+          <div className="w-full max-w-3xl rounded-2xl bg-white shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <h3 className="text-base font-semibold text-slate-800">选择目录</h3>
+              <button
+                type="button"
+                className="text-sm text-slate-500 hover:text-slate-700"
+                onClick={closeModal}
+              >
+                关闭
+              </button>
+            </div>
+            <div className="px-6 py-5">
+              <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <span className="font-semibold text-slate-700">当前路径：</span>
+                <span className="flex-1 break-all">{currentPath}</span>
+                <button
+                  type="button"
+                  className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-white"
+                  onClick={() => parentPath && loadDirectory(parentPath)}
+                  disabled={!parentPath}
+                >
+                  上一级
+                </button>
               </div>
+              {dirError ? (
+                <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                  {dirError}
+                </div>
+              ) : null}
+              {dirLoading ? (
+                <div className="mt-4 text-center text-sm text-slate-500">正在加载...</div>
+              ) : (
+                <div className="mt-4 space-y-2">
+                  {items.map((item) => (
+                    <button
+                      key={item.path}
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-left text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                      onClick={() => item.type === 'directory' && loadDirectory(item.path)}
+                    >
+                      <span>
+                        {item.type === 'directory' ? '[DIR]' : '[FILE]'} {item.name}
+                      </span>
+                      <span className="text-xs text-slate-400">{item.type}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                onClick={closeModal}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                onClick={handleSelectDirectory}
+              >
+                选择当前目录
+              </button>
             </div>
           </div>
-          <div className="modal-backdrop fade show" />
-        </>
+        </div>
       ) : null}
     </div>
   )

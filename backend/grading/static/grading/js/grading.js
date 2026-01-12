@@ -21,6 +21,67 @@ let pendingDefaultLabComment = null;  // 实验报告默认评价待应用
 window.currentCourse = null;
 window.currentRepoId = null;
 
+// Allow external UI (React) to update repo selection
+window.setCurrentRepoId = function (repoId) {
+  currentRepoId = repoId || null;
+  window.currentRepoId = currentRepoId;
+};
+
+// Allow external UI (React) to update course selection
+window.setCurrentCourse = function (courseName) {
+  currentCourse = courseName || null;
+  window.currentCourse = currentCourse;
+};
+
+// Ensure API calls reach the backend when running through the frontend dev server
+function resolveGradingApiUrl(url) {
+  const fallbackBase = `${window.location.protocol}//${window.location.hostname}:8000`;
+  const baseUrl = window.GRADING_API_BASE_URL || fallbackBase;
+  if (!url || typeof url !== 'string') {
+    return url;
+  }
+  if (url.startsWith('/grading/')) {
+    return `${baseUrl}${url}`;
+  }
+  return url;
+}
+
+function applyAjaxUrlRewrite() {
+  if (!window.jQuery || !window.jQuery.ajax) {
+    return false;
+  }
+  if (window.jQuery.ajax._gradingWrapped) {
+    return true;
+  }
+  const originalAjax = window.jQuery.ajax;
+  const wrapped = function(options) {
+    if (options && options.url) {
+      options.url = resolveGradingApiUrl(options.url);
+    }
+    return originalAjax.apply(this, arguments);
+  };
+  wrapped._gradingWrapped = true;
+  window.jQuery.ajax = wrapped;
+  if (typeof window.jQuery.ajaxPrefilter === 'function') {
+    window.jQuery.ajaxPrefilter(function(options) {
+      options.url = resolveGradingApiUrl(options.url);
+    });
+  }
+  return true;
+}
+
+(function waitForJquery() {
+  if (applyAjaxUrlRewrite()) {
+    return;
+  }
+  const timer = setInterval(function() {
+    if (applyAjaxUrlRewrite()) {
+      clearInterval(timer);
+    }
+  }, 50);
+})();
+
+// ?????? CSRF Token
 // 获取 CSRF Token
 window.getCSRFToken = function() {
   const name = 'csrftoken';
@@ -663,11 +724,10 @@ window.loadFile = function(path) {
     $('#add-grade-to-file').prop('disabled', true);
 
     // 获取当前文件所在目录
-    const dirPath = normalizedPath.substring(0, normalizedPath.lastIndexOf('/'));
-    if (!dirPath) {
-        console.error('Invalid directory path for:', path);
-        $('#directory-file-count').text('0');
-        return;
+    const lastSlashIndex = normalizedPath.lastIndexOf('/');
+    const dirPath = lastSlashIndex >= 0 ? normalizedPath.substring(0, lastSlashIndex) : '';
+    if (lastSlashIndex == -1) {
+        console.warn('File is at repository root:', path);
     }
 
     console.log('Current directory path:', dirPath);
@@ -675,7 +735,7 @@ window.loadFile = function(path) {
 
     // 尝试从目录树中获取缓存的文件数量
     const tree = $('#directory-tree').jstree(true);
-    const node = tree.get_node(dirPath);
+    const node = dirPath ? tree.get_node(dirPath) : null;
     console.log('Directory node:', node);
 
     if (node && node.data && node.data.file_count !== undefined) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client.js'
 
 export default function SuperAdminDashboard() {
@@ -12,7 +12,7 @@ export default function SuperAdminDashboard() {
     const response = await apiFetch('/grading/api/tenants/')
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setMessage((data && data.message) || 'Failed to load tenants')
+      setMessage((data && data.message) || '加载租户失败')
       return
     }
     setTenants(data.tenants || [])
@@ -33,7 +33,7 @@ export default function SuperAdminDashboard() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setMessage((data && data.message) || 'Failed to create tenant')
+      setMessage((data && data.message) || '创建租户失败')
       return
     }
     setForm({ name: '', description: '' })
@@ -56,7 +56,7 @@ export default function SuperAdminDashboard() {
     })
     const data = await response.json().catch(() => null)
     if (!response.ok || (data && data.status !== 'success')) {
-      setMessage((data && data.message) || 'Failed to update tenant')
+      setMessage((data && data.message) || '更新租户失败')
       return
     }
     setEditing(null)
@@ -64,73 +64,93 @@ export default function SuperAdminDashboard() {
   }
 
   return (
-    <div className="row g-4">
-      <div className="col-lg-4">
-        <div className="card">
-          <div className="card-header">
-            <h5 className="mb-0">Create Tenant</h5>
+    <div className="min-h-screen">
+      <div className="page-shell flex flex-col gap-6">
+        <header>
+          <h1 className="text-2xl font-semibold text-slate-900">超级管理员</h1>
+          <p className="mt-1 text-sm text-slate-500">创建与管理租户信息。</p>
+        </header>
+
+        {message ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            {message}
           </div>
-          <div className="card-body">
-            {message ? <div className="alert alert-info">{message}</div> : null}
-            <form onSubmit={handleCreate}>
-              <div className="mb-3">
-                <label className="form-label">Name</label>
-                <input className="form-control" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
+        ) : null}
+
+        <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+          <section className="card-surface p-5">
+            <h2 className="text-base font-semibold text-slate-800">创建租户</h2>
+            <form className="mt-4 space-y-4" onSubmit={handleCreate}>
+              <div>
+                <label className="text-sm font-medium text-slate-700">名称</label>
+                <input
+                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                  value={form.name}
+                  onChange={(event) => setForm({ ...form, name: event.target.value })}
+                  required
+                />
               </div>
-              <div className="mb-3">
-                <label className="form-label">Description</label>
-                <textarea className="form-control" rows="3" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
+              <div>
+                <label className="text-sm font-medium text-slate-700">描述</label>
+                <textarea
+                  className="mt-2 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                  rows="3"
+                  value={form.description}
+                  onChange={(event) => setForm({ ...form, description: event.target.value })}
+                />
               </div>
-              <button className="btn btn-primary w-100" type="submit">
-                Create Tenant
+              <button
+                className="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                type="submit"
+              >
+                创建租户
               </button>
             </form>
-          </div>
-        </div>
-        <div className="card mt-3">
-          <div className="card-header">
-            <h6 className="mb-0">Stats</h6>
-          </div>
-          <div className="card-body">
-            <div>Total users: {stats.total_users}</div>
-            <div>Active tenants: {stats.active_tenants}</div>
-          </div>
-        </div>
-      </div>
-      <div className="col-lg-8">
-        <div className="card">
-          <div className="card-header">
-            <h5 className="mb-0">Tenants</h5>
-          </div>
-          <div className="card-body">
+            <div className="mt-6 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <div>用户总数：{stats.total_users}</div>
+              <div>活跃租户：{stats.active_tenants}</div>
+            </div>
+          </section>
+
+          <section className="card-surface p-5">
+            <h2 className="text-base font-semibold text-slate-800">租户列表</h2>
             {tenants.length === 0 ? (
-              <div className="alert alert-secondary">No tenants found.</div>
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                暂无租户。
+              </div>
             ) : (
-              <div className="table-responsive">
-                <table className="table table-sm">
-                  <thead>
+              <div className="mt-4 overflow-hidden rounded-lg border border-slate-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-slate-100 text-slate-600">
                     <tr>
-                      <th>Name</th>
-                      <th>Users</th>
-                      <th>Status</th>
-                      <th>Actions</th>
+                      <th className="px-4 py-2 text-left font-medium">名称</th>
+                      <th className="px-4 py-2 text-left font-medium">用户数</th>
+                      <th className="px-4 py-2 text-left font-medium">状态</th>
+                      <th className="px-4 py-2 text-left font-medium">操作</th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-slate-100 bg-white">
                     {tenants.map((tenant) => (
-                      <tr key={tenant.id}>
-                        <td>{tenant.name}</td>
-                        <td>{tenant.user_count}</td>
-                        <td>
-                          {tenant.is_active ? (
-                            <span className="badge bg-success">Active</span>
-                          ) : (
-                            <span className="badge bg-secondary">Inactive</span>
-                          )}
+                      <tr key={tenant.id} className="text-slate-700">
+                        <td className="px-4 py-2 font-medium text-slate-800">{tenant.name}</td>
+                        <td className="px-4 py-2">{tenant.user_count}</td>
+                        <td className="px-4 py-2">
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              tenant.is_active
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-slate-100 text-slate-600'
+                            }`}
+                          >
+                            {tenant.is_active ? '活跃' : '停用'}
+                          </span>
                         </td>
-                        <td>
-                          <button className="btn btn-outline-primary btn-sm" onClick={() => setEditing(tenant)}>
-                            Edit
+                        <td className="px-4 py-2">
+                          <button
+                            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                            onClick={() => setEditing(tenant)}
+                          >
+                            编辑
                           </button>
                         </td>
                       </tr>
@@ -139,43 +159,51 @@ export default function SuperAdminDashboard() {
                 </table>
               </div>
             )}
-          </div>
+          </section>
         </div>
 
         {editing ? (
-          <div className="card mt-3">
-            <div className="card-header">
-              <h6 className="mb-0">Edit Tenant</h6>
-            </div>
-            <div className="card-body">
-              <form onSubmit={handleUpdate}>
-                <div className="row g-2">
-                  <div className="col-md-6">
-                    <input className="form-control" value={editing.name} onChange={(event) => setEditing({ ...editing, name: event.target.value })} />
-                  </div>
-                  <div className="col-md-6">
-                    <input className="form-control" value={editing.description || ''} onChange={(event) => setEditing({ ...editing, description: event.target.value })} />
-                  </div>
-                  <div className="col-12">
-                    <div className="form-check">
-                      <input className="form-check-input" type="checkbox" checked={editing.is_active} onChange={(event) => setEditing({ ...editing, is_active: event.target.checked })} id="tenantActive" />
-                      <label className="form-check-label" htmlFor="tenantActive">
-                        Active
-                      </label>
-                    </div>
-                  </div>
-                  <div className="col-12 d-flex gap-2">
-                    <button className="btn btn-primary" type="submit">
-                      Save
-                    </button>
-                    <button className="btn btn-outline-secondary" type="button" onClick={() => setEditing(null)}>
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </form>
-            </div>
-          </div>
+          <section className="card-surface p-5">
+            <h2 className="text-base font-semibold text-slate-800">编辑租户</h2>
+            <form className="mt-4 space-y-3" onSubmit={handleUpdate}>
+              <div className="grid gap-3 md:grid-cols-2">
+                <input
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                  value={editing.name}
+                  onChange={(event) => setEditing({ ...editing, name: event.target.value })}
+                />
+                <input
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-slate-400"
+                  value={editing.description || ''}
+                  onChange={(event) => setEditing({ ...editing, description: event.target.value })}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-slate-600">
+                <input
+                  className="h-4 w-4 rounded border-slate-300 text-slate-900"
+                  type="checkbox"
+                  checked={editing.is_active}
+                  onChange={(event) => setEditing({ ...editing, is_active: event.target.checked })}
+                />
+                活跃
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800"
+                  type="submit"
+                >
+                  保存
+                </button>
+                <button
+                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                  type="button"
+                  onClick={() => setEditing(null)}
+                >
+                  取消
+                </button>
+              </div>
+            </form>
+          </section>
         ) : null}
       </div>
     </div>

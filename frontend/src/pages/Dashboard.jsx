@@ -1,29 +1,27 @@
-import { Link } from 'react-router-dom'
+﻿import { Link } from 'react-router-dom'
 
 export default function Dashboard() {
   return (
-    <div className="card">
-      <div className="card-header">
-        <h4 className="mb-0">仪表盘</h4>
-      </div>
-      <div className="card-body">
-        <p className="text-muted">
-          使用下面入口访问评分、仓库与作业管理功能。
+    <div className="card-surface p-6">
+      <div className="space-y-2">
+        <h1 className="text-xl font-semibold text-slate-900">仪表盘</h1>
+        <p className="text-sm text-slate-500">
+          使用下面入口访问评分、作业管理与批量处理功能。
         </p>
-        <div className="d-flex flex-wrap gap-2">
-          <Link className="btn btn-primary" to="/grading">
-            进入评分
-          </Link>
-          <Link className="btn btn-outline-primary" to="/assignments">
-            作业管理
-          </Link>
-          <Link className="btn btn-outline-info" to="/batch-ai-score">
-            批量AI评分
-          </Link>
-          <Link className="btn btn-outline-success" to="/batch-grade">
-            批量登分
-          </Link>
-        </div>
+      </div>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Link className="btn-primary" to="/grading">
+          进入评分
+        </Link>
+        <Link className="btn-soft" to="/assignments">
+          作业管理
+        </Link>
+        <Link className="btn-soft" to="/batch-ai-score">
+          批量 AI 评分
+        </Link>
+        <Link className="btn-soft" to="/batch-grade">
+          批量登分
+        </Link>
       </div>
     </div>
   )

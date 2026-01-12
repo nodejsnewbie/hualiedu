@@ -7708,13 +7708,15 @@ def _build_git_auth_url(git_url: str, username: str = "", password: str = "") ->
     if not username or not password:
         return git_url
 
-    from urllib.parse import urlparse, urlunparse
+    from urllib.parse import quote, urlparse, urlunparse
 
     parsed = urlparse(git_url)
     if parsed.scheme not in ["http", "https"]:
         return git_url
 
-    netloc = f"{username}:{password}@{parsed.netloc}"
+    safe_username = quote(username, safe="")
+    safe_password = quote(password, safe="")
+    netloc = f"{safe_username}:{safe_password}@{parsed.netloc}"
     return urlunparse(
         (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
     )

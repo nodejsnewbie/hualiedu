@@ -1,7 +1,103 @@
-body {
-  background-color: #f5f6f8;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --ink-950: #0b1020;
+  --ink-900: #111827;
+  --ink-700: #334155;
+  --surface: #ffffff;
+  --surface-muted: rgba(255, 255, 255, 0.86);
+  --accent-amber: #f59e0b;
+  --accent-cyan: #22d3ee;
 }
 
-main.container {
-  padding-bottom: 2rem;
+body {
+  font-family: "IBM Plex Sans", "Space Grotesk", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  background:
+    radial-gradient(1200px 520px at 10% -10%, rgba(245, 158, 11, 0.18), transparent 65%),
+    radial-gradient(900px 540px at 95% 0%, rgba(34, 211, 238, 0.22), transparent 60%),
+    #f8fafc;
+  color: var(--ink-900);
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+ul,
+ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+::selection {
+  background: rgba(245, 158, 11, 0.25);
+}
+
+@layer base {
+  h1 {
+    @apply text-2xl font-semibold tracking-tight text-slate-900;
+  }
+
+  h2 {
+    @apply text-lg font-semibold text-slate-800;
+  }
+
+  h3 {
+    @apply text-base font-semibold text-slate-700;
+  }
+
+  p {
+    @apply text-slate-600;
+  }
+
+  a {
+    @apply text-slate-700;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply rounded-lg border border-slate-200 bg-white/90 text-slate-800 shadow-sm outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-amber-200/60;
+  }
+
+  button {
+    @apply transition;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-6xl px-4 py-10 sm:px-6;
+  }
+
+  .card-surface {
+    @apply rounded-2xl border border-slate-200/70 bg-white/85 shadow-[0_25px_60px_-45px_rgba(15,23,42,0.45)];
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 250, 252, 0.88));
+  }
+
+  .card-header {
+    @apply flex flex-wrap items-center justify-between gap-3;
+  }
+
+  .pill {
+    @apply inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-800;
+  }
+
+  .btn-soft {
+    @apply inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50;
+  }
 }

@@ -31,6 +31,8 @@
 """
 
 import logging
+import os
+import subprocess
 from grading.services.storage_adapter import RemoteAccessError
 from grading.services.repository_service import RepositoryService
 from grading.services.git_storage_adapter import GitStorageAdapter
@@ -43,7 +45,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_http_methods
 
 from grading.assignment_utils import ValidationError
-from grading.models import Assignment, Class, Course
+from grading.models import AssignmentSetting
 from grading.services.assignment_management_service import AssignmentManagementService
 
 logger = logging.getLogger(__name__)
@@ -68,6 +70,102 @@ def _looks_like_private_key(value: str) -> bool:
     if "PRIVATE KEY" in normalized and "BEGIN" in normalized:
         return True
     return False
+
+
+def _build_git_auth_url(git_url: str, username: str = "", password: str = "") -> str:
+    if not username or not password:
+        return git_url
+
+    from urllib.parse import quote, urlparse, urlunparse
+
+    parsed = urlparse(git_url)
+    if parsed.scheme not in ["http", "https"]:
+        return git_url
+
+    safe_username = quote(username, safe="")
+    safe_password = quote(password, safe="")
+    netloc = f"{safe_username}:{safe_password}@{parsed.netloc}"
+    return urlunparse(
+        (parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment)
+    )
+
+
+def _get_remote_default_branch(git_url: str, username: str = "", password: str = "") -> str | None:
+    auth_url = _build_git_auth_url(git_url, username=username, password=password)
+    try:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        result = subprocess.run(
+            ["git", "ls-remote", "--symref", auth_url, "HEAD"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            return None
+        for line in result.stdout.splitlines():
+            if line.startswith("ref: ") and "\tHEAD" in line:
+                ref = line.split("\t", 1)[0].strip()
+                if ref.startswith("ref: refs/heads/"):
+                    return ref.replace("ref: refs/heads/", "").strip()
+    except Exception:
+        return None
+    return None
+
+
+def _get_remote_branches(git_url: str, username: str = "", password: str = "") -> list[str]:
+    auth_url = _build_git_auth_url(git_url, username=username, password=password)
+    branches = []
+    try:
+        env = os.environ.copy()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        result = subprocess.run(
+            ["git", "ls-remote", "--heads", auth_url],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+        if result.returncode != 0:
+            return []
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            ref = parts[1].strip()
+            if ref.startswith("refs/heads/"):
+                branches.append(ref.replace("refs/heads/", ""))
+    except Exception:
+        return []
+    return sorted(set(branches))
+
+
+@login_required
+@require_http_methods(["POST"])
+def git_branches_api(request):
+    """Return remote branch list and default branch for a Git repository."""
+    git_url = request.POST.get("git_url", "").strip()
+    git_username = request.POST.get("git_username", "").strip()
+    git_password = request.POST.get("git_password", "").strip()
+
+    if not git_url:
+        return JsonResponse({"status": "error", "message": "Git仓库URL不能为空"}, status=400)
+
+    default_branch = _get_remote_default_branch(
+        git_url=git_url, username=git_username, password=git_password
+    )
+    branches = _get_remote_branches(git_url=git_url, username=git_username, password=git_password)
+    if not branches:
+        return JsonResponse({"status": "error", "message": "无法获取远程分支列表"}, status=400)
+
+    return JsonResponse(
+        {"status": "success", "branches": branches, "default_branch": default_branch}
+    )
 
 
 def _validate_git_credentials(git_url: str, git_branch: str, git_username: str, git_password: str):
@@ -166,34 +264,18 @@ def assignment_list_view(request):
         service = AssignmentManagementService()
 
         # 获取筛选参数
-        course_id = request.GET.get("course_id")
-        class_id = request.GET.get("class_id")
-        storage_type = request.GET.get("storage_type")
-
-        # 转换参数类型
-        course_id = int(course_id) if course_id else None
-        class_id = int(class_id) if class_id else None
+        repo_type = request.GET.get("repo_type") or request.GET.get("storage_type")
 
         # 获取作业列表
-        assignments = service.list_assignments(
-            teacher=request.user, course_id=course_id, class_id=class_id, storage_type=storage_type
-        )
-
-        # 获取筛选选项
-        courses = service.get_teacher_courses(request.user)
-        classes = service.get_teacher_classes(request.user, course_id=course_id)
+        assignments = service.list_assignments(teacher=request.user, repo_type=repo_type)
 
         # 获取统计信息
         summary = service.get_assignment_summary(request.user)
 
         context = {
             "assignments": assignments,
-            "courses": courses,
-            "classes": classes,
             "summary": summary,
-            "selected_course_id": course_id,
-            "selected_class_id": class_id,
-            "selected_storage_type": storage_type,
+            "selected_repo_type": repo_type,
             "page_title": "作业管理",
         }
 
@@ -212,18 +294,9 @@ def assignment_list_api(request):
     try:
         service = AssignmentManagementService()
 
-        course_id = request.GET.get("course_id")
-        class_id = request.GET.get("class_id")
-        storage_type = request.GET.get("storage_type")
+        repo_type = request.GET.get("repo_type") or request.GET.get("storage_type")
 
-        course_id = int(course_id) if course_id else None
-        class_id = int(class_id) if class_id else None
-
-        assignments = service.list_assignments(
-            teacher=request.user, course_id=course_id, class_id=class_id, storage_type=storage_type
-        )
-        courses = service.get_teacher_courses(request.user)
-        classes = service.get_teacher_classes(request.user, course_id=course_id)
+        assignments = service.list_assignments(teacher=request.user, repo_type=repo_type)
         summary = service.get_assignment_summary(request.user)
 
         assignment_list = []
@@ -232,37 +305,23 @@ def assignment_list_api(request):
                 {
                     "id": assignment.id,
                     "name": assignment.name,
-                    "storage_type": assignment.storage_type,
+                    "repo_type": assignment.repo_type,
                     "description": assignment.description,
-                    "course": {
-                        "id": assignment.course.id if assignment.course else None,
-                        "name": assignment.course.name if assignment.course else "",
-                    },
-                    "class_obj": {
-                        "id": assignment.class_obj.id if assignment.class_obj else None,
-                        "name": assignment.class_obj.name if assignment.class_obj else "",
-                    },
                     "git_url": assignment.git_url,
                     "git_branch": assignment.git_branch,
-                    "base_path": assignment.base_path,
+                    "git_username": assignment.git_username,
+                    "filesystem_path": assignment.filesystem_path,
                     "created_at": assignment.created_at.isoformat() if assignment.created_at else None,
                     "updated_at": assignment.updated_at.isoformat() if assignment.updated_at else None,
                 }
             )
 
-        course_list = [{"id": course.id, "name": course.name} for course in courses]
-        class_list = [{"id": cls.id, "name": cls.name} for cls in classes]
-
         return JsonResponse(
             {
                 "status": "success",
                 "assignments": assignment_list,
-                "courses": course_list,
-                "classes": class_list,
                 "summary": summary,
-                "selected_course_id": course_id,
-                "selected_class_id": class_id,
-                "selected_storage_type": storage_type,
+                "selected_repo_type": repo_type,
             }
         )
     except Exception as e:
@@ -354,30 +413,13 @@ def assignment_create_view(request):
 
             # 获取表单数据
             name = request.POST.get("name", "").strip()
-            storage_type = request.POST.get("storage_type", "git").strip() or "git"
+            storage_type = (
+                request.POST.get("storage_type")
+                or request.POST.get("repo_type")
+                or "git"
+            ).strip()
             description = request.POST.get("description", "").strip()
-            course_id = request.POST.get("course_id")
-            class_id = request.POST.get("class_id")
-
-            # 验证必填字段
-            if not name:
-                return JsonResponse({"status": "error", "message": "作业名称不能为空"})
-
-            if storage_type != "git":
-                return JsonResponse({"status": "error", "message": "作业管理仅支持 Git 仓库"})
-
-            if not course_id:
-                return JsonResponse({"status": "error", "message": "请选择课程"})
-
-            if not class_id:
-                return JsonResponse({"status": "error", "message": "请选择班级"})
-
-            # 获取课程和班级对象
-            try:
-                course = Course.objects.get(id=course_id, tenant=request.user.profile.tenant)
-                class_obj = Class.objects.get(id=class_id, tenant=request.user.profile.tenant)
-            except (Course.DoesNotExist, Class.DoesNotExist):
-                return JsonResponse({"status": "error", "message": "课程或班级不存在"})
+            base_path = request.POST.get("base_path", "").strip()
 
             # 准备创建参数
             create_params = {"description": description}
@@ -385,7 +427,7 @@ def assignment_create_view(request):
             # 根据存储类型添加特定参数
             if storage_type == "git":
                 git_url = request.POST.get("git_url", "").strip()
-                git_branch = request.POST.get("git_branch", "main").strip()
+                git_branch = request.POST.get("git_branch", "").strip()
                 git_username = request.POST.get("git_username", "").strip()
                 git_password = request.POST.get("git_password", "").strip()
 
@@ -394,29 +436,49 @@ def assignment_create_view(request):
 
                 is_valid, error_message = _validate_git_credentials(
                     git_url=git_url,
-                    git_branch=git_branch or "main",
+                    git_branch=git_branch or "",
                     git_username=git_username,
                     git_password=git_password,
                 )
                 if not is_valid:
                     return JsonResponse({"status": "error", "message": error_message})
 
+                branches = _get_remote_branches(
+                    git_url=git_url, username=git_username, password=git_password
+                )
+                if not branches:
+                    return JsonResponse({"status": "error", "message": "无法获取远程分支列表"})
+
+                default_branch = _get_remote_default_branch(
+                    git_url=git_url, username=git_username, password=git_password
+                )
+                selected_branch = git_branch or default_branch or branches[0]
+                if selected_branch not in branches:
+                    return JsonResponse(
+                        {
+                            "status": "error",
+                            "message": "分支不存在，请从远程分支列表中选择",
+                        }
+                    )
+
                 create_params.update(
                     {
                         "git_url": git_url,
-                        "git_branch": git_branch or "main",
+                        "git_branch": selected_branch,
                         "git_username": git_username,
                         "git_password": git_password,
                     }
                 )
+            elif storage_type == "filesystem":
+                if not base_path:
+                    return JsonResponse({"status": "error", "message": "存储路径不能为空"})
+                create_params["filesystem_path"] = base_path
 
             # 创建作业配置
             assignment = service.create_assignment(
                 teacher=request.user,
-                course=course,
-                class_obj=class_obj,
                 name=name,
-                storage_type=storage_type,
+                repo_type=storage_type,
                 **create_params,
             )
 
@@ -454,7 +516,7 @@ def assignment_edit_view(request, assignment_id):
     try:
         # 获取作业配置
         assignment = get_object_or_404(
-            Assignment, id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
+            AssignmentSetting, id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
         )
 
         if request.method == "GET":
@@ -470,7 +532,9 @@ def assignment_edit_view(request, assignment_id):
 
             # 基本字段
             if "name" in request.POST:
-                update_fields["name"] = request.POST.get("name", "").strip()
+                name = request.POST.get("name", "").strip()
+                if name:
+                    update_fields["name"] = name
 
             if "description" in request.POST:
                 update_fields["description"] = request.POST.get("description", "").strip()
@@ -479,7 +543,7 @@ def assignment_edit_view(request, assignment_id):
                 update_fields["is_active"] = request.POST.get("is_active") == "true"
 
             # Git特定字段
-            if assignment.storage_type == "git":
+            if assignment.repo_type == "git":
                 if "git_url" in request.POST:
                     update_fields["git_url"] = request.POST.get("git_url", "").strip()
 
@@ -493,11 +557,14 @@ def assignment_edit_view(request, assignment_id):
                     git_password = request.POST.get("git_password", "").strip()
                     if git_password:  # 只在提供了新密码时更新
                         update_fields["git_password"] = git_password
+            elif assignment.repo_type == "filesystem":
+                if "base_path" in request.POST:
+                    update_fields["filesystem_path"] = request.POST.get("base_path", "").strip()
 
             # 执行更新
-            if assignment.storage_type == "git":
+            if assignment.repo_type == "git":
                 git_url = update_fields.get("git_url", assignment.git_url or "")
-                git_branch = update_fields.get("git_branch", assignment.git_branch or "main")
+                git_branch = update_fields.get("git_branch", assignment.git_branch or "")
                 git_username = update_fields.get("git_username", assignment.git_username or "")
                 git_password = update_fields.get("git_password", "")
 
@@ -507,12 +574,23 @@ def assignment_edit_view(request, assignment_id):
                 if needs_validation:
                     is_valid, error_message = _validate_git_credentials(
                         git_url=git_url,
-                        git_branch=git_branch or "main",
+                        git_branch=git_branch or "",
                         git_username=git_username,
                         git_password=git_password,
                     )
                     if not is_valid:
                         return JsonResponse({"status": "error", "message": error_message})
+
+                if "git_branch" in update_fields:
+                    branches = _get_remote_branches(
+                        git_url=git_url, username=git_username, password=git_password
+                    )
+                    if not branches:
+                        return JsonResponse({"status": "error", "message": "无法获取远程分支列表"})
+                    if git_branch not in branches:
+                        return JsonResponse(
+                            {"status": "error", "message": "分支不存在，请从远程分支列表中选择"}
+                        )
 
             assignment = service.update_assignment(
                 assignment=assignment, teacher=request.user, **update_fields
@@ -549,7 +627,7 @@ def assignment_delete_view(request, assignment_id):
     try:
         # 获取作业配置
         assignment = get_object_or_404(
-            Assignment, id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
+            AssignmentSetting, id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
         )
 
         service = AssignmentManagementService()
@@ -657,10 +735,10 @@ def get_assignment_structure_api(request):
 
         # 获取作业配置
         try:
-            assignment = Assignment.objects.get(
+            assignment = AssignmentSetting.objects.get(
                 id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
             )
-        except Assignment.DoesNotExist:
+        except AssignmentSetting.DoesNotExist:
             return JsonResponse({"success": False, "error": "作业配置不存在或无权限访问"})
 
         # 获取目录结构
@@ -694,10 +772,10 @@ def get_assignment_file_api(request):
 
         # 获取作业配置
         try:
-            assignment = Assignment.objects.get(
+            assignment = AssignmentSetting.objects.get(
                 id=assignment_id, owner=request.user, tenant=request.user.profile.tenant
             )
-        except Assignment.DoesNotExist:
+        except AssignmentSetting.DoesNotExist:
             return JsonResponse({"success": False, "error": "作业配置不存在或无权限访问"})
 
         # 获取存储适配器
@@ -804,10 +882,10 @@ def upload_assignment_file_api(request):
         try:
             # 学生可以访问任何文件系统类型的作业配置
             # 注意：这里不限制owner，因为学生需要向教师的作业提交
-            assignment = Assignment.objects.get(
-                id=assignment_id, storage_type="filesystem", is_active=True  # 只支持文件系统类型
+            assignment = AssignmentSetting.objects.get(
+                id=assignment_id, repo_type="filesystem", is_active=True  # 只支持文件系统类型
             )
-        except Assignment.DoesNotExist:
+        except AssignmentSetting.DoesNotExist:
             return JsonResponse({"success": False, "message": "作业配置不存在或不支持文件上传"})
 
         # 上传文件
@@ -854,10 +932,10 @@ def create_assignment_directory_api(request):
 
         # 获取作业配置
         try:
-            assignment = Assignment.objects.get(
-                id=assignment_id, storage_type="filesystem", is_active=True
+            assignment = AssignmentSetting.objects.get(
+                id=assignment_id, repo_type="filesystem", is_active=True
             )
-        except Assignment.DoesNotExist:
+        except AssignmentSetting.DoesNotExist:
             return JsonResponse({"success": False, "message": "作业配置不存在或不支持此操作"})
 
         # 创建目录
@@ -899,8 +977,8 @@ def get_assignment_directories_api(request):
 
         # 获取作业配置
         try:
-            assignment = Assignment.objects.get(id=assignment_id, is_active=True)
-        except Assignment.DoesNotExist:
+            assignment = AssignmentSetting.objects.get(id=assignment_id, is_active=True)
+        except AssignmentSetting.DoesNotExist:
             return JsonResponse({"success": False, "message": "作业配置不存在"})
 
         # 获取目录列表
@@ -930,25 +1008,7 @@ def get_course_classes_api(request):
     - Requirements 7.2: 实现课程和班级选择器
     """
     try:
-        course_id = request.GET.get("course_id")
-
-        if not course_id:
-            return JsonResponse({"status": "error", "message": "缺少课程ID参数"})
-
-        # 获取课程
-        try:
-            course = Course.objects.get(id=course_id, tenant=request.user.profile.tenant)
-        except Course.DoesNotExist:
-            return JsonResponse({"status": "error", "message": "课程不存在"})
-
-        # 获取该课程的班级列表
-        classes = (
-            Class.objects.filter(course=course, tenant=request.user.profile.tenant)
-            .order_by("name")
-            .values("id", "name")
-        )
-
-        return JsonResponse({"status": "success", "classes": list(classes)})
+        return JsonResponse({"status": "success", "classes": []})
 
     except Exception as e:
         logger.error(f"获取课程班级列表失败: {str(e)}", exc_info=True)

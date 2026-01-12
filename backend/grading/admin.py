@@ -16,6 +16,7 @@ from django.utils.html import format_html
 
 from .models import (
     Assignment,
+    AssignmentSetting,
     Class,
     CommentTemplate,
     Course,
@@ -294,6 +295,17 @@ class AssignmentAdmin(admin.ModelAdmin):
             },
         ),
     )
+
+
+@admin.register(AssignmentSetting)
+class AssignmentSettingAdmin(admin.ModelAdmin):
+    """作业设置管理界面"""
+
+    list_display = ("name", "repo_type", "owner", "is_active", "created_at")
+    list_filter = ("repo_type", "is_active", "created_at")
+    search_fields = ("name", "description", "owner__username")
+    ordering = ("-created_at",)
+    readonly_fields = ("created_at", "updated_at", "owner", "tenant")
 
     def get_queryset(self, request):
         """只显示当前教师的作业配置"""

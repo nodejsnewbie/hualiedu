@@ -940,10 +940,20 @@ class Assignment(models.Model):
         Tenant, on_delete=models.CASCADE, related_name="assignments", help_text="所属租户"
     )
     course = models.ForeignKey(
-        Course, on_delete=models.CASCADE, related_name="assignments", help_text="关联课程"
+        Course,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        null=True,
+        blank=True,
+        help_text="关联课程（可选）",
     )
     class_obj = models.ForeignKey(
-        Class, on_delete=models.CASCADE, related_name="assignments", help_text="关联班级"
+        Class,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        null=True,
+        blank=True,
+        help_text="关联班级（可选）",
     )
     name = models.CharField(max_length=255, help_text="作业名称")
     description = models.TextField(blank=True, help_text="作业描述")
@@ -1060,6 +1070,82 @@ class Assignment(models.Model):
                 "base_path": self.base_path,
             }
 
+
+class AssignmentSetting(models.Model):
+    """作业设置模型 - 管理作业提交方式与存储位置"""
+
+    REPO_TYPE_CHOICES = [
+        ("git", "Git仓库"),
+        ("filesystem", "文件上传"),
+    ]
+
+    owner = models.ForeignKey(
+        "auth.User",
+        on_delete=models.CASCADE,
+        related_name="assignment_settings",
+        help_text="作业设置创建者（教师）",
+    )
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="assignment_settings", help_text="所属租户"
+    )
+    name = models.CharField(max_length=255, help_text="作业设置名称")
+    repo_type = models.CharField(
+        max_length=20, choices=REPO_TYPE_CHOICES, default="filesystem", help_text="存储类型"
+    )
+
+    # Git 仓库配置
+    git_url = models.CharField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="Git仓库URL（支持 http://, https://, git://, ssh://, git@ 格式）",
+    )
+    git_branch = models.CharField(max_length=100, default="main", blank=True, help_text="Git分支")
+    git_username = models.CharField(max_length=100, blank=True, help_text="Git用户名")
+    git_password_encrypted = models.CharField(max_length=500, blank=True, help_text="加密的Git密码")
+
+    # 文件上传配置
+    filesystem_path = models.CharField(max_length=500, blank=True, help_text="作业提交根目录")
+
+    description = models.TextField(blank=True, help_text="作业设置描述")
+    is_active = models.BooleanField(default=True, help_text="是否激活")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "grading_assignment_setting"
+        verbose_name = "作业设置"
+        verbose_name_plural = "作业设置"
+        ordering = ["-created_at"]
+        unique_together = ["owner", "name"]
+        indexes = [
+            models.Index(fields=["owner", "is_active"]),
+            models.Index(fields=["tenant", "is_active"]),
+            models.Index(fields=["repo_type", "is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.owner.username} - {self.name}"
+
+    def is_git_storage(self):
+        return self.repo_type == "git" and bool(self.git_url)
+
+    def get_display_path(self):
+        if self.is_git_storage():
+            return self.git_url or ""
+        return self.filesystem_path
+
+    def get_storage_config(self):
+        if self.is_git_storage():
+            return {
+                "type": "git",
+                "url": self.git_url,
+                "branch": self.git_branch or "main",
+                "username": self.git_username,
+                "password_encrypted": self.git_password_encrypted,
+            }
+        return {"type": "filesystem", "base_path": self.filesystem_path}
+
     def validate_git_config(self):
         """验证Git配置完整性
 
@@ -1073,11 +1159,11 @@ class Assignment(models.Model):
             - git_branch如果未配置，自动设置为"main"
             - git_username和git_password_encrypted是可选的，用于私有仓库认证
         """
-        if self.storage_type == "git":
+        if self.repo_type == "git":
             if not self.git_url:
                 raise ValueError("Git存储方式必须提供仓库URL")
             if not self.git_branch:
-                self.git_branch = "main"
+                raise ValueError("Git存储方式必须提供分支名称")
 
     def validate_filesystem_config(self):
         """验证文件系统配置完整性
@@ -1092,13 +1178,9 @@ class Assignment(models.Model):
             这确保了不同班级的作业文件存储在独立的目录中，
             实现了班级目录隔离（Requirements 7.3）
         """
-        if self.storage_type == "filesystem":
-            if not self.base_path:
-                # 自动生成基础路径
-                # 格式: <课程名称>/<班级名称>/
-                course_name = self.course.name if self.course else "未知课程"
-                class_name = self.class_obj.name if self.class_obj else "未知班级"
-                self.base_path = f"{course_name}/{class_name}/"
+        if self.repo_type == "filesystem":
+            if not self.filesystem_path:
+                raise ValueError("文件上传方式必须提供存储路径")
 
     def clean(self):
         """Django模型验证方法
@@ -1117,7 +1199,7 @@ class Assignment(models.Model):
 
         # 验证存储配置
         try:
-            if self.storage_type == "git":
+            if self.repo_type == "git":
                 self.validate_git_config()
             else:
                 self.validate_filesystem_config()

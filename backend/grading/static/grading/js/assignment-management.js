@@ -33,17 +33,17 @@ function initAssignmentForm() {
         $('#storageTypeError').hide();
     });
     
-    // Course selection change event
-    $('#assignmentCourse').change(function() {
-        const courseId = $(this).val();
-        loadClassesForCourse(courseId);
-        updatePathPreview();
+    // Path preview
+    updatePathPreview();
+
+    // Fetch branches button
+    $('#fetchBranchesBtn').on('click', function () {
+        fetchGitBranches();
     });
-    
-    // Class selection change event
-    $('#assignmentClass').change(function() {
-        $(this).removeClass('is-invalid');
-        updatePathPreview();
+
+    // Clear branches when URL changes
+    $('#gitUrl, #gitUsername, #gitPassword').on('input', function () {
+        resetBranchSelect();
     });
     
     // Form submission
@@ -88,60 +88,79 @@ function switchStorageTypeFields(type) {
  * Load classes for selected course
  * @param {string} courseId - Course ID
  */
-function loadClassesForCourse(courseId) {
-    const classSelect = $('#assignmentClass');
-    
-    // Clear validation state
-    $('#assignmentCourse').removeClass('is-invalid');
-    
-    if (courseId) {
-        classSelect.html('<option value="">加载中...</option>');
-        classSelect.prop('disabled', true);
-        
-        $.ajax({
-            url: '/grading/api/get-course-classes/',
-            method: 'GET',
-            data: { course_id: courseId },
-            success: function(response) {
-                if (response.status === 'success') {
-                    classSelect.html('<option value="">请选择班级</option>');
-                    response.classes.forEach(function(cls) {
-                        classSelect.append(`<option value="${cls.id}">${cls.name}</option>`);
-                    });
-                    classSelect.prop('disabled', false);
-                } else {
-                    classSelect.html('<option value="">加载失败，请重试</option>');
-                    showErrorMessage('加载班级列表失败：' + response.message);
-                }
-            },
-            error: function(xhr) {
-                classSelect.html('<option value="">加载失败，请重试</option>');
-                showErrorMessage('加载班级列表失败，请检查网络连接');
-            }
-        });
-    } else {
-        classSelect.html('<option value="">请先选择课程</option>');
-        classSelect.prop('disabled', true);
-    }
-}
-
 /**
  * Update path preview for filesystem storage
  */
 function updatePathPreview() {
-    const courseText = $('#assignmentCourse option:selected').text();
-    const classText = $('#assignmentClass option:selected').text();
-    
-    if (courseText && classText && 
-        courseText !== '请选择课程' && 
-        classText !== '请选择班级' &&
-        classText !== '请先选择课程' &&
-        classText !== '加载中...' &&
-        classText !== '加载失败，请重试') {
-        $('#pathPreview').html(`<i class="bi bi-folder"></i> ${courseText}/${classText}/<span class="text-muted">&lt;作业次数&gt;/</span>`);
-    } else {
-        $('#pathPreview').text('请先选择课程和班级');
+    $('#pathPreview').html('<i class="bi bi-folder"></i> 课程目录/班级目录/<span class="text-muted">&lt;作业次数&gt;/</span>');
+}
+
+function resetBranchSelect() {
+    const select = $('#gitBranch');
+    select.empty();
+    select.append('<option value="">请先获取分支</option>');
+    $('#gitBranchHelp')
+        .removeClass('text-danger')
+        .html('<i class="bi bi-info-circle"></i> 从远程仓库分支列表中选择');
+}
+
+function fetchGitBranches() {
+    const gitUrl = $('#gitUrl').val().trim();
+    const gitUsername = $('#gitUsername').val().trim();
+    const gitPassword = $('#gitPassword').val();
+
+    if (!gitUrl) {
+        showErrorMessage('请先填写Git仓库URL');
+        return;
     }
+
+    $('#fetchBranchesBtn').prop('disabled', true).text('加载中...');
+    const formData = new FormData();
+    formData.append('git_url', gitUrl);
+    if (gitUsername || gitPassword) {
+        formData.append('git_username', gitUsername);
+        formData.append('git_password', gitPassword);
+    }
+
+    $.ajax({
+        url: '/grading/api/git-branches/',
+        method: 'POST',
+        data: formData,
+        processData: false,
+        contentType: false,
+        success: function (response) {
+            if (response.status === 'success') {
+                const branches = response.branches || [];
+                const defaultBranch = response.default_branch || branches[0] || '';
+                const select = $('#gitBranch');
+                select.empty();
+                branches.forEach(function (branch) {
+                    select.append(`<option value="${branch}">${branch}</option>`);
+                });
+                if (defaultBranch) {
+                    select.val(defaultBranch);
+                }
+                $('#gitBranchHelp')
+                    .removeClass('text-danger')
+                    .html('<i class="bi bi-info-circle"></i> 从远程仓库分支列表中选择');
+            } else {
+                $('#gitBranchHelp')
+                    .addClass('text-danger')
+                    .text(response.message || '获取分支失败');
+                resetBranchSelect();
+            }
+        },
+        error: function (xhr) {
+            const response = xhr.responseJSON;
+            $('#gitBranchHelp')
+                .addClass('text-danger')
+                .text(response && response.message ? response.message : '获取分支失败');
+            resetBranchSelect();
+        },
+        complete: function () {
+            $('#fetchBranchesBtn').prop('disabled', false).text('获取分支');
+        },
+    });
 }
 
 /**
@@ -157,29 +176,6 @@ function submitAssignmentForm(form) {
     let isValid = true;
     let errorMessage = '';
     
-    // Validate assignment name
-    const name = $('#assignmentName').val().trim();
-    if (!name) {
-        $('#assignmentName').addClass('is-invalid');
-        isValid = false;
-        errorMessage = '请输入作业名称';
-    }
-    
-    // Validate course
-    const courseId = $('#assignmentCourse').val();
-    if (!courseId) {
-        $('#assignmentCourse').addClass('is-invalid');
-        isValid = false;
-        errorMessage = errorMessage || '请选择课程';
-    }
-    
-    // Validate class
-    const classId = $('#assignmentClass').val();
-    if (!classId) {
-        $('#assignmentClass').addClass('is-invalid');
-        isValid = false;
-        errorMessage = errorMessage || '请选择班级';
-    }
     
     // Validate storage type
     const storageType = $('input[name="storage_type"]:checked').val();
@@ -192,6 +188,7 @@ function submitAssignmentForm(form) {
     // If Git storage, validate Git URL (Requirement 2.2)
     if (storageType === 'git') {
         const gitUrl = $('#gitUrl').val().trim();
+        const gitBranch = $('#gitBranch').val();
         if (!gitUrl) {
             $('#gitUrl').addClass('is-invalid');
             isValid = false;
@@ -200,6 +197,21 @@ function submitAssignmentForm(form) {
             $('#gitUrl').addClass('is-invalid');
             isValid = false;
             errorMessage = errorMessage || '请输入有效的Git仓库URL';
+        }
+        if (!gitBranch) {
+            $('#gitBranch').addClass('is-invalid');
+            isValid = false;
+            errorMessage = errorMessage || '请选择分支';
+        }
+    }
+
+    // If filesystem storage, validate base path
+    if (storageType === 'filesystem') {
+        const basePath = $('#basePath').val().trim();
+        if (!basePath) {
+            $('#basePath').addClass('is-invalid');
+            isValid = false;
+            errorMessage = errorMessage || '请输入存储路径';
         }
     }
     

@@ -1,5 +1,11 @@
-import { useEffect, useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client.js'
+
+const scoringOptions = [
+  { value: 'repository', label: '仓库' },
+  { value: 'class', label: '班级' },
+  { value: 'homework', label: '作业' },
+]
 
 export default function BatchAiScore() {
   const [step, setStep] = useState(1)
@@ -79,118 +85,156 @@ export default function BatchAiScore() {
     setLoading(false)
   }
 
+  const canStart =
+    selectedRepo &&
+    (scoringType !== 'class' || selectedClass) &&
+    (scoringType !== 'homework' || selectedHomework)
+
   return (
-    <div className="card">
-      <div className="card-header">
-        <h4 className="mb-0">批量AI评分</h4>
-      </div>
-      <div className="card-body">
-        {message ? <div className="alert alert-info">{message}</div> : null}
+    <div className="min-h-screen">
+      <div className="page-shell max-w-5xl flex flex-col gap-6">
+        <header>
+          <h1 className="text-2xl font-semibold text-slate-900">批量 AI 评分</h1>
+          <p className="mt-1 text-sm text-slate-500">选择评分范围并发起批量评分任务。</p>
+        </header>
 
-        <div className="mb-3">
-          <h6>步骤 1：选择评分范围</h6>
-          <div className="d-flex gap-2 flex-wrap">
-            {['repository', 'class', 'homework'].map((type) => (
+        <section className="card-surface p-6">
+          {message ? (
+            <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              {message}
+            </div>
+          ) : null}
+
+          <div className="space-y-6">
+            <div>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-slate-700">步骤 1：选择评分范围</h2>
+                {loading ? (
+                  <span className="text-xs text-slate-400">加载中...</span>
+                ) : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {scoringOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setScoringType(option.value)
+                      setStep(2)
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                      scoringType === option.value
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {step >= 2 ? (
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">步骤 2：选择仓库</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {repositories.map((repo) => (
+                    <button
+                      key={repo.name}
+                      type="button"
+                      onClick={() => {
+                        setSelectedRepo(repo.name)
+                        setSelectedClass('')
+                        setSelectedHomework('')
+                        setClasses([])
+                        setHomeworks([])
+                        if (scoringType === 'class' || scoringType === 'homework') {
+                          loadClasses(repo.name)
+                        }
+                        setStep(3)
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                        selectedRepo === repo.name
+                          ? 'border-emerald-600 bg-emerald-600 text-white'
+                          : 'border-emerald-200 bg-white text-emerald-700 hover:border-emerald-300 hover:bg-emerald-50'
+                      }`}
+                    >
+                      {repo.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {step >= 3 && scoringType !== 'repository' ? (
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">步骤 3：选择班级</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {classes.map((cls) => (
+                    <button
+                      key={cls.name}
+                      type="button"
+                      onClick={() => {
+                        setSelectedClass(cls.name)
+                        setSelectedHomework('')
+                        if (scoringType === 'homework') {
+                          loadHomeworks(selectedRepo, cls.name)
+                        }
+                        setStep(4)
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                        selectedClass === cls.name
+                          ? 'border-amber-500 bg-amber-500 text-white'
+                          : 'border-amber-200 bg-white text-amber-700 hover:border-amber-300 hover:bg-amber-50'
+                      }`}
+                    >
+                      {cls.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {step >= 4 && scoringType === 'homework' ? (
+              <div>
+                <h2 className="text-sm font-semibold text-slate-700">步骤 4：选择作业</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {homeworks.map((hw) => (
+                    <button
+                      key={hw.name}
+                      type="button"
+                      onClick={() => {
+                        setSelectedHomework(hw.name)
+                        setStep(5)
+                      }}
+                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                        selectedHomework === hw.name
+                          ? 'border-sky-500 bg-sky-500 text-white'
+                          : 'border-sky-200 bg-white text-sky-700 hover:border-sky-300 hover:bg-sky-50'
+                      }`}
+                    >
+                      {hw.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="flex items-center gap-3">
               <button
-                key={type}
-                className={`btn ${scoringType === type ? 'btn-primary' : 'btn-outline-primary'}`}
                 type="button"
-                onClick={() => {
-                  setScoringType(type)
-                  setStep(2)
-                }}
+                onClick={startScoring}
+                disabled={!canStart}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {type === 'repository' ? '仓库' : type === 'class' ? '班级' : '作业'}
+                开始评分
               </button>
-            ))}
-          </div>
-        </div>
-
-        {step >= 2 ? (
-          <div className="mb-3">
-            <h6>步骤 2：选择仓库</h6>
-            {loading ? <div className="text-muted">加载中...</div> : null}
-            <div className="d-flex gap-2 flex-wrap">
-              {repositories.map((repo) => (
-                <button
-                  key={repo.name}
-                  className={`btn ${selectedRepo === repo.name ? 'btn-success' : 'btn-outline-success'}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedRepo(repo.name)
-                    setSelectedClass('')
-                    setSelectedHomework('')
-                    setClasses([])
-                    setHomeworks([])
-                    if (scoringType === 'class' || scoringType === 'homework') {
-                      loadClasses(repo.name)
-                    }
-                    setStep(3)
-                  }}
-                >
-                  {repo.name}
-                </button>
-              ))}
+              {!canStart ? (
+                <span className="text-xs text-slate-400">请按步骤选择范围</span>
+              ) : null}
             </div>
           </div>
-        ) : null}
-
-        {step >= 3 && scoringType !== 'repository' ? (
-          <div className="mb-3">
-            <h6>步骤 3：选择班级</h6>
-            <div className="d-flex gap-2 flex-wrap">
-              {classes.map((cls) => (
-                <button
-                  key={cls.name}
-                  className={`btn ${selectedClass === cls.name ? 'btn-warning' : 'btn-outline-warning'}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedClass(cls.name)
-                    setSelectedHomework('')
-                    if (scoringType === 'homework') {
-                      loadHomeworks(selectedRepo, cls.name)
-                    }
-                    setStep(4)
-                  }}
-                >
-                  {cls.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        {step >= 4 && scoringType === 'homework' ? (
-          <div className="mb-3">
-            <h6>步骤 4：选择作业</h6>
-            <div className="d-flex gap-2 flex-wrap">
-              {homeworks.map((hw) => (
-                <button
-                  key={hw.name}
-                  className={`btn ${selectedHomework === hw.name ? 'btn-info' : 'btn-outline-info'}`}
-                  type="button"
-                  onClick={() => {
-                    setSelectedHomework(hw.name)
-                    setStep(5)
-                  }}
-                >
-                  {hw.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="mt-3">
-          <button
-            className="btn btn-success"
-            type="button"
-            onClick={startScoring}
-            disabled={!selectedRepo || (scoringType === 'class' && !selectedClass) || (scoringType === 'homework' && !selectedHomework)}
-          >
-            开始评分
-          </button>
-        </div>
+        </section>
       </div>
     </div>
   )

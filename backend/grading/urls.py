@@ -91,6 +91,7 @@ urlpatterns = [
         name="get_assignment_directories_api",
     ),
     path("api/assignments/", assignment_views.assignment_list_api, name="assignment_list_api"),
+    path("api/git-branches/", assignment_views.git_branches_api, name="git_branches_api"),
     # Helper APIs
     path("api/course-classes/", assignment_views.get_course_classes_api, name="get_course_classes"),
     path("api/auth/csrf/", api_views.csrf_view, name="api_csrf"),
