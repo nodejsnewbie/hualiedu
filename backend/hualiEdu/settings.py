@@ -270,7 +270,8 @@ LOGGING = {
 }
 
 # CORS 设置
-CORS_ALLOW_ALL_ORIGINS = True  # 允许所有来源的跨域请求
+# 开发环境允许所有来源，生产环境使用 CORS_ALLOWED_ORIGINS
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # 仅在 DEBUG=True 时允许所有来源
 CORS_ALLOW_CREDENTIALS = os.environ.get("CORS_ALLOW_CREDENTIALS", "True").lower() == "true"
 
 # Jazzmin Settings

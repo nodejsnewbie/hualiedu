@@ -71,6 +71,9 @@ templates/*_old.html
 
 # Logs directory
 logs/*.log
+*.log
+*-out.log
+*-err.log
 
 # SSH keys and sensitive files
 media/ssh_keys/
